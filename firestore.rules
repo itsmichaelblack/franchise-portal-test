@@ -1,0 +1,87 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper functions ────────────────────────────────────────────────────
+
+    // Check if the requesting user is authenticated
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    // Get the requesting user's profile document from Firestore
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Role checks for HQ staff
+    function isMasterAdmin() {
+      return isAuth() && userDoc().role == 'master_admin';
+    }
+
+    function isAdmin() {
+      return isAuth() && (userDoc().role == 'admin' || userDoc().role == 'master_admin');
+    }
+
+    // Check if the user is a franchise partner for a specific location
+    function isFranchisePartner(locationId) {
+      return isAuth() && userDoc().role == 'franchise_partner' && userDoc().locationId == locationId;
+    }
+
+    // ── Users collection ────────────────────────────────────────────────────
+    // Stores role, name, locationId (for partners), etc.
+    match /users/{userId} {
+      // Users can read their own document
+      allow read: if isAuth() && request.auth.uid == userId;
+
+      // Master admins can read all user documents (for admin management)
+      allow read: if isMasterAdmin();
+
+      // Only master admins can create or update user roles
+      allow create, update: if isMasterAdmin();
+
+      // Nobody can delete user documents through the client (use Admin SDK only)
+      allow delete: if false;
+    }
+
+    // ── Franchise Locations collection ──────────────────────────────────────
+    match /locations/{locationId} {
+      // HQ admins (both roles) can read all locations
+      allow read: if isAdmin();
+
+      // Franchise partners can read their own location
+      allow read: if isFranchisePartner(locationId);
+
+      // Both admin and master_admin can create and update locations
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasAll(['name', 'address', 'phone', 'email', 'createdAt'])
+        && request.resource.data.name is string
+        && request.resource.data.email is string
+        && request.resource.data.phone is string
+        && request.resource.data.address is string;
+
+      // Only master_admin can delete locations
+      allow delete: if isMasterAdmin();
+    }
+
+    // ── Availability collection ─────────────────────────────────────────────
+    // Each document ID matches a locationId
+    match /availability/{locationId} {
+      // HQ admins can read all availability
+      allow read: if isAdmin();
+
+      // Franchise partners can read and write their own availability
+      allow read, write: if isFranchisePartner(locationId)
+        && request.resource.data.keys().hasAll(['schedule', 'timezone', 'bufferMinutes'])
+        && request.resource.data.bufferMinutes is int
+        && request.resource.data.bufferMinutes >= 0
+        && request.resource.data.bufferMinutes <= 120
+        && request.resource.data.timezone is string;
+    }
+
+    // ── Deny everything else ────────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
