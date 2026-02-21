@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { createLocation, updateLocation, deleteLocation, saveAvailability } from "./services/firestore";
+import { createLocation, updateLocation, deleteLocation, saveAvailability, getLocations } from "./services/firestore";
 
 // ─── Simulated Data ───────────────────────────────────────────────────────────
 const SIMULATED_USERS = {
@@ -12,11 +12,7 @@ const SIMULATED_USERS = {
   ],
 };
 
-const INITIAL_LOCATIONS = [
-  { id: 1, name: "Sydney CBD", address: "123 George St, Sydney NSW 2000, Australia", phone: "+61 2 9000 0001", email: "sydney@franchise.com", createdAt: "2024-11-01" },
-  { id: 2, name: "Melbourne Central", address: "456 Swanston St, Melbourne VIC 3000, Australia", phone: "+61 3 9000 0002", email: "melbourne@franchise.com", createdAt: "2024-12-15" },
-  { id: 3, name: "Brisbane North", address: "789 Queen St, Brisbane QLD 4000, Australia", phone: "+61 7 9000 0003", email: "brisbane@franchise.com", createdAt: "2025-01-20" },
-];
+const INITIAL_LOCATIONS = [];
 
 const TIMEZONES = [
   "Pacific/Auckland", "Australia/Sydney", "Australia/Melbourne", "Australia/Brisbane",
@@ -1055,7 +1051,8 @@ function AuthPage({ portal, onLogin, onBack }) {
 // ─── HQ Portal ────────────────────────────────────────────────────────────────
 function HQPortal({ user, onLogout }) {
   const [page, setPage] = useState('locations');
-  const [locations, setLocations] = useState(INITIAL_LOCATIONS);
+  const [locations, setLocations] = useState([]);
+  const [locationsLoading, setLocationsLoading] = useState(true);
   const [modal, setModal] = useState(null); // null | 'add' | { type:'edit', loc } | { type:'delete', loc }
   const [toast, setToast] = useState(null);
 
@@ -1063,6 +1060,21 @@ function HQPortal({ user, onLogout }) {
   const [hqUsers, setHqUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [userModal, setUserModal] = useState(null); // null | 'invite' | { type:'remove', u }
+
+  useEffect(() => {
+    const loadLocations = async () => {
+      setLocationsLoading(true);
+      try {
+        const locs = await getLocations();
+        setLocations(locs.map(l => ({
+          ...l,
+          createdAt: l.createdAt?.toDate ? l.createdAt.toDate().toISOString().split('T')[0] : l.createdAt || '',
+        })));
+      } catch (e) { console.error("Failed to load locations:", e); }
+      setLocationsLoading(false);
+    };
+    loadLocations();
+  }, []);
 
   const showToast = (msg) => {
     setToast(msg);
@@ -1234,8 +1246,8 @@ function HQPortal({ user, onLogout }) {
           </div>
           {locations.length === 0 && (
             <div className="empty-state hq">
-              <div className="empty-icon">🗺️</div>
-              <div className="empty-text hq">No locations yet. Add your first franchise location.</div>
+              <div className="empty-icon">{locationsLoading ? '⏳' : '🗺️'}</div>
+              <div className="empty-text hq">{locationsLoading ? 'Loading locations from database...' : 'No locations yet. Add your first franchise location.'}</div>
             </div>
           )}
         </div>
