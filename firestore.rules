@@ -54,7 +54,7 @@ service cloud.firestore {
 
       // Both admin and master_admin can create and update locations
       allow create, update: if isAdmin()
-        && request.resource.data.keys().hasAll(['name', 'address', 'phone', 'email', 'createdAt'])
+        && request.resource.data.keys().hasAll(['name', 'address', 'phone', 'email', 'createdAt', 'updatedAt'])
         && request.resource.data.name is string
         && request.resource.data.email is string
         && request.resource.data.phone is string
