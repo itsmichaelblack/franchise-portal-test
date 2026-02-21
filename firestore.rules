@@ -46,11 +46,8 @@ service cloud.firestore {
 
     // ── Franchise Locations collection ──────────────────────────────────────
     match /locations/{locationId} {
-      // HQ admins (both roles) can read all locations
-      allow read: if isAdmin();
-
-      // Franchise partners can read their own location
-      allow read: if isFranchisePartner(locationId);
+      // Public read access (needed for the Find a Centre page)
+      allow read: if true;
 
       // Both admin and master_admin can create and update locations
       allow create, update: if isAdmin()
