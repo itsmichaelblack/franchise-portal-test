@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { createLocation } from "./services/firestore";
+import { createLocation, updateLocation, deleteLocation, saveAvailability } from "./services/firestore";
 
 // ─── Simulated Data ───────────────────────────────────────────────────────────
 const SIMULATED_USERS = {
@@ -1071,8 +1071,14 @@ function HQPortal({ user, onLogout }) {
 
   const handleSave = async (data, editingId) => {
     if (editingId) {
-      setLocations(prev => prev.map(l => l.id === editingId ? { ...l, ...data } : l));
-      showToast(`✓ Location "${data.name}" updated.`);
+      try {
+        await updateLocation(editingId, data);
+        setLocations(prev => prev.map(l => l.id === editingId ? { ...l, ...data } : l));
+        showToast(`✓ Location "${data.name}" updated.`);
+      } catch (err) {
+        console.error("Failed to update location:", err);
+        showToast(`✗ Failed to update location. Please try again.`);
+      }
     } else {
       try {
         const newId = await createLocation(data);
@@ -1087,10 +1093,16 @@ function HQPortal({ user, onLogout }) {
     setModal(null);
   };
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     const loc = locations.find(l => l.id === id);
-    setLocations(prev => prev.filter(l => l.id !== id));
-    showToast(`Location "${loc.name}" deleted.`);
+    try {
+      await deleteLocation(id);
+      setLocations(prev => prev.filter(l => l.id !== id));
+      showToast(`Location "${loc.name}" deleted.`);
+    } catch (err) {
+      console.error("Failed to delete location:", err);
+      showToast(`✗ Failed to delete location. Please try again.`);
+    }
     setModal(null);
   };
 
@@ -1553,8 +1565,18 @@ function FranchisePortal({ user, onLogout }) {
     setAvailability(prev => prev.map((d, j) => j === i ? { ...d, [field]: val } : d));
   };
 
-  const handleSave = () => {
-    showToast('✓ Availability saved successfully.');
+  const handleSave = async () => {
+    try {
+      await saveAvailability(user.locationId?.toString() || user.id?.toString(), {
+        schedule: availability,
+        timezone,
+        bufferMinutes: buffer,
+      });
+      showToast('✓ Availability saved successfully.');
+    } catch (err) {
+      console.error("Failed to save availability:", err);
+      showToast('✗ Failed to save availability. Please try again.');
+    }
   };
 
   const bufferOptions = [0, 15, 30, 45, 60];
@@ -1702,7 +1724,19 @@ function FranchisePortal({ user, onLogout }) {
             </div>
 
             <div className="save-bar" style={{ marginTop: 8 }}>
-              <button className="btn btn-primary fp" onClick={() => showToast('✓ Settings saved.')}>
+              <button className="btn btn-primary fp" onClick={async () => {
+                try {
+                  await saveAvailability(user.locationId?.toString() || user.id?.toString(), {
+                    schedule: availability,
+                    timezone,
+                    bufferMinutes: buffer,
+                  });
+                  showToast('✓ Settings saved.');
+                } catch (err) {
+                  console.error("Failed to save settings:", err);
+                  showToast('✗ Failed to save settings. Please try again.');
+                }
+              }}>
                 <Icon path={icons.check} size={14} /> Save Settings
               </button>
             </div>
