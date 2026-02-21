@@ -72,6 +72,8 @@ const styles = `
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+  html, body, #root { width: 100%; min-height: 100vh; margin: 0; padding: 0; }
+
   :root {
     --orange: #E25D25;
     --orange-light: #f07040;
@@ -111,6 +113,8 @@ const styles = `
   /* ── Portal Selector ──────────────────────────────────────────── */
   .portal-selector {
     min-height: 100vh;
+    min-height: 100dvh;
+    width: 100vw;
     background: linear-gradient(145deg, #fff9f5 0%, #f0fafa 50%, #fffbf0 100%);
     display: flex;
     flex-direction: column;
@@ -244,6 +248,8 @@ const styles = `
   /* ── Auth ─────────────────────────────────────────────────────── */
   .auth-page {
     min-height: 100vh;
+    min-height: 100dvh;
+    width: 100vw;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -338,6 +344,8 @@ const styles = `
   /* ── Layout ───────────────────────────────────────────────────── */
   .layout {
     min-height: 100vh;
+    min-height: 100dvh;
+    width: 100vw;
     display: flex;
     background: var(--bg);
   }
@@ -463,7 +471,10 @@ const styles = `
     flex: 1;
     padding: 32px 36px;
     min-height: 100vh;
+    min-height: 100dvh;
     background: var(--bg);
+    overflow-x: hidden;
+    max-width: calc(100vw - 256px);
   }
 
   /* ── Mobile header ────────────────────────────────────────────── */
@@ -877,14 +888,35 @@ const styles = `
     .main {
       margin-left: 0;
       padding: 20px 16px;
+      max-width: 100vw;
+    }
+    .portal-selector {
+      gap: 32px;
+      padding: 24px 16px;
     }
     .portal-cards {
       flex-direction: column;
       align-items: center;
+      width: 100%;
+      padding: 0 8px;
     }
     .portal-card {
       width: 100%;
       max-width: 340px;
+      padding: 28px 22px;
+    }
+    .portal-logo-img {
+      width: 72px;
+      height: 72px;
+    }
+    .portal-brand-name {
+      font-size: 20px;
+    }
+    .portal-title {
+      font-size: 11px;
+    }
+    .auth-page {
+      padding: 16px;
     }
     .auth-card {
       padding: 32px 24px;
@@ -894,24 +926,107 @@ const styles = `
     }
     .page-header {
       flex-direction: column;
+      gap: 12px;
+    }
+    .page-title {
+      font-size: 20px;
+    }
+    .modal-overlay {
+      padding: 12px;
+      align-items: flex-start;
+      padding-top: 40px;
     }
     .modal {
       padding: 24px 20px;
+      max-height: 90vh;
+      overflow-y: auto;
+      width: 100%;
     }
-    .timetable-row {
+    .phone-row {
+      flex-direction: column;
+    }
+    .phone-code {
+      width: 100% !important;
+    }
+    .timetable-row, .day-row {
+      flex-wrap: wrap;
       gap: 10px;
     }
-    .day-toggle { width: 100%; }
+    .day-toggle { width: auto; }
+    .day-name { width: 80px; font-size: 13px; }
     .time-inputs { width: 100%; }
+    .time-input { width: 100%; }
     .actions { flex-direction: column; }
     .actions .btn { width: 100%; justify-content: center; }
+    .settings-grid {
+      grid-template-columns: 1fr;
+    }
+    .buffer-options {
+      flex-wrap: wrap;
+    }
+    .save-bar {
+      justify-content: stretch;
+    }
+    .save-bar .btn {
+      width: 100%;
+      justify-content: center;
+    }
+    .card {
+      border-radius: var(--radius);
+    }
+    .table-wrap {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .btn-primary {
+      width: 100%;
+      justify-content: center;
+    }
+    .select-styled {
+      width: 100% !important;
+    }
   }
   @media (max-width: 480px) {
+    .portal-selector {
+      gap: 24px;
+      padding: 20px 12px;
+    }
+    .portal-card {
+      padding: 24px 18px;
+      gap: 12px;
+    }
+    .portal-icon-wrap {
+      width: 56px;
+      height: 56px;
+    }
+    .portal-card-title {
+      font-size: 17px;
+    }
+    .portal-card-desc {
+      font-size: 12px;
+    }
     .stats-row { grid-template-columns: 1fr; }
     .buffer-chips { gap: 8px; }
     .buffer-chip { padding: 7px 14px; font-size: 12px; }
     .table-wrap { margin: 0 -8px; }
-    .portal-logo-img { width: 72px; height: 72px; }
+    .portal-logo-img { width: 64px; height: 64px; }
+    .portal-brand-name { font-size: 18px; }
+    .auth-card { padding: 28px 18px; }
+    .page-header { padding: 0; }
+    .stat-card { padding: 14px 16px; }
+    .day-row { padding: 12px 0; }
+  }
+  @media (max-width: 360px) {
+    .portal-card {
+      max-width: 100%;
+      padding: 20px 16px;
+    }
+    .auth-card {
+      padding: 24px 16px;
+    }
+    .modal {
+      padding: 20px 16px;
+    }
   }
 `;
 
