@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createLocation, updateLocation, deleteLocation, saveAvailability, getLocations } from "./services/firestore";
 
 // ─── Simulated Data ───────────────────────────────────────────────────────────
@@ -1332,6 +1332,27 @@ function LocationModal({ portal, editing, onSave, onClose }) {
   const [phoneNum, setPhoneNum] = useState(editing ? editing.phone.split(' ').slice(1).join(' ') : '');
   const [email, setEmail] = useState(editing?.email || '');
   const t = portal;
+  const addressInputRef = useRef(null);
+  const autocompleteRef = useRef(null);
+
+  useEffect(() => {
+    if (!addressInputRef.current || !window.google?.maps?.places) return;
+    autocompleteRef.current = new window.google.maps.places.Autocomplete(addressInputRef.current, {
+      types: ['address'],
+      fields: ['formatted_address'],
+    });
+    autocompleteRef.current.addListener('place_changed', () => {
+      const place = autocompleteRef.current.getPlace();
+      if (place.formatted_address) {
+        setAddress(place.formatted_address);
+      }
+    });
+    return () => {
+      if (autocompleteRef.current) {
+        window.google.maps.event.clearInstanceListeners(autocompleteRef.current);
+      }
+    };
+  }, []);
 
   const handleSave = () => {
     if (!name || !address || !email) return;
@@ -1358,7 +1379,7 @@ function LocationModal({ portal, editing, onSave, onClose }) {
         </div>
         <div className="form-group">
           <label className={`form-label ${t}`}>Full Address</label>
-          <input className={`form-input ${t}`} value={address} onChange={e => setAddress(e.target.value)} placeholder="123 Main St, City, State, Country" />
+          <input ref={addressInputRef} className={`form-input ${t}`} value={address} onChange={e => setAddress(e.target.value)} placeholder="Start typing an address..." />
         </div>
         <div className="form-group">
           <label className={`form-label ${t}`}>Contact Number</label>
