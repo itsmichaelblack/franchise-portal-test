@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { createLocation, updateLocation } from "./services/firestore";
+import { getLocations, createLocation, updateLocation, deleteLocation } from "./services/firestore";
 
 // ─── Simulated Data ───────────────────────────────────────────────────────────
 const SIMULATED_USERS = {
@@ -1055,7 +1055,8 @@ function AuthPage({ portal, onLogin, onBack }) {
 // ─── HQ Portal ────────────────────────────────────────────────────────────────
 function HQPortal({ user, onLogout }) {
   const [page, setPage] = useState('locations');
-  const [locations, setLocations] = useState(INITIAL_LOCATIONS);
+  const [locations, setLocations] = useState([]);
+  const [locationsLoading, setLocationsLoading] = useState(true);
   const [modal, setModal] = useState(null); // null | 'add' | { type:'edit', loc } | { type:'delete', loc }
   const [toast, setToast] = useState(null);
 
@@ -1063,6 +1064,40 @@ function HQPortal({ user, onLogout }) {
   const [hqUsers, setHqUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [userModal, setUserModal] = useState(null); // null | 'invite' | { type:'remove', u }
+
+  // Load locations from Firestore on mount
+  useEffect(() => {
+    let cancelled = false;
+    async function loadLocations() {
+      try {
+        const firestoreLocations = await getLocations();
+        if (!cancelled) {
+          if (firestoreLocations.length > 0) {
+            setLocations(firestoreLocations);
+          } else {
+            // Seed Firestore with initial locations if collection is empty
+            const seeded = [];
+            for (const loc of INITIAL_LOCATIONS) {
+              const { id, ...data } = loc;
+              const newId = await createLocation(data);
+              seeded.push({ ...data, id: newId, createdAt: loc.createdAt });
+            }
+            setLocations(seeded);
+          }
+          setLocationsLoading(false);
+        }
+      } catch (err) {
+        console.error("Failed to load locations:", err);
+        if (!cancelled) {
+          // Fall back to initial data so the UI still works
+          setLocations(INITIAL_LOCATIONS);
+          setLocationsLoading(false);
+        }
+      }
+    }
+    loadLocations();
+    return () => { cancelled = true; };
+  }, []);
 
   const showToast = (msg) => {
     setToast(msg);
@@ -1088,10 +1123,16 @@ function HQPortal({ user, onLogout }) {
     }
   };
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     const loc = locations.find(l => l.id === id);
-    setLocations(prev => prev.filter(l => l.id !== id));
-    showToast(`Location "${loc.name}" deleted.`);
+    try {
+      await deleteLocation(id);
+      setLocations(prev => prev.filter(l => l.id !== id));
+      showToast(`Location "${loc.name}" deleted.`);
+    } catch (err) {
+      console.error("Failed to delete location:", err);
+      showToast(`✗ Failed to delete location. Please try again.`);
+    }
     setModal(null);
   };
 
@@ -1158,7 +1199,13 @@ function HQPortal({ user, onLogout }) {
           )}
         </div>
 
-        {page === 'locations' && (<>
+        {page === 'locations' && locationsLoading && (
+          <div style={{ textAlign: 'center', padding: '60px 0', color: '#888' }}>
+            Loading locations...
+          </div>
+        )}
+
+        {page === 'locations' && !locationsLoading && (<>
         <div className="stats-row">
           <div className="stat-card hq">
             <div className="stat-num" style={{color:"var(--orange)"}}>{locations.length}</div>
@@ -1203,7 +1250,7 @@ function HQPortal({ user, onLogout }) {
                     <td className="hq"><span className="td-muted hq">{loc.address}</span></td>
                     <td className="hq"><span className="td-muted hq">{loc.phone}</span></td>
                     <td className="hq"><span className="td-muted hq">{loc.email}</span></td>
-                    <td className="hq"><span className="td-muted hq">{loc.createdAt}</span></td>
+                    <td className="hq"><span className="td-muted hq">{loc.createdAt?.toDate ? loc.createdAt.toDate().toISOString().split('T')[0] : loc.createdAt}</span></td>
                     <td className="hq">
                       <div className="actions">
                         <button className="btn btn-ghost hq" style={{ padding: '7px 12px' }} onClick={() => setModal({ type: 'edit', loc })}>
