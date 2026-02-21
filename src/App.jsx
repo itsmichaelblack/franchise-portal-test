@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { createLocation } from "./services/firestore";
 
 // ─── Simulated Data ───────────────────────────────────────────────────────────
 const SIMULATED_USERS = {
@@ -1068,14 +1069,20 @@ function HQPortal({ user, onLogout }) {
     setTimeout(() => setToast(null), 4000);
   };
 
-  const handleSave = (data, editingId) => {
+  const handleSave = async (data, editingId) => {
     if (editingId) {
       setLocations(prev => prev.map(l => l.id === editingId ? { ...l, ...data } : l));
       showToast(`✓ Location "${data.name}" updated.`);
     } else {
-      const newLoc = { ...data, id: Date.now(), createdAt: new Date().toISOString().split('T')[0] };
-      setLocations(prev => [...prev, newLoc]);
-      showToast(`✓ Location created. Confirmation email sent to ${data.email} via SendGrid.`);
+      try {
+        const newId = await createLocation(data);
+        const newLoc = { ...data, id: newId, createdAt: new Date().toISOString().split('T')[0] };
+        setLocations(prev => [...prev, newLoc]);
+        showToast(`✓ Location created. Confirmation email sent to ${data.email} via SendGrid.`);
+      } catch (err) {
+        console.error("Failed to create location:", err);
+        showToast(`✗ Failed to create location. Please try again.`);
+      }
     }
     setModal(null);
   };
