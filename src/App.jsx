@@ -1453,13 +1453,16 @@ function LocationModal({ portal, editing, onSave, onClose }) {
   useEffect(() => {
     if (!addressInputRef.current || !window.google?.maps?.places) return;
     autocompleteRef.current = new window.google.maps.places.Autocomplete(addressInputRef.current, {
-      types: ['address'],
-      fields: ['formatted_address'],
+      types: ['establishment'],
+      fields: ['formatted_address', 'name'],
     });
     autocompleteRef.current.addListener('place_changed', () => {
       const place = autocompleteRef.current.getPlace();
       if (place.formatted_address) {
         setAddress(place.formatted_address);
+      }
+      if (place.name) {
+        setName(place.name);
       }
     });
     return () => {
@@ -1494,7 +1497,7 @@ function LocationModal({ portal, editing, onSave, onClose }) {
         </div>
         <div className="form-group">
           <label className={`form-label ${t}`}>Full Address</label>
-          <input ref={addressInputRef} className={`form-input ${t}`} value={address} onChange={e => setAddress(e.target.value)} placeholder="Start typing an address..." />
+          <input ref={addressInputRef} className={`form-input ${t}`} value={address} onChange={e => setAddress(e.target.value)} placeholder="Search for a business name..." />
         </div>
         <div className="form-group">
           <label className={`form-label ${t}`}>Contact Number</label>
