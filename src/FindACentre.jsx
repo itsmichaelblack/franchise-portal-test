@@ -502,10 +502,19 @@ export default function FindACentre() {
   const initMap = useCallback(() => {
     if (!mapRef.current || !window.google?.maps || mapInstance.current) return;
 
+    // Calculate minimum zoom to prevent grey background
+    // At zoom N, the world is 256 * 2^N pixels tall
+    // We need the map height to be <= world height
+    const mapHeight = mapRef.current.offsetHeight;
+    const mapWidth = mapRef.current.offsetWidth;
+    const minZoomForHeight = Math.ceil(Math.log2(mapHeight / 256));
+    const minZoomForWidth = Math.ceil(Math.log2(mapWidth / 256));
+    const calculatedMinZoom = Math.max(minZoomForHeight, minZoomForWidth, 2);
+
     mapInstance.current = new window.google.maps.Map(mapRef.current, {
       center: { lat: -33.8688, lng: 151.2093 }, // Default: Sydney
       zoom: 10,
-      minZoom: 5,
+      minZoom: calculatedMinZoom,
       maxZoom: 18,
       styles: [
         { featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] },
@@ -633,10 +642,11 @@ export default function FindACentre() {
 
     mapInstance.current.fitBounds(bounds, { padding: 60 });
 
-    // Clamp zoom to min/max
+    // Clamp zoom to prevent grey background
     const idleListener = mapInstance.current.addListener("idle", () => {
+      const minZ = mapInstance.current.get("minZoom") || 3;
       const z = mapInstance.current.getZoom();
-      if (z < 5) mapInstance.current.setZoom(5);
+      if (z < minZ) mapInstance.current.setZoom(minZ);
       window.google.maps.event.removeListener(idleListener);
     });
 
