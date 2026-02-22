@@ -75,8 +75,8 @@ const css = `
 
   /* ── Sidebar Panel ────────────────────────────────────────── */
   .fac-panel {
-    width: 420px;
-    min-width: 420px;
+    width: 460px;
+    min-width: 460px;
     height: 100%;
     display: flex;
     flex-direction: column;
@@ -266,6 +266,7 @@ const css = `
   }
   .fac-loc-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
     margin-top: 8px;
   }
@@ -283,6 +284,8 @@ const css = `
     align-items: center;
     gap: 4px;
     transition: all 0.15s;
+    white-space: nowrap;
+    text-decoration: none;
   }
   .fac-loc-action-btn:hover {
     background: #fdf0ea;
