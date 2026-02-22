@@ -1843,26 +1843,30 @@ function FranchisePortal({ user, onLogout }) {
   const [bookingsLoading, setBookingsLoading] = useState(false);
   const [calendarWeekOffset, setCalendarWeekOffset] = useState(0);
 
-  const locationId = user.locationId?.toString() || user.id?.toString();
+  const locationId = user.locationId?.toString() || user.uid?.toString();
 
   // Load bookings for this location
   useEffect(() => {
     const loadBookings = async () => {
       setBookingsLoading(true);
       try {
-        const { collection, getDocs, query, where, orderBy } = await import('firebase/firestore');
+        const { collection, getDocs, query, where } = await import('firebase/firestore');
         const { db } = await import('./firebase.js');
+        console.log("Loading bookings for locationId:", locationId);
         const q = query(
           collection(db, 'bookings'),
-          where('locationId', '==', locationId),
-          orderBy('date', 'asc')
+          where('locationId', '==', locationId)
         );
         const snap = await getDocs(q);
-        setBookings(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        console.log("Found bookings:", snap.docs.length);
+        const allBookings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        // Sort by date and time client-side
+        allBookings.sort((a, b) => a.date === b.date ? a.time.localeCompare(b.time) : a.date.localeCompare(b.date));
+        setBookings(allBookings);
       } catch (e) { console.error("Failed to load bookings:", e); }
       setBookingsLoading(false);
     };
-    loadBookings();
+    if (locationId) loadBookings();
   }, [locationId]);
 
   const showToast = (msg) => {
