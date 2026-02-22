@@ -2191,19 +2191,21 @@ function FranchisePortal({ user, onLogout }) {
                               padding: '10px 8px', textAlign: 'center',
                               borderBottom: '2px solid var(--fp-border)',
                               borderRight: i < 6 ? '1px solid var(--fp-border)' : 'none',
-                              background: isToday ? 'rgba(109,203,202,0.12)' : 'var(--fp-bg)',
+                              background: isToday ? 'rgba(109,203,202,0.18)' : 'var(--fp-bg)',
                             }}>
-                              <div style={{ fontSize: 11, fontWeight: 600, color: isToday ? 'var(--fp-accent)' : 'var(--fp-muted)', textTransform: 'uppercase' }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: isToday ? '#3d9695' : 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                                 {d.toLocaleDateString('en-AU', { weekday: 'short' })}
                               </div>
                               <div style={{
                                 fontSize: 18, fontWeight: 800, marginTop: 2,
-                                width: 32, height: 32, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                width: 34, height: 34, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                                 background: isToday ? 'var(--fp-accent)' : 'transparent',
                                 color: isToday ? '#fff' : 'var(--fp-text)',
+                                boxShadow: isToday ? '0 2px 8px rgba(109,203,202,0.4)' : 'none',
                               }}>
                                 {d.getDate()}
                               </div>
+                              {isToday && <div style={{ fontSize: 9, fontWeight: 700, color: '#3d9695', marginTop: 2, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Today</div>}
                             </div>
                           );
                         })}
@@ -2216,9 +2218,15 @@ function FranchisePortal({ user, onLogout }) {
                               borderRight: '1px solid var(--fp-border)',
                               borderBottom: '1px solid #eef0f2',
                               display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end',
-                              minHeight: 56, background: '#fafbfc',
+                              minHeight: 56, background: '#fafbfc', position: 'relative',
                             }}>
                               {h > 12 ? h - 12 : h}{h >= 12 ? 'PM' : 'AM'}
+                              {isCurrentWeek && currentHour === h && (
+                                <div style={{
+                                  position: 'absolute', left: 0, right: 0, top: (currentMin / 60) * 56,
+                                  height: 2, background: '#E25D25', zIndex: 5,
+                                }} />
+                              )}
                             </div>
                             {weekDays.map((d, di) => {
                               const dateStr = d.toISOString().split('T')[0];
@@ -2230,7 +2238,7 @@ function FranchisePortal({ user, onLogout }) {
                               const isToday = d.toDateString() === today.toDateString();
 
                               // Current time indicator
-                              const showTimeIndicator = isCurrentWeek && isToday && currentHour === h;
+                              const showTimeIndicator = isCurrentWeek && currentHour === h;
                               const timeIndicatorTop = showTimeIndicator ? (currentMin / 60) * 56 : 0;
 
                               return (
@@ -2238,18 +2246,21 @@ function FranchisePortal({ user, onLogout }) {
                                   borderRight: di < 6 ? '1px solid #eef0f2' : 'none',
                                   borderBottom: '1px solid #eef0f2',
                                   padding: 3, minHeight: 56, position: 'relative',
-                                  background: isToday ? 'rgba(109,203,202,0.04)' : 'transparent',
+                                  background: isToday ? 'rgba(109,203,202,0.08)' : 'transparent',
+                                  borderLeft: isToday ? '2px solid var(--fp-accent)' : 'none',
+                                  borderLeftColor: isToday ? 'rgba(109,203,202,0.3)' : undefined,
                                 }}>
                                   {/* Current time line */}
                                   {showTimeIndicator && (
                                     <div style={{
-                                      position: 'absolute', left: 0, right: 0, top: timeIndicatorTop,
+                                      position: 'absolute', left: -2, right: 0, top: timeIndicatorTop,
                                       height: 2, background: '#E25D25', zIndex: 5,
-                                      boxShadow: '0 0 4px rgba(226,93,37,0.4)',
+                                      opacity: isToday ? 1 : 0.35,
                                     }}>
-                                      <div style={{ position: 'absolute', left: -3, top: -3, width: 8, height: 8, borderRadius: '50%', background: '#E25D25' }} />
+                                      {isToday && <div style={{ position: 'absolute', left: -4, top: -4, width: 10, height: 10, borderRadius: '50%', background: '#E25D25', boxShadow: '0 0 4px rgba(226,93,37,0.5)' }} />}
                                     </div>
                                   )}
+                                  {/* Time indicator in the hour label column too */}
 
                                   {cellBookings.map((b, bi) => {
                                     const [bh, bm] = b.time.split(':').map(Number);
@@ -2441,9 +2452,9 @@ function FranchisePortal({ user, onLogout }) {
       {selectedBooking && (
         <div className="modal-overlay" onClick={() => setSelectedBooking(null)}>
           <div className="modal fp" onClick={e => e.stopPropagation()} style={{ maxWidth: 440 }}>
-            <div className="modal-header fp">
+            <div className="modal-header fp" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div className="modal-title fp">Booking Details</div>
-              <button className="modal-close" onClick={() => setSelectedBooking(null)}>✕</button>
+              <button className="modal-close" onClick={() => setSelectedBooking(null)} style={{ marginLeft: 'auto' }}>✕</button>
             </div>
             <div className="modal-body" style={{ padding: '24px' }}>
               {(() => {
