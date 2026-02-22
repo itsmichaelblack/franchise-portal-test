@@ -410,6 +410,7 @@ export default function FindACentre() {
   const mapRef = useRef(null);
   const mapInstance = useRef(null);
   const markersRef = useRef([]);
+  const clustererRef = useRef(null);
   const userMarkerRef = useRef(null);
   const searchInputRef = useRef(null);
   const autocompleteRef = useRef(null);
@@ -500,6 +501,11 @@ export default function FindACentre() {
     // Clear old markers
     markersRef.current.forEach((m) => m.setMap(null));
     markersRef.current = [];
+    // Clear old clusterer
+    if (clustererRef.current) {
+      clustererRef.current.clearMarkers();
+      clustererRef.current = null;
+    }
 
     const locsWithCoords = locations.filter((l) => l.lat && l.lng);
     if (locsWithCoords.length === 0) return;
@@ -512,24 +518,22 @@ export default function FindACentre() {
         map: mapInstance.current,
         title: loc.name,
         icon: {
-          path: window.google.maps.SymbolPath.CIRCLE,
-          scale: 10,
-          fillColor: "#E25D25",
-          fillOpacity: 1,
-          strokeColor: "#fff",
-          strokeWeight: 3,
+          url: "/logo-sticker.png",
+          scaledSize: new window.google.maps.Size(40, 40),
+          anchor: new window.google.maps.Point(20, 20),
         },
       });
 
       marker.addListener("click", () => {
         setSelectedLoc(loc.id);
-        const dist = loc.distance ? ` · ${loc.distance.toFixed(1)} km away` : "";
+        const dist = loc.distance ? ` - ${loc.distance.toFixed(1)} km away` : "";
         infoWindowRef.current.setContent(`
-          <div style="font-family:'Plus Jakarta Sans',sans-serif;padding:4px 2px;max-width:240px;">
-            <div style="font-weight:800;font-size:14px;color:#1a1d23;margin-bottom:4px;">${loc.name}</div>
+          <div style="font-family:'Plus Jakarta Sans',sans-serif;padding:6px 4px;max-width:260px;position:relative;">
+            <button onclick="document.querySelector('.gm-ui-hover-effect').click()" style="position:absolute;top:-2px;right:-2px;width:26px;height:26px;border:none;background:rgba(0,0,0,0.06);border-radius:50%;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;color:#6b7280;line-height:1;" title="Close">&times;</button>
+            <div style="font-weight:800;font-size:14px;color:#1a1d23;margin-bottom:4px;padding-right:28px;">${loc.name}</div>
             <div style="font-size:12px;color:#6b7280;line-height:1.4;margin-bottom:4px;">${loc.address}</div>
             ${loc.phone ? `<div style="font-size:12px;color:#6b7280;">${loc.phone}</div>` : ""}
-            ${dist ? `<div style="font-size:12px;font-weight:700;color:#E25D25;margin-top:4px;">${dist.replace(" · ", "")}</div>` : ""}
+            ${dist ? `<div style="font-size:12px;font-weight:700;color:#E25D25;margin-top:4px;">${dist.replace(" - ", "")}</div>` : ""}
             <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(loc.address)}" target="_blank"
               style="display:inline-block;margin-top:8px;padding:6px 14px;border-radius:6px;background:#E25D25;color:#fff;font-size:12px;font-weight:700;text-decoration:none;">
               Get Directions
@@ -542,6 +546,38 @@ export default function FindACentre() {
       bounds.extend({ lat: loc.lat, lng: loc.lng });
       markersRef.current.push(marker);
     });
+
+    // Initialize MarkerClusterer
+    if (window.markerClusterer && markersRef.current.length > 0) {
+      clustererRef.current = new window.markerClusterer.MarkerClusterer({
+        map: mapInstance.current,
+        markers: markersRef.current,
+        renderer: {
+          render: ({ count, position }) => {
+            return new window.google.maps.Marker({
+              position,
+              label: {
+                text: String(count),
+                color: "#fff",
+                fontWeight: "800",
+                fontSize: "13px",
+                fontFamily: "Plus Jakarta Sans, sans-serif",
+              },
+              icon: {
+                path: "M-20,0a20,20 0 1,0 40,0a20,20 0 1,0 -40,0",
+                fillColor: "#E25D25",
+                fillOpacity: 1,
+                strokeColor: "#fff",
+                strokeWeight: 3,
+                scale: 1,
+                labelOrigin: new window.google.maps.Point(0, 0),
+              },
+              zIndex: Number(window.google.maps.Marker.MAX_ZINDEX) + count,
+            });
+          },
+        },
+      });
+    }
 
     if (userPos) {
       bounds.extend(userPos);
@@ -597,12 +633,37 @@ export default function FindACentre() {
             };
             setUserPos(pos);
             setLocStatus("located");
+
+            // Zoom to area showing searched location + nearby centres
+            if (mapInstance.current) {
+              const bounds = new window.google.maps.LatLngBounds();
+              bounds.extend(pos);
+
+              // Include the 3 nearest locations in the bounds
+              const nearby = locations
+                .filter((l) => l.lat && l.lng)
+                .map((l) => ({ ...l, dist: distanceKm(pos.lat, pos.lng, l.lat, l.lng) }))
+                .sort((a, b) => a.dist - b.dist)
+                .slice(0, 3);
+
+              nearby.forEach((l) => bounds.extend({ lat: l.lat, lng: l.lng }));
+
+              mapInstance.current.fitBounds(bounds, { padding: 80 });
+
+              // Limit max zoom so it doesn't zoom in too much
+              const listener = mapInstance.current.addListener("idle", () => {
+                if (mapInstance.current.getZoom() > 13) {
+                  mapInstance.current.setZoom(13);
+                }
+                window.google.maps.event.removeListener(listener);
+              });
+            }
           }
         });
       }
     }, 300);
     return () => clearInterval(checkReady);
-  }, []);
+  }, [locations]);
 
   // ── Geolocate user ────────────────────────────────────────────────────
   const handleGeolocate = () => {
