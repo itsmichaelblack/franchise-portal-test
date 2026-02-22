@@ -60,6 +60,24 @@ function formatDate(d) {
   return d.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 }
 
+function buildCalendarUrl(location, date, time) {
+  const [h, m] = time.split(":").map(Number);
+  const start = new Date(date);
+  start.setHours(h, m, 0, 0);
+  const end = new Date(start.getTime() + ASSESSMENT_DURATION * 60000);
+  const fmt = (d) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+  const title = encodeURIComponent(`Free Assessment - ${location.name}`);
+  const details = encodeURIComponent(`Your free 40-minute assessment at ${location.name}.\nAddress: ${location.address}`);
+  const loc = encodeURIComponent(location.address);
+  return `https://www.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${fmt(start)}/${fmt(end)}&details=${details}&location=${loc}`;
+}
+
+function getYouTubeEmbedId(url) {
+  if (!url) return null;
+  const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
+  return match ? match[1] : null;
+}
+
 // ─── Icons ───────────────────────────────────────────────────────────────────
 const Icon = ({ d, size = 18 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>
@@ -518,6 +536,9 @@ export default function BookAssessment() {
   const [confirmed, setConfirmed] = useState(false);
   const [bookingRef, setBookingRef] = useState(null);
 
+  // HQ Settings (YouTube video)
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+
   // ── Load locations ─────────────────────────────────────────────────────
   useEffect(() => {
     const load = async () => {
@@ -530,6 +551,16 @@ export default function BookAssessment() {
       setLoading(false);
     };
     load();
+    // Load HQ settings
+    const loadSettings = async () => {
+      try {
+        const snap = await getDoc(doc(db, "settings", "hq"));
+        if (snap.exists() && snap.data().youtubeUrl) {
+          setYoutubeUrl(snap.data().youtubeUrl);
+        }
+      } catch (e) { console.error("Failed to load settings:", e); }
+    };
+    loadSettings();
   }, []);
 
   // ── Geocode locations ──────────────────────────────────────────────────
@@ -736,11 +767,11 @@ export default function BookAssessment() {
                   <div className="ba-loading">Loading centres...</div>
                 ) : (
                   <div className="ba-locs">
-                    {sortedLocs.map((loc) => (
+                    {sortedLocs.slice(0, 3).map((loc) => (
                       <div
                         key={loc.id}
                         className={`ba-loc ${selectedLocation?.id === loc.id ? "selected" : ""}`}
-                        onClick={() => setSelectedLocation(loc)}
+                        onClick={() => { setSelectedLocation(loc); setSelectedDate(null); setSelectedTime(null); setStep(2); }}
                       >
                         <div className="ba-loc-icon"><Icon d={ic.mapPin} size={18} /></div>
                         <div className="ba-loc-info">
@@ -762,13 +793,7 @@ export default function BookAssessment() {
                   <button className="ba-btn ba-btn-ghost" onClick={() => (window.location.href = "/")}>
                     <Icon d={ic.back} size={16} /> Back
                   </button>
-                  <button
-                    className="ba-btn ba-btn-primary"
-                    disabled={!selectedLocation}
-                    onClick={() => { setStep(2); setSelectedDate(null); setSelectedTime(null); }}
-                  >
-                    Continue <Icon d={ic.forward} size={16} />
-                  </button>
+                  <div />
                 </div>
               </>
             )}
@@ -783,9 +808,55 @@ export default function BookAssessment() {
 
                 {availLoading ? (
                   <div className="ba-loading">Loading available times...</div>
-                ) : !availability ? (
-                  <div className="ba-no-slots">
-                    This location hasn't set up their availability yet. Please try another centre or contact them directly.
+                ) : !availability || (() => {
+                  // Check if ANY day in next 14 has slots
+                  const hasAnySlots = dates.some(d => {
+                    const dayName = DAYS_MAP[d.getDay()];
+                    const daySched = availability?.schedule?.find(s => s.day === dayName);
+                    if (!daySched?.enabled) return false;
+                    const buffer = availability.bufferMinutes || 0;
+                    const allSlots = generateTimeSlots(daySched.start, daySched.end, ASSESSMENT_DURATION, buffer);
+                    const dateStr = d.toISOString().split("T")[0];
+                    const booked = existingBookings.filter(b => b.date === dateStr).map(b => b.time);
+                    return allSlots.filter(s => !booked.includes(s)).length > 0;
+                  });
+                  return !hasAnySlots;
+                })() ? (
+                  <div>
+                    <div style={{ padding: "28px 24px", borderRadius: 14, background: "#fff", border: "2px solid #fde8b0", marginBottom: 20, textAlign: "center" }}>
+                      <div style={{ fontSize: 32, marginBottom: 12 }}>📅</div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: "#1a1d23", marginBottom: 8 }}>
+                        {selectedLocation?.name} isn't showing any availability
+                      </div>
+                      <div style={{ fontSize: 14, color: "#6b7280", lineHeight: 1.6 }}>
+                        Please contact them directly on{" "}
+                        <a href={`tel:${selectedLocation?.phone?.replace(/\s/g, "")}`} style={{ color: "#E25D25", fontWeight: 700, textDecoration: "none" }}>
+                          {selectedLocation?.phone || "their listed number"}
+                        </a>{" "}
+                        or try one of the centres below.
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>
+                      Other centres nearby
+                    </div>
+                    <div className="ba-locs">
+                      {sortedLocs.filter(l => l.id !== selectedLocation?.id).slice(0, 2).map((loc) => (
+                        <div
+                          key={loc.id}
+                          className="ba-loc"
+                          onClick={() => { setSelectedLocation(loc); setAvailability(null); setAvailLoading(true); setSelectedDate(null); setSelectedTime(null); }}
+                        >
+                          <div className="ba-loc-icon"><Icon d={ic.mapPin} size={18} /></div>
+                          <div className="ba-loc-info">
+                            <div className="ba-loc-name">{loc.name}</div>
+                            <div className="ba-loc-addr">{loc.address}</div>
+                          </div>
+                          {loc.distance !== undefined && (
+                            <div className="ba-loc-dist">{loc.distance.toFixed(1)} km</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ) : (
                   <>
@@ -973,9 +1044,43 @@ export default function BookAssessment() {
                   )}
                 </div>
 
-                <button className="ba-btn ba-btn-success" onClick={() => (window.location.href = "/")} style={{ margin: "0 auto" }}>
-                  Back to Home
-                </button>
+                {/* Add to Calendar button */}
+                <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap", marginBottom: 28 }}>
+                  <a
+                    href={buildCalendarUrl(selectedLocation, selectedDate, selectedTime)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ba-btn ba-btn-primary"
+                    style={{ textDecoration: "none" }}
+                  >
+                    <Icon d={ic.calendar} size={16} /> Add to Google Calendar
+                  </a>
+                  <button className="ba-btn ba-btn-ghost" onClick={() => (window.location.href = "/")} style={{ border: "2px solid #e8eaed", borderRadius: 12 }}>
+                    Back to Home
+                  </button>
+                </div>
+
+                {/* YouTube Video */}
+                {(() => {
+                  const embedId = getYouTubeEmbedId(youtubeUrl);
+                  if (!embedId) return null;
+                  return (
+                    <div style={{ maxWidth: 480, margin: "0 auto" }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12, textAlign: "left" }}>
+                        While you wait — watch this
+                      </div>
+                      <div style={{ position: "relative", paddingBottom: "56.25%", height: 0, borderRadius: 14, overflow: "hidden", boxShadow: "0 4px 20px rgba(0,0,0,0.1)" }}>
+                        <iframe
+                          src={`https://www.youtube.com/embed/${embedId}`}
+                          title="Success Tutoring"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                          allowFullScreen
+                          style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: "none" }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
