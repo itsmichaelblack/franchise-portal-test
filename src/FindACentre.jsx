@@ -505,6 +505,8 @@ export default function FindACentre() {
     mapInstance.current = new window.google.maps.Map(mapRef.current, {
       center: { lat: -33.8688, lng: 151.2093 }, // Default: Sydney
       zoom: 10,
+      minZoom: 5,
+      maxZoom: 18,
       styles: [
         { featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] },
         { featureType: "transit", stylers: [{ visibility: "off" }] },
@@ -513,6 +515,10 @@ export default function FindACentre() {
       streetViewControl: false,
       fullscreenControl: false,
       zoomControlOptions: { position: window.google.maps.ControlPosition.RIGHT_CENTER },
+      restriction: {
+        latLngBounds: { north: 85, south: -85, west: -180, east: 180 },
+        strictBounds: true,
+      },
     });
 
     infoWindowRef.current = new window.google.maps.InfoWindow();
@@ -585,16 +591,21 @@ export default function FindACentre() {
       clustererRef.current = new window.markerClusterer.MarkerClusterer({
         map: mapInstance.current,
         markers: markersRef.current,
+        algorithmOptions: {
+          maxZoom: 14,
+          radius: 120,
+        },
         renderer: {
           render: ({ count, position }) => {
-            const size = Math.min(22 + Math.log2(count) * 6, 40);
+            const zoom = mapInstance.current.getZoom() || 5;
+            const size = Math.min(18 + Math.log2(count) * 5, 36);
             return new window.google.maps.Marker({
               position,
               label: {
                 text: String(count),
                 color: "#fff",
                 fontWeight: "800",
-                fontSize: "12px",
+                fontSize: count > 99 ? "11px" : "12px",
                 fontFamily: "Plus Jakarta Sans, sans-serif",
               },
               icon: {
@@ -610,6 +621,9 @@ export default function FindACentre() {
             });
           },
         },
+        onClusterClick: (event, cluster, map) => {
+          map.fitBounds(cluster.bounds, { padding: 60 });
+        },
       });
     }
 
@@ -618,6 +632,13 @@ export default function FindACentre() {
     }
 
     mapInstance.current.fitBounds(bounds, { padding: 60 });
+
+    // Clamp zoom to min/max
+    const idleListener = mapInstance.current.addListener("idle", () => {
+      const z = mapInstance.current.getZoom();
+      if (z < 5) mapInstance.current.setZoom(5);
+      window.google.maps.event.removeListener(idleListener);
+    });
 
     if (locsWithCoords.length === 1 && !userPos) {
       mapInstance.current.setZoom(14);
