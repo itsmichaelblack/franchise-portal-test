@@ -102,6 +102,14 @@ service cloud.firestore {
     }
 
     // ── Deny everything else ────────────────────────────────────────────────
+    // ── Settings collection ──────────────────────────────────────────────
+    match /settings/{settingId} {
+      // Public read (booking page needs youtube URL)
+      allow read: if true;
+      // Only admins can write settings
+      allow write: if isAdmin();
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
