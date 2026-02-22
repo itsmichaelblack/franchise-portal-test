@@ -37,8 +37,18 @@ service cloud.firestore {
       // Master admins can read all user documents (for admin management)
       allow read: if isMasterAdmin();
 
+      // Admins can read all user documents (for listing HQ users)
+      allow read: if isAdmin();
+
       // Only master admins can create or update user roles
       allow create, update: if isMasterAdmin();
+
+      // Allow franchise partners to self-register (create their own profile)
+      // when they sign in for the first time
+      allow create: if isAuth()
+        && request.auth.uid == userId
+        && request.resource.data.role == 'franchise_partner'
+        && request.resource.data.email == request.auth.token.email;
 
       // Nobody can delete user documents through the client (use Admin SDK only)
       allow delete: if false;
