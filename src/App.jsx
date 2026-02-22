@@ -2358,7 +2358,7 @@ function FranchisePortal({ user, onLogout }) {
                         const dateObj = new Date(b.date + 'T00:00:00');
                         const dateLabel = dateObj.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
                         return (
-                          <div key={b.id} className="card fp" onClick={() => setSelectedBooking(b)} style={{ padding: '14px 18px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer', transition: 'border-color 0.15s' }}
+                          <div key={b.id} className="card fp" onClick={() => setSelectedBooking(b)} style={{ padding: '14px 18px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer', transition: 'border-color 0.15s', border: '1px solid var(--fp-border)' }}
                             onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--fp-accent)'}
                             onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--fp-border)'}
                           >
