@@ -1194,6 +1194,9 @@ function HQPortal({ user, onLogout }) {
   const [locationsLoading, setLocationsLoading] = useState(true);
   const [modal, setModal] = useState(null); // null | 'add' | { type:'edit', loc } | { type:'delete', loc }
   const [toast, setToast] = useState(null);
+  const [filterCountry, setFilterCountry] = useState('all');
+  const [filterState, setFilterState] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('all');
 
   const isMaster = user.role === 'master_admin';
   const [hqUsers, setHqUsers] = useState([]);
@@ -1373,9 +1376,15 @@ function HQPortal({ user, onLogout }) {
           </div>
           <div className="stat-card hq">
             <div className="stat-num" style={{ color: 'var(--success)' }}>
-              {isMaster ? <span style={{ fontSize: 16 }}>Master Admin</span> : <span style={{ fontSize: 16 }}>Admin</span>}
+              {locations.filter(l => (l.status || 'open') === 'open').length}
             </div>
-            <div className="stat-label">Your access level</div>
+            <div className="stat-label">Open</div>
+          </div>
+          <div className="stat-card hq">
+            <div className="stat-num" style={{ color: '#d97706' }}>
+              {locations.filter(l => l.status === 'coming_soon').length}
+            </div>
+            <div className="stat-label">Coming Soon</div>
           </div>
           <div className="stat-card hq">
             <div className="stat-num">
@@ -1387,54 +1396,167 @@ function HQPortal({ user, onLogout }) {
           </div>
         </div>
 
-        <div className="card hq">
-          <div className="card-header">
-            <span className="card-title">All Locations ({locations.length})</span>
-          </div>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th className="hq">Location</th>
-                  <th className="hq">Address</th>
-                  <th className="hq">Contact</th>
-                  <th className="hq">Email</th>
-                  <th className="hq">Created</th>
-                  <th className="hq">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {locations.map(loc => (
-                  <tr key={loc.id}>
-                    <td className="hq" style={{ fontWeight: 600 }}>{loc.name}</td>
-                    <td className="hq"><span className="td-muted hq">{loc.address}</span></td>
-                    <td className="hq"><span className="td-muted hq">{loc.phone}</span></td>
-                    <td className="hq"><span className="td-muted hq">{loc.email}</span></td>
-                    <td className="hq"><span className="td-muted hq">{loc.createdAt}</span></td>
-                    <td className="hq">
-                      <div className="actions">
-                        <button className="btn btn-ghost hq" style={{ padding: '7px 12px' }} onClick={() => setModal({ type: 'edit', loc })}>
-                          <Icon path={icons.edit} size={13} /> Edit
-                        </button>
-                        {isMaster && (
-                          <button className="btn btn-danger" style={{ padding: '7px 12px' }} onClick={() => setModal({ type: 'delete', loc })}>
-                            <Icon path={icons.trash} size={13} /> Delete
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {locations.length === 0 && (
-            <div className="empty-state hq">
-              <div className="empty-icon">{locationsLoading ? '⏳' : '🗺️'}</div>
-              <div className="empty-text hq">{locationsLoading ? 'Loading locations from database...' : 'No locations yet. Add your first franchise location.'}</div>
+        {/* Filter Bar */}
+        {(() => {
+          // Extract unique countries and states from addresses
+          const countries = [...new Set(locations.map(l => {
+            const parts = l.address?.split(',').map(s => s.trim()) || [];
+            return parts[parts.length - 1] || 'Unknown';
+          }))].sort();
+          const states = [...new Set(locations.map(l => {
+            const parts = l.address?.split(',').map(s => s.trim()) || [];
+            if (parts.length >= 2) {
+              const statePart = parts[parts.length - 2];
+              const match = statePart.match(/([A-Z]{2,3})\s*\d{4}/);
+              return match ? match[1] : statePart;
+            }
+            return 'Unknown';
+          }))].sort();
+
+          return (
+            <div className="card hq" style={{ padding: '14px 18px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>Filters:</span>
+              <select value={filterCountry} onChange={e => setFilterCountry(e.target.value)} style={{
+                padding: '7px 28px 7px 10px', borderRadius: 8, border: '1.5px solid var(--border)',
+                fontSize: 13, fontFamily: 'inherit', color: 'var(--text)', background: '#fff', cursor: 'pointer',
+                appearance: 'none',
+                backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+                backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center', backgroundSize: '14px',
+              }}>
+                <option value="all">All Countries</option>
+                {countries.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <select value={filterState} onChange={e => setFilterState(e.target.value)} style={{
+                padding: '7px 28px 7px 10px', borderRadius: 8, border: '1.5px solid var(--border)',
+                fontSize: 13, fontFamily: 'inherit', color: 'var(--text)', background: '#fff', cursor: 'pointer',
+                appearance: 'none',
+                backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+                backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center', backgroundSize: '14px',
+              }}>
+                <option value="all">All States</option>
+                {states.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{
+                padding: '7px 28px 7px 10px', borderRadius: 8, border: '1.5px solid var(--border)',
+                fontSize: 13, fontFamily: 'inherit', color: 'var(--text)', background: '#fff', cursor: 'pointer',
+                appearance: 'none',
+                backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+                backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center', backgroundSize: '14px',
+              }}>
+                <option value="all">All Statuses</option>
+                <option value="open">Open</option>
+                <option value="coming_soon">Coming Soon</option>
+                <option value="temporary_closed">Temporary Closed</option>
+              </select>
+              {(filterCountry !== 'all' || filterState !== 'all' || filterStatus !== 'all') && (
+                <button onClick={() => { setFilterCountry('all'); setFilterState('all'); setFilterStatus('all'); }} style={{
+                  padding: '7px 12px', borderRadius: 8, border: 'none', background: 'var(--orange-pale)',
+                  color: 'var(--orange)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+                }}>
+                  Clear Filters
+                </button>
+              )}
             </div>
-          )}
-        </div>
+          );
+        })()}
+
+        {(() => {
+          // Apply filters
+          let filtered = locations;
+          if (filterStatus !== 'all') {
+            filtered = filtered.filter(l => (l.status || 'open') === filterStatus);
+          }
+          if (filterCountry !== 'all') {
+            filtered = filtered.filter(l => {
+              const parts = l.address?.split(',').map(s => s.trim()) || [];
+              return parts[parts.length - 1] === filterCountry;
+            });
+          }
+          if (filterState !== 'all') {
+            filtered = filtered.filter(l => {
+              const parts = l.address?.split(',').map(s => s.trim()) || [];
+              if (parts.length >= 2) {
+                const statePart = parts[parts.length - 2];
+                const match = statePart.match(/([A-Z]{2,3})\s*\d{4}/);
+                const state = match ? match[1] : statePart;
+                return state === filterState;
+              }
+              return false;
+            });
+          }
+
+          const statusBadge = (s) => {
+            const cfg = {
+              open: { label: 'Open', bg: 'rgba(16,185,129,0.1)', color: '#059669', border: 'rgba(16,185,129,0.2)' },
+              coming_soon: { label: 'Coming Soon', bg: 'rgba(217,119,6,0.1)', color: '#d97706', border: 'rgba(217,119,6,0.2)' },
+              temporary_closed: { label: 'Temp. Closed', bg: 'rgba(239,68,68,0.1)', color: '#dc2626', border: 'rgba(239,68,68,0.2)' },
+            };
+            const c = cfg[s] || cfg.open;
+            return (
+              <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700, background: c.bg, color: c.color, border: `1px solid ${c.border}` }}>
+                {c.label}
+              </span>
+            );
+          };
+
+          return (
+            <div className="card hq">
+              <div className="card-header">
+                <span className="card-title">
+                  {filterCountry !== 'all' || filterState !== 'all' || filterStatus !== 'all'
+                    ? `Filtered Locations (${filtered.length} of ${locations.length})`
+                    : `All Locations (${locations.length})`
+                  }
+                </span>
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th className="hq">Location</th>
+                      <th className="hq">Address</th>
+                      <th className="hq">Contact</th>
+                      <th className="hq">Email</th>
+                      <th className="hq">Status</th>
+                      <th className="hq">Created</th>
+                      <th className="hq">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map(loc => (
+                      <tr key={loc.id}>
+                        <td className="hq" style={{ fontWeight: 600 }}>{loc.name}</td>
+                        <td className="hq"><span className="td-muted hq">{loc.address}</span></td>
+                        <td className="hq"><span className="td-muted hq">{loc.phone}</span></td>
+                        <td className="hq"><span className="td-muted hq">{loc.email}</span></td>
+                        <td className="hq">{statusBadge(loc.status || 'open')}</td>
+                        <td className="hq"><span className="td-muted hq">{loc.createdAt}</span></td>
+                        <td className="hq">
+                          <div className="actions">
+                            <button className="btn btn-ghost hq" style={{ padding: '7px 12px' }} onClick={() => setModal({ type: 'edit', loc })}>
+                              <Icon path={icons.edit} size={13} /> Edit
+                            </button>
+                            {isMaster && (
+                              <button className="btn btn-danger" style={{ padding: '7px 12px' }} onClick={() => setModal({ type: 'delete', loc })}>
+                                <Icon path={icons.trash} size={13} /> Delete
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {filtered.length === 0 && (
+                <div className="empty-state hq">
+                  <div className="empty-icon">{locationsLoading ? '⏳' : '🗺️'}</div>
+                  <div className="empty-text hq">{locationsLoading ? 'Loading locations from database...' : (filterCountry !== 'all' || filterState !== 'all' || filterStatus !== 'all') ? 'No locations match your filters.' : 'No locations yet. Add your first franchise location.'}</div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
         </>)}
 
       {/* Users Page */}
@@ -1556,6 +1678,7 @@ function LocationModal({ portal, editing, onSave, onClose }) {
   const [countryCode, setCountryCode] = useState(editing ? editing.phone.split(' ')[0] : '+61');
   const [phoneNum, setPhoneNum] = useState(editing ? editing.phone.split(' ').slice(1).join(' ') : '');
   const [email, setEmail] = useState(editing?.email || '');
+  const [status, setStatus] = useState(editing?.status || 'coming_soon');
   const [resendEmail, setResendEmail] = useState(false);
   const [resending, setResending] = useState(false);
   const t = portal;
@@ -1566,7 +1689,7 @@ function LocationModal({ portal, editing, onSave, onClose }) {
     if (!addressInputRef.current || !window.google?.maps?.places) return;
     autocompleteRef.current = new window.google.maps.places.Autocomplete(addressInputRef.current, {
       types: ['establishment'],
-      fields: ['formatted_address', 'name'],
+      fields: ['formatted_address', 'name', 'formatted_phone_number', 'international_phone_number', 'website'],
     });
     autocompleteRef.current.addListener('place_changed', () => {
       const place = autocompleteRef.current.getPlace();
@@ -1575,6 +1698,28 @@ function LocationModal({ portal, editing, onSave, onClose }) {
       }
       if (place.name) {
         setName(place.name);
+      }
+      // Auto-populate phone number
+      if (place.international_phone_number) {
+        // international_phone_number is like "+61 2 9999 8888"
+        const intlPhone = place.international_phone_number;
+        // Try to extract country code and number
+        const match = intlPhone.match(/^(\+\d{1,3})\s(.+)$/);
+        if (match) {
+          setCountryCode(match[1]);
+          setPhoneNum(match[2]);
+        } else {
+          setPhoneNum(intlPhone.replace(/^\+\d{1,3}\s?/, ''));
+        }
+      } else if (place.formatted_phone_number) {
+        setPhoneNum(place.formatted_phone_number);
+      }
+      // Try to guess email from website domain (best effort)
+      if (place.website && !email) {
+        try {
+          const domain = new URL(place.website).hostname.replace('www.', '');
+          setEmail(`info@${domain}`);
+        } catch (e) {}
       }
     });
     return () => {
@@ -1594,7 +1739,7 @@ function LocationModal({ portal, editing, onSave, onClose }) {
         console.error("Failed to resend confirmation email:", err);
       }
     }
-    onSave({ name, address, phone: `${countryCode} ${phoneNum}`, email }, editing?.id, resendEmail);
+    onSave({ name, address, phone: `${countryCode} ${phoneNum}`, email, status }, editing?.id, resendEmail);
     setResending(false);
   };
 
@@ -1634,6 +1779,19 @@ function LocationModal({ portal, editing, onSave, onClose }) {
         <div className="form-group">
           <label className={`form-label ${t}`}>Email Address</label>
           <input className={`form-input ${t}`} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="location@franchise.com" />
+        </div>
+        <div className="form-group">
+          <label className={`form-label ${t}`}>Status</label>
+          <select
+            className={`form-input ${t}`}
+            value={status}
+            onChange={e => setStatus(e.target.value)}
+            style={{ cursor: 'pointer' }}
+          >
+            <option value="coming_soon">Coming Soon</option>
+            <option value="open">Open</option>
+            <option value="temporary_closed">Temporary Closed</option>
+          </select>
         </div>
 
         {editing && (
