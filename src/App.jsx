@@ -1207,6 +1207,11 @@ function HQPortal({ user, onLogout }) {
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [settingsLoading, setSettingsLoading] = useState(false);
 
+  // Services
+  const [services, setServices] = useState([]);
+  const [servicesLoading, setServicesLoading] = useState(false);
+  const [serviceModal, setServiceModal] = useState(null); // null | 'add' | { type: 'edit', svc } | { type: 'delete', svc }
+
   // Load HQ settings
   useEffect(() => {
     const loadSettings = async () => {
@@ -1238,6 +1243,55 @@ function HQPortal({ user, onLogout }) {
       showToast('✗ Failed to save settings.');
     }
     setSettingsLoading(false);
+  };
+
+  // Load services
+  useEffect(() => {
+    const loadServices = async () => {
+      setServicesLoading(true);
+      try {
+        const { collection, getDocs } = await import('firebase/firestore');
+        const { db } = await import('./firebase.js');
+        const snap = await getDocs(collection(db, 'services'));
+        setServices(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (e) { console.error("Failed to load services:", e); }
+      setServicesLoading(false);
+    };
+    loadServices();
+  }, []);
+
+  const handleSaveService = async (data, editingId) => {
+    try {
+      const { doc, setDoc, addDoc, collection, serverTimestamp } = await import('firebase/firestore');
+      const { db } = await import('./firebase.js');
+      if (editingId) {
+        await setDoc(doc(db, 'services', editingId), { ...data, updatedAt: serverTimestamp() }, { merge: true });
+        setServices(prev => prev.map(s => s.id === editingId ? { ...s, ...data } : s));
+        showToast('✓ Service updated.');
+      } else {
+        const ref = await addDoc(collection(db, 'services'), { ...data, createdAt: serverTimestamp() });
+        setServices(prev => [...prev, { id: ref.id, ...data }]);
+        showToast('✓ Service created.');
+      }
+    } catch (err) {
+      console.error("Failed to save service:", err);
+      showToast('✗ Failed to save service.');
+    }
+    setServiceModal(null);
+  };
+
+  const handleDeleteService = async (id) => {
+    try {
+      const { doc, deleteDoc } = await import('firebase/firestore');
+      const { db } = await import('./firebase.js');
+      await deleteDoc(doc(db, 'services', id));
+      setServices(prev => prev.filter(s => s.id !== id));
+      showToast('✓ Service deleted.');
+    } catch (err) {
+      console.error("Failed to delete service:", err);
+      showToast('✗ Failed to delete service.');
+    }
+    setServiceModal(null);
   };
 
   useEffect(() => {
@@ -1331,6 +1385,9 @@ function HQPortal({ user, onLogout }) {
             </button>
           )}
           <div className="nav-section-label">Configuration</div>
+          <button className={`nav-item ${page === 'services' ? 'active' : ''}`} onClick={() => setPage('services')}>
+            <Icon path={icons.star} size={16} /> Services
+          </button>
           <button className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => setPage('settings')}>
             <Icon path={icons.clock} size={16} /> Settings
           </button>
@@ -1350,6 +1407,7 @@ function HQPortal({ user, onLogout }) {
       </aside>
 
       <main className="main hq">
+        {(page === 'locations' || page === 'users') && (
         <div className="page-header">
           <div className="page-header-left">
             <div className="page-title">{page === 'users' ? 'HQ Users' : 'Franchise Locations'}</div>
@@ -1367,6 +1425,7 @@ function HQPortal({ user, onLogout }) {
             </button>
           )}
         </div>
+        )}
 
         {page === 'locations' && (<>
         <div className="stats-row">
@@ -1572,6 +1631,78 @@ function HQPortal({ user, onLogout }) {
         />
       )}
 
+      {/* Services Page */}
+      {page === 'services' && (
+        <>
+          <div className="page-header">
+            <div className="page-header-left">
+              <div className="page-title">Services</div>
+              <div className="page-desc">Create and manage the services offered across your franchise network.</div>
+            </div>
+            {isMaster && (
+              <button className="btn btn-primary hq" onClick={() => setServiceModal('add')}>
+                <Icon path={icons.plus} size={14} /> Add Service
+              </button>
+            )}
+          </div>
+
+          {servicesLoading ? (
+            <div style={{ textAlign: 'center', padding: 48, color: 'var(--text-muted)' }}>Loading services...</div>
+          ) : services.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 60 }}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>📋</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>No services yet</div>
+              <div style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 20 }}>Create your first service to get started.</div>
+              {isMaster && (
+                <button className="btn btn-primary hq" onClick={() => setServiceModal('add')}>
+                  <Icon path={icons.plus} size={14} /> Add Service
+                </button>
+              )}
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
+              {services.map(svc => (
+                <div key={svc.id} className="card hq" style={{ padding: 0, overflow: 'hidden' }}>
+                  {svc.imageUrl ? (
+                    <div style={{ height: 160, background: `url(${svc.imageUrl}) center/cover no-repeat`, borderBottom: '1px solid var(--border)' }} />
+                  ) : (
+                    <div style={{ height: 160, background: 'linear-gradient(135deg, var(--orange-pale), #fff5ee)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid var(--border)' }}>
+                      <Icon path={icons.star} size={40} style={{ color: 'var(--orange)', opacity: 0.3 }} />
+                    </div>
+                  )}
+                  <div style={{ padding: '18px 20px' }}>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>{svc.name}</div>
+                    <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 12, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{svc.description}</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+                      <span style={{ padding: '4px 10px', borderRadius: 6, background: 'var(--orange-pale)', color: 'var(--orange)', fontSize: 12, fontWeight: 700 }}>{svc.duration} min</span>
+                      <span style={{ padding: '4px 10px', borderRadius: 6, background: '#eef6ff', color: '#3b82f6', fontSize: 12, fontWeight: 700 }}>Max {svc.maxStudents} students</span>
+                      {svc.price && <span style={{ padding: '4px 10px', borderRadius: 6, background: '#ecfdf5', color: '#059669', fontSize: 12, fontWeight: 700 }}>${svc.price} RRP</span>}
+                    </div>
+                    {svc.availability && svc.availability.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 12 }}>
+                        {svc.availability.map((a, i) => (
+                          <span key={i} style={{ padding: '2px 8px', borderRadius: 4, background: 'var(--bg)', fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>{a}</span>
+                        ))}
+                      </div>
+                    )}
+                    {isMaster && (
+                      <div style={{ display: 'flex', gap: 8, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+                        <button className="btn btn-ghost hq" style={{ fontSize: 12, padding: '6px 12px' }} onClick={() => setServiceModal({ type: 'edit', svc })}>
+                          <Icon path={icons.edit} size={13} /> Edit
+                        </button>
+                        <button className="btn btn-ghost hq" style={{ fontSize: 12, padding: '6px 12px', color: 'var(--hq-danger)' }} onClick={() => setServiceModal({ type: 'delete', svc })}>
+                          <Icon path={icons.trash} size={13} /> Delete
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
       {/* Settings Page */}
       {page === 'settings' && (
         <>
@@ -1662,6 +1793,26 @@ function HQPortal({ user, onLogout }) {
         />
       )}
 
+      {/* Service Modals */}
+      {(serviceModal === 'add' || serviceModal?.type === 'edit') && (
+        <ServiceModal
+          editing={serviceModal?.type === 'edit' ? serviceModal.svc : null}
+          onSave={handleSaveService}
+          onClose={() => setServiceModal(null)}
+        />
+      )}
+      {serviceModal?.type === 'delete' && (
+        <ConfirmModal
+          portal="hq"
+          title="Delete Service"
+          body={<>Are you sure you want to permanently delete <span className="confirm-name hq">{serviceModal.svc.name}</span>? This action cannot be undone.</>}
+          confirmLabel="Delete"
+          danger
+          onConfirm={() => handleDeleteService(serviceModal.svc.id)}
+          onClose={() => setServiceModal(null)}
+        />
+      )}
+
       {toast && (
         <div className="toast hq toast-success">
           <span className="toast-icon"><Icon path={icons.check} size={16} /></span>
@@ -1672,8 +1823,285 @@ function HQPortal({ user, onLogout }) {
   );
 }
 
+// ─── Service Modal ────────────────────────────────────────────────────────────
+const SERVICE_NAMES = [
+  'Free Assessment',
+  'One-on-One Tutoring',
+  'Small Group Tutoring',
+  'Homework Club',
+  'Exam Preparation',
+  'HSC Preparation',
+  'VCE Preparation',
+  'QCE Preparation',
+  'ATAR Preparation',
+  'Selective School Prep',
+  'Scholarship Prep',
+  'NAPLAN Preparation',
+  'Holiday Intensive',
+  'Reading Program',
+  'Writing Workshop',
+  'Maths Masterclass',
+  'Science Lab',
+  'English Workshop',
+  'Study Skills Workshop',
+  'Parent Information Session',
+  'Other',
+];
+
+const COUNTRIES_STATES = {
+  'Australia': ['New South Wales', 'Victoria', 'Queensland', 'Western Australia', 'South Australia', 'Tasmania', 'Northern Territory', 'ACT'],
+  'New Zealand': ['Auckland', 'Wellington', 'Canterbury', 'Waikato', 'Bay of Plenty', 'Otago'],
+  'United Kingdom': ['England', 'Scotland', 'Wales', 'Northern Ireland'],
+  'United States': ['California', 'New York', 'Texas', 'Florida', 'Illinois', 'Pennsylvania'],
+};
+
+function ServiceModal({ editing, onSave, onClose }) {
+  const [name, setName] = useState(editing?.name || '');
+  const [customName, setCustomName] = useState(editing?.customName || '');
+  const [description, setDescription] = useState(editing?.description || '');
+  const [duration, setDuration] = useState(editing?.duration || 40);
+  const [maxStudents, setMaxStudents] = useState(editing?.maxStudents || 1);
+  const [price, setPrice] = useState(editing?.price || '');
+  const [imageUrl, setImageUrl] = useState(editing?.imageUrl || '');
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState(editing?.imageUrl || '');
+  const [selectedCountries, setSelectedCountries] = useState(editing?.countries || []);
+  const [selectedStates, setSelectedStates] = useState(editing?.availability || []);
+  const [saving, setSaving] = useState(false);
+
+  const fileInputRef = useRef(null);
+
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setImageFile(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => setImagePreview(ev.target.result);
+    reader.readAsDataURL(file);
+  };
+
+  const toggleCountry = (country) => {
+    setSelectedCountries(prev => {
+      if (prev.includes(country)) {
+        const newCountries = prev.filter(c => c !== country);
+        // Remove states for this country
+        const countryStates = COUNTRIES_STATES[country] || [];
+        setSelectedStates(s => s.filter(st => !countryStates.includes(st)));
+        return newCountries;
+      }
+      return [...prev, country];
+    });
+  };
+
+  const toggleState = (state) => {
+    setSelectedStates(prev => prev.includes(state) ? prev.filter(s => s !== state) : [...prev, state]);
+  };
+
+  const handleSave = async () => {
+    const finalName = name === 'Other' ? customName : name;
+    if (!finalName || !description) return;
+    setSaving(true);
+
+    let finalImageUrl = imageUrl;
+    // If a file was selected, convert to base64 data URL (for simplicity without Storage)
+    if (imageFile) {
+      finalImageUrl = imagePreview; // base64
+    }
+
+    await onSave({
+      name: finalName,
+      description,
+      duration: Number(duration),
+      maxStudents: Number(maxStudents),
+      price: price ? Number(price) : null,
+      imageUrl: finalImageUrl,
+      countries: selectedCountries,
+      availability: selectedStates,
+    }, editing?.id);
+    setSaving(false);
+  };
+
+  const durationOptions = [20, 30, 40, 45, 60, 90, 120];
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal hq" style={{ maxWidth: 560, maxHeight: '90vh', overflowY: 'auto' }}>
+        <div className="modal-title" style={{ color: 'var(--text)' }}>
+          {editing ? 'Edit Service' : 'Add New Service'}
+        </div>
+
+        {/* Service Name */}
+        <div className="form-group">
+          <div className="form-label hq">Service Name</div>
+          <select
+            className="form-input hq"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            style={{
+              appearance: 'none',
+              backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+              backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '16px',
+              paddingRight: 36, cursor: 'pointer',
+            }}
+          >
+            <option value="">Select a service...</option>
+            {SERVICE_NAMES.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          {name === 'Other' && (
+            <input
+              className="form-input hq"
+              value={customName}
+              onChange={e => setCustomName(e.target.value)}
+              placeholder="Enter custom service name..."
+              style={{ marginTop: 8 }}
+            />
+          )}
+        </div>
+
+        {/* Description */}
+        <div className="form-group">
+          <div className="form-label hq">Description</div>
+          <textarea
+            className="form-input hq"
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            placeholder="Describe this service..."
+            rows={3}
+            style={{ resize: 'vertical', fontFamily: 'inherit' }}
+          />
+        </div>
+
+        {/* Duration & Max Students */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <div className="form-group">
+            <div className="form-label hq">Duration</div>
+            <select
+              className="form-input hq"
+              value={duration}
+              onChange={e => setDuration(e.target.value)}
+              style={{
+                appearance: 'none',
+                backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+                backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '16px',
+                paddingRight: 36, cursor: 'pointer',
+              }}
+            >
+              {durationOptions.map(d => <option key={d} value={d}>{d} minutes</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <div className="form-label hq">Max Students</div>
+            <input
+              className="form-input hq"
+              type="number"
+              min={1}
+              max={100}
+              value={maxStudents}
+              onChange={e => setMaxStudents(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {/* Price */}
+        <div className="form-group">
+          <div className="form-label hq">Recommended Retail Price (optional)</div>
+          <div style={{ position: 'relative' }}>
+            <span style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontWeight: 700, fontSize: 14 }}>$</span>
+            <input
+              className="form-input hq"
+              type="number"
+              min={0}
+              step={0.01}
+              value={price}
+              onChange={e => setPrice(e.target.value)}
+              placeholder="0.00"
+              style={{ paddingLeft: 30 }}
+            />
+          </div>
+        </div>
+
+        {/* Image Upload */}
+        <div className="form-group">
+          <div className="form-label hq">Service Image (optional)</div>
+          {imagePreview ? (
+            <div style={{ position: 'relative', marginBottom: 8 }}>
+              <img src={imagePreview} alt="Preview" style={{ width: '100%', height: 160, objectFit: 'cover', borderRadius: 10, border: '1px solid var(--border)' }} />
+              <button onClick={() => { setImagePreview(''); setImageUrl(''); setImageFile(null); }} style={{
+                position: 'absolute', top: 8, right: 8, width: 28, height: 28, borderRadius: '50%',
+                background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 14,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>✕</button>
+            </div>
+          ) : (
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                padding: 28, borderRadius: 10, border: '2px dashed var(--border)', textAlign: 'center',
+                cursor: 'pointer', background: 'var(--bg)', transition: 'border-color 0.15s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--orange)'}
+              onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+            >
+              <div style={{ fontSize: 28, marginBottom: 6 }}>📷</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Click to upload an image</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>JPG, PNG up to 5MB</div>
+            </div>
+          )}
+          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageChange} style={{ display: 'none' }} />
+        </div>
+
+        {/* Countries & States */}
+        <div className="form-group">
+          <div className="form-label hq">Available In</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>Select which countries and states this service is available in.</div>
+          {Object.keys(COUNTRIES_STATES).map(country => (
+            <div key={country} style={{ marginBottom: 12 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={selectedCountries.includes(country)}
+                  onChange={() => toggleCountry(country)}
+                  style={{ width: 16, height: 16, accentColor: 'var(--orange)', cursor: 'pointer' }}
+                />
+                <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{country}</span>
+              </label>
+              {selectedCountries.includes(country) && (
+                <div style={{ marginLeft: 24, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {COUNTRIES_STATES[country].map(state => (
+                    <button
+                      key={state}
+                      onClick={() => toggleState(state)}
+                      style={{
+                        padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                        border: '1.5px solid',
+                        borderColor: selectedStates.includes(state) ? 'var(--orange)' : 'var(--border)',
+                        background: selectedStates.includes(state) ? 'var(--orange-pale)' : '#fff',
+                        color: selectedStates.includes(state) ? 'var(--orange)' : 'var(--text-muted)',
+                        transition: 'all 0.15s', fontFamily: 'inherit',
+                      }}
+                    >
+                      {state}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div className="modal-actions">
+          <button className="btn btn-ghost hq" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary hq" onClick={handleSave} disabled={saving || (!name || (name === 'Other' && !customName) || !description)}>
+            <Icon path={icons.check} size={14} />
+            {saving ? 'Saving...' : editing ? 'Save Changes' : 'Create Service'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Location Modal ───────────────────────────────────────────────────────────
-function LocationModal({ portal, editing, locations = [], onSave, onClose }) {
   const [name, setName] = useState(editing?.name || '');
   const [address, setAddress] = useState(editing?.address || '');
   const [countryCode, setCountryCode] = useState(editing ? editing.phone.split(' ')[0] : '+61');
