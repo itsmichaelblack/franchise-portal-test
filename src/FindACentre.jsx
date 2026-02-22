@@ -53,6 +53,7 @@ const ic = {
   directions: "M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z",
   clock: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z M12 6v6l4 2",
   back: "M15 18l-6-6 6-6",
+  calendar: "M3 4h18v18H3z M16 2v4 M8 2v4 M3 10h18",
 };
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
@@ -286,6 +287,15 @@ const css = `
   .fac-loc-action-btn:hover {
     background: #fdf0ea;
     border-color: #E25D25;
+  }
+  .fac-loc-book-btn {
+    background: #E25D25;
+    color: #fff;
+    border-color: #E25D25;
+  }
+  .fac-loc-book-btn:hover {
+    background: #d04f1a;
+    border-color: #d04f1a;
   }
 
   .fac-empty {
@@ -911,6 +921,15 @@ export default function FindACentre() {
                             onClick={(e) => e.stopPropagation()}
                           >
                             <Icon d={ic.phone} size={12} /> Call
+                          </a>
+                        )}
+                        {(!loc.status || loc.status === 'open') && (
+                          <a
+                            href={`/book-assessment?location=${encodeURIComponent(loc.id)}`}
+                            className="fac-loc-action-btn fac-loc-book-btn"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Icon d={ic.calendar} size={12} /> Book Assessment
                           </a>
                         )}
                       </div>
