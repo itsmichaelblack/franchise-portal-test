@@ -2156,7 +2156,7 @@ function FranchisePortal({ user, onLogout }) {
               const weekBookings = bookings.filter(b => b.date >= weekStart && b.date <= weekEnd);
 
               const hours = [];
-              for (let h = 8; h <= 18; h++) hours.push(h);
+              for (let h = 8; h <= 21; h++) hours.push(h);
 
               // Is the current week being shown?
               const isCurrentWeek = weekDays.some(d => d.toDateString() === today.toDateString());
