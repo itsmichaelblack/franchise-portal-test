@@ -36,6 +36,7 @@ const INITIAL_AVAILABILITY = DAYS.map((day, i) => ({
   enabled: i < 5,
   start: "09:00",
   end: "17:00",
+  unavailable: [], // Array of { date: 'YYYY-MM-DD', reason: '' }
 }));
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
@@ -1842,6 +1843,13 @@ function FranchisePortal({ user, onLogout }) {
   const [bookings, setBookings] = useState([]);
   const [bookingsLoading, setBookingsLoading] = useState(false);
   const [calendarWeekOffset, setCalendarWeekOffset] = useState(0);
+  const [selectedBooking, setSelectedBooking] = useState(null);
+
+  // Unavailable dates state
+  const [unavailableDates, setUnavailableDates] = useState([]); // [{ date, reason }]
+  const [showUnavailModal, setShowUnavailModal] = useState(false);
+  const [unavailDate, setUnavailDate] = useState('');
+  const [unavailReason, setUnavailReason] = useState('');
 
   const locationId = user.locationId?.toString() || user.uid?.toString();
 
@@ -1852,21 +1860,37 @@ function FranchisePortal({ user, onLogout }) {
       try {
         const { collection, getDocs, query, where } = await import('firebase/firestore');
         const { db } = await import('./firebase.js');
-        console.log("Loading bookings for locationId:", locationId);
         const q = query(
           collection(db, 'bookings'),
           where('locationId', '==', locationId)
         );
         const snap = await getDocs(q);
-        console.log("Found bookings:", snap.docs.length);
         const allBookings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        // Sort by date and time client-side
         allBookings.sort((a, b) => a.date === b.date ? a.time.localeCompare(b.time) : a.date.localeCompare(b.date));
         setBookings(allBookings);
       } catch (e) { console.error("Failed to load bookings:", e); }
       setBookingsLoading(false);
     };
     if (locationId) loadBookings();
+  }, [locationId]);
+
+  // Load availability (including unavailable dates)
+  useEffect(() => {
+    const loadAvail = async () => {
+      try {
+        const { doc, getDoc } = await import('firebase/firestore');
+        const { db } = await import('./firebase.js');
+        const snap = await getDoc(doc(db, 'availability', locationId));
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data.schedule) setAvailability(data.schedule);
+          if (data.timezone) setTimezone(data.timezone);
+          if (data.bufferMinutes !== undefined) setBuffer(data.bufferMinutes);
+          if (data.unavailableDates) setUnavailableDates(data.unavailableDates);
+        }
+      } catch (e) { console.error("Failed to load availability:", e); }
+    };
+    if (locationId) loadAvail();
   }, [locationId]);
 
   const showToast = (msg) => {
@@ -1884,10 +1908,11 @@ function FranchisePortal({ user, onLogout }) {
 
   const handleSave = async () => {
     try {
-      await saveAvailability(user.locationId?.toString() || user.id?.toString(), {
+      await saveAvailability(locationId, {
         schedule: availability,
         timezone,
         bufferMinutes: buffer,
+        unavailableDates,
       });
       showToast('✓ Availability saved successfully.');
     } catch (err) {
@@ -1896,7 +1921,34 @@ function FranchisePortal({ user, onLogout }) {
     }
   };
 
+  const addUnavailableDate = () => {
+    if (!unavailDate) return;
+    if (unavailableDates.some(u => u.date === unavailDate)) {
+      showToast('This date is already marked unavailable.');
+      return;
+    }
+    setUnavailableDates(prev => [...prev, { date: unavailDate, reason: unavailReason }].sort((a, b) => a.date.localeCompare(b.date)));
+    setUnavailDate('');
+    setUnavailReason('');
+    setShowUnavailModal(false);
+  };
+
+  const removeUnavailableDate = (date) => {
+    setUnavailableDates(prev => prev.filter(u => u.date !== date));
+  };
+
   const bufferOptions = [0, 15, 30, 45, 60];
+
+  // Helper to format time
+  const fmtTime = (t) => {
+    const [h, m] = t.split(':').map(Number);
+    return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
+  };
+
+  // Current time position for the time indicator line
+  const now = new Date();
+  const currentHour = now.getHours();
+  const currentMin = now.getMinutes();
 
   return (
     <div className="layout fp" style={{ background: 'var(--fp-bg)' }}>
@@ -1931,6 +1983,7 @@ function FranchisePortal({ user, onLogout }) {
       </aside>
 
       <main className="main fp">
+        {/* ═══ TIMETABLE PAGE ═══ */}
         {page === 'timetable' && (
           <>
             <div className="page-header">
@@ -1938,23 +1991,8 @@ function FranchisePortal({ user, onLogout }) {
               <div className="page-desc" style={{ color: 'var(--fp-muted)' }}>Set the days and hours you're available for bookings.</div>
             </div>
 
-            <div style={{ marginBottom: 24 }}>
-              <div className="card fp" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-                <Icon path={icons.globe} size={16} style={{ color: 'var(--fp-accent)' }} />
-                <span style={{ fontSize: 13, color: 'var(--fp-muted)', flex: 1 }}>Timezone</span>
-                <select
-                  className="select-styled fp"
-                  style={{ width: 220 }}
-                  value={timezone}
-                  onChange={e => setTimezone(e.target.value)}
-                >
-                  {TIMEZONES.map(tz => <option key={tz} value={tz}>{tz}</option>)}
-                </select>
-              </div>
-            </div>
-
             <div className="card fp" style={{ padding: '28px' }}>
-              <div style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, color: 'var(--fp-text)', fontSize: 15, marginBottom: 20 }}>Weekly Schedule</div>
+              <div style={{ fontWeight: 700, color: 'var(--fp-text)', fontSize: 15, marginBottom: 20 }}>Weekly Schedule</div>
               <div className="timetable">
                 {availability.map((day, i) => (
                   <div className="day-row fp" key={day.day}>
@@ -1990,15 +2028,105 @@ function FranchisePortal({ user, onLogout }) {
                   </div>
                 ))}
               </div>
-              <div className="save-bar">
-                <button className="btn btn-primary fp" onClick={handleSave}>
-                  <Icon path={icons.check} size={14} /> Save Availability
+            </div>
+
+            {/* Unavailable Dates Section */}
+            <div className="card fp" style={{ padding: '28px', marginTop: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                <div>
+                  <div style={{ fontWeight: 700, color: 'var(--fp-text)', fontSize: 15 }}>Unavailable Dates</div>
+                  <div style={{ fontSize: 13, color: 'var(--fp-muted)', marginTop: 2 }}>Block specific dates when you can't take bookings (e.g. holidays, training days).</div>
+                </div>
+                <button className="btn btn-primary fp" style={{ padding: '8px 16px', fontSize: 13 }} onClick={() => setShowUnavailModal(true)}>
+                  <Icon path={icons.plus} size={13} /> Add Date
                 </button>
               </div>
+
+              {unavailableDates.length === 0 ? (
+                <div style={{ padding: 20, textAlign: 'center', color: 'var(--fp-muted)', fontSize: 13, background: 'var(--fp-bg)', borderRadius: 10, border: '1px dashed var(--fp-border)' }}>
+                  No unavailable dates set. All enabled days are open for bookings.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {unavailableDates.map(u => {
+                    const d = new Date(u.date + 'T00:00:00');
+                    const label = d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
+                    const isPast = u.date < new Date().toISOString().split('T')[0];
+                    return (
+                      <div key={u.date} style={{
+                        display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+                        background: isPast ? 'var(--fp-bg)' : '#fff', borderRadius: 8,
+                        border: '1px solid var(--fp-border)', opacity: isPast ? 0.5 : 1,
+                      }}>
+                        <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(226,93,37,0.08)', color: '#E25D25', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 12, fontWeight: 800 }}>
+                          <div style={{ lineHeight: 1 }}>{d.getDate()}</div>
+                          <div style={{ fontSize: 8, textTransform: 'uppercase' }}>{d.toLocaleDateString('en-AU', { month: 'short' })}</div>
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fp-text)' }}>{label}</div>
+                          {u.reason && <div style={{ fontSize: 11, color: 'var(--fp-muted)' }}>{u.reason}</div>}
+                        </div>
+                        <button onClick={() => removeUnavailableDate(u.date)} style={{
+                          background: 'none', border: 'none', color: 'var(--fp-muted)', cursor: 'pointer', padding: '4px 8px', fontSize: 12, fontWeight: 600,
+                        }}>✕</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
+
+            <div className="save-bar" style={{ marginTop: 16 }}>
+              <button className="btn btn-primary fp" onClick={handleSave}>
+                <Icon path={icons.check} size={14} /> Save Availability
+              </button>
+            </div>
+
+            {/* Add Unavailable Date Modal */}
+            {showUnavailModal && (
+              <div className="modal-overlay" onClick={() => setShowUnavailModal(false)}>
+                <div className="modal fp" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
+                  <div className="modal-header fp">
+                    <div className="modal-title fp">Add Unavailable Date</div>
+                    <button className="modal-close" onClick={() => setShowUnavailModal(false)}>✕</button>
+                  </div>
+                  <div className="modal-body" style={{ padding: '24px' }}>
+                    <div style={{ marginBottom: 16 }}>
+                      <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>Date</label>
+                      <input
+                        type="date"
+                        className="form-input fp"
+                        value={unavailDate}
+                        onChange={e => setUnavailDate(e.target.value)}
+                        min={new Date().toISOString().split('T')[0]}
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    <div style={{ marginBottom: 20 }}>
+                      <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>Reason (optional)</label>
+                      <input
+                        type="text"
+                        className="form-input fp"
+                        value={unavailReason}
+                        onChange={e => setUnavailReason(e.target.value)}
+                        placeholder="e.g. Public holiday, Staff training"
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                      <button className="btn btn-ghost fp" onClick={() => setShowUnavailModal(false)}>Cancel</button>
+                      <button className="btn btn-primary fp" onClick={addUnavailableDate} disabled={!unavailDate}>
+                        <Icon path={icons.check} size={14} /> Add Date
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         )}
 
+        {/* ═══ BOOKINGS PAGE ═══ */}
         {page === 'bookings' && (
           <>
             <div className="page-header">
@@ -2011,10 +2139,9 @@ function FranchisePortal({ user, onLogout }) {
             {bookingsLoading ? (
               <div style={{ textAlign: 'center', padding: 48, color: 'var(--fp-muted)' }}>Loading bookings...</div>
             ) : (() => {
-              // Build week view
               const today = new Date();
               const startOfWeek = new Date(today);
-              startOfWeek.setDate(today.getDate() - today.getDay() + 1 + calendarWeekOffset * 7); // Monday
+              startOfWeek.setDate(today.getDate() - today.getDay() + 1 + calendarWeekOffset * 7);
               const weekDays = [];
               for (let i = 0; i < 7; i++) {
                 const d = new Date(startOfWeek);
@@ -2023,14 +2150,15 @@ function FranchisePortal({ user, onLogout }) {
               }
               const weekLabel = `${weekDays[0].toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })} — ${weekDays[6].toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}`;
 
-              // Filter bookings for this week
               const weekStart = weekDays[0].toISOString().split('T')[0];
               const weekEnd = weekDays[6].toISOString().split('T')[0];
               const weekBookings = bookings.filter(b => b.date >= weekStart && b.date <= weekEnd);
 
-              // Time slots for the grid (8am-6pm)
               const hours = [];
               for (let h = 8; h <= 18; h++) hours.push(h);
+
+              // Is the current week being shown?
+              const isCurrentWeek = weekDays.some(d => d.toDateString() === today.toDateString());
 
               return (
                 <>
@@ -2042,7 +2170,7 @@ function FranchisePortal({ user, onLogout }) {
                       {weekLabel}
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <button className="btn btn-ghost fp" style={{ padding: '8px 14px' }} onClick={() => setCalendarWeekOffset(0)}>
+                      <button className="btn btn-ghost fp" style={{ padding: '8px 14px', ...(calendarWeekOffset === 0 ? { background: 'rgba(109,203,202,0.1)', color: 'var(--fp-accent)', border: '1px solid var(--fp-accent)' } : {}) }} onClick={() => setCalendarWeekOffset(0)}>
                         Today
                       </button>
                       <button className="btn btn-ghost fp" style={{ padding: '8px 14px' }} onClick={() => setCalendarWeekOffset(w => w + 1)}>
@@ -2053,7 +2181,7 @@ function FranchisePortal({ user, onLogout }) {
 
                   <div className="card fp" style={{ padding: 0, overflow: 'hidden' }}>
                     <div style={{ overflowX: 'auto' }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: '60px repeat(7, 1fr)', minWidth: 700 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '60px repeat(7, 1fr)', minWidth: 700, position: 'relative' }}>
                         {/* Header row */}
                         <div style={{ padding: '12px 8px', borderBottom: '2px solid var(--fp-border)', borderRight: '1px solid var(--fp-border)', background: 'var(--fp-bg)' }} />
                         {weekDays.map((d, i) => {
@@ -2063,17 +2191,16 @@ function FranchisePortal({ user, onLogout }) {
                               padding: '10px 8px', textAlign: 'center',
                               borderBottom: '2px solid var(--fp-border)',
                               borderRight: i < 6 ? '1px solid var(--fp-border)' : 'none',
-                              background: isToday ? 'rgba(109,203,202,0.1)' : 'var(--fp-bg)',
+                              background: isToday ? 'rgba(109,203,202,0.12)' : 'var(--fp-bg)',
                             }}>
                               <div style={{ fontSize: 11, fontWeight: 600, color: isToday ? 'var(--fp-accent)' : 'var(--fp-muted)', textTransform: 'uppercase' }}>
                                 {d.toLocaleDateString('en-AU', { weekday: 'short' })}
                               </div>
                               <div style={{
-                                fontSize: 18, fontWeight: 800,
-                                color: isToday ? 'var(--fp-accent)' : 'var(--fp-text)',
+                                fontSize: 18, fontWeight: 800, marginTop: 2,
                                 width: 32, height: 32, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                                 background: isToday ? 'var(--fp-accent)' : 'transparent',
-                                ...(isToday ? { color: '#fff' } : {}),
+                                color: isToday ? '#fff' : 'var(--fp-text)',
                               }}>
                                 {d.getDate()}
                               </div>
@@ -2082,13 +2209,14 @@ function FranchisePortal({ user, onLogout }) {
                         })}
 
                         {/* Time grid */}
-                        {hours.map(h => (
+                        {hours.map((h, hi) => (
                           <div key={h} style={{ display: 'contents' }}>
                             <div style={{
                               padding: '4px 8px', fontSize: 11, fontWeight: 600, color: 'var(--fp-muted)',
-                              borderRight: '1px solid var(--fp-border)', borderBottom: '1px solid var(--fp-border)',
+                              borderRight: '1px solid var(--fp-border)',
+                              borderBottom: '1px solid #eef0f2',
                               display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end',
-                              minHeight: 52,
+                              minHeight: 56, background: '#fafbfc',
                             }}>
                               {h > 12 ? h - 12 : h}{h >= 12 ? 'PM' : 'AM'}
                             </div>
@@ -2100,24 +2228,43 @@ function FranchisePortal({ user, onLogout }) {
                                 return bh === h;
                               });
                               const isToday = d.toDateString() === today.toDateString();
+
+                              // Current time indicator
+                              const showTimeIndicator = isCurrentWeek && isToday && currentHour === h;
+                              const timeIndicatorTop = showTimeIndicator ? (currentMin / 60) * 56 : 0;
+
                               return (
                                 <div key={di} style={{
-                                  borderRight: di < 6 ? '1px solid var(--fp-border)' : 'none',
-                                  borderBottom: '1px solid var(--fp-border)',
-                                  padding: 3, minHeight: 52, position: 'relative',
-                                  background: isToday ? 'rgba(109,203,202,0.03)' : 'transparent',
+                                  borderRight: di < 6 ? '1px solid #eef0f2' : 'none',
+                                  borderBottom: '1px solid #eef0f2',
+                                  padding: 3, minHeight: 56, position: 'relative',
+                                  background: isToday ? 'rgba(109,203,202,0.04)' : 'transparent',
                                 }}>
+                                  {/* Current time line */}
+                                  {showTimeIndicator && (
+                                    <div style={{
+                                      position: 'absolute', left: 0, right: 0, top: timeIndicatorTop,
+                                      height: 2, background: '#E25D25', zIndex: 5,
+                                      boxShadow: '0 0 4px rgba(226,93,37,0.4)',
+                                    }}>
+                                      <div style={{ position: 'absolute', left: -3, top: -3, width: 8, height: 8, borderRadius: '50%', background: '#E25D25' }} />
+                                    </div>
+                                  )}
+
                                   {cellBookings.map((b, bi) => {
                                     const [bh, bm] = b.time.split(':').map(Number);
-                                    const ampm = bh >= 12 ? 'PM' : 'AM';
-                                    const timeLabel = `${bh % 12 || 12}:${String(bm).padStart(2, '0')} ${ampm}`;
+                                    const timeLabel = fmtTime(b.time);
                                     return (
-                                      <div key={bi} style={{
+                                      <div key={bi} onClick={() => setSelectedBooking(b)} style={{
                                         background: 'linear-gradient(135deg, #E25D25, #f0845a)',
                                         color: '#fff', borderRadius: 6, padding: '6px 8px', fontSize: 11,
-                                        marginBottom: 2, cursor: 'default',
-                                        lineHeight: 1.3,
-                                      }} title={`${b.customerName} — ${b.customerEmail}\n${timeLabel} (40 min)\n${b.notes || ''}`}>
+                                        marginBottom: 2, cursor: 'pointer',
+                                        lineHeight: 1.3, position: 'relative', zIndex: 2,
+                                        transition: 'transform 0.1s, box-shadow 0.1s',
+                                      }}
+                                      onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(226,93,37,0.3)'; }}
+                                      onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = 'none'; }}
+                                      >
                                         <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.customerName}</div>
                                         <div style={{ opacity: 0.85, fontSize: 10 }}>{timeLabel}</div>
                                       </div>
@@ -2159,13 +2306,14 @@ function FranchisePortal({ user, onLogout }) {
                     <div style={{ marginTop: 20 }}>
                       <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>This Week's Bookings</div>
                       {weekBookings.sort((a, b) => a.date === b.date ? a.time.localeCompare(b.time) : a.date.localeCompare(b.date)).map(b => {
-                        const [bh, bm] = b.time.split(':').map(Number);
-                        const ampm = bh >= 12 ? 'PM' : 'AM';
-                        const timeLabel = `${bh % 12 || 12}:${String(bm).padStart(2, '0')} ${ampm}`;
+                        const timeLabel = fmtTime(b.time);
                         const dateObj = new Date(b.date + 'T00:00:00');
                         const dateLabel = dateObj.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
                         return (
-                          <div key={b.id} className="card fp" style={{ padding: '14px 18px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 14 }}>
+                          <div key={b.id} className="card fp" onClick={() => setSelectedBooking(b)} style={{ padding: '14px 18px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer', transition: 'border-color 0.15s' }}
+                            onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--fp-accent)'}
+                            onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--fp-border)'}
+                          >
                             <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(226,93,37,0.1)', color: '#E25D25', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                               <div style={{ fontSize: 14, fontWeight: 800, lineHeight: 1 }}>{dateObj.getDate()}</div>
                               <div style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase' }}>{dateObj.toLocaleDateString('en-AU', { month: 'short' })}</div>
@@ -2175,8 +2323,8 @@ function FranchisePortal({ user, onLogout }) {
                               <div style={{ fontSize: 12, color: 'var(--fp-muted)' }}>{dateLabel} at {timeLabel} · 40 min</div>
                             </div>
                             <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                              <a href={`mailto:${b.customerEmail}`} style={{ fontSize: 12, color: 'var(--fp-accent)', textDecoration: 'none', fontWeight: 600 }}>Email</a>
-                              <a href={`tel:${b.customerPhone?.replace(/\s/g, '')}`} style={{ fontSize: 12, color: 'var(--fp-accent)', textDecoration: 'none', fontWeight: 600 }}>Call</a>
+                              <a href={`mailto:${b.customerEmail}`} onClick={e => e.stopPropagation()} style={{ fontSize: 12, color: 'var(--fp-accent)', textDecoration: 'none', fontWeight: 600 }}>Email</a>
+                              <a href={`tel:${b.customerPhone?.replace(/\s/g, '')}`} onClick={e => e.stopPropagation()} style={{ fontSize: 12, color: 'var(--fp-accent)', textDecoration: 'none', fontWeight: 600 }}>Call</a>
                             </div>
                           </div>
                         );
@@ -2195,6 +2343,7 @@ function FranchisePortal({ user, onLogout }) {
           </>
         )}
 
+        {/* ═══ SETTINGS PAGE ═══ */}
         {page === 'settings' && (
           <>
             <div className="page-header">
@@ -2202,50 +2351,78 @@ function FranchisePortal({ user, onLogout }) {
               <div className="page-desc" style={{ color: 'var(--fp-muted)' }}>Configure your timezone and booking buffer preferences.</div>
             </div>
 
-            <div className="settings-grid">
-              <div className="setting-card fp">
-                <div className="setting-label-row">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 560 }}>
+              {/* Timezone */}
+              <div className="card fp" style={{ padding: '24px' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 16 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(109,203,202,0.1)', color: 'var(--fp-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Icon path={icons.globe} size={18} />
+                  </div>
                   <div>
-                    <div className="setting-title fp">Timezone</div>
-                    <div className="setting-hint fp">Bookings will be shown in this timezone.</div>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)' }}>Timezone</div>
+                    <div style={{ fontSize: 13, color: 'var(--fp-muted)', marginTop: 2 }}>All bookings and availability times will be displayed in this timezone.</div>
                   </div>
                 </div>
-                <select className="select-styled fp" value={timezone} onChange={e => setTimezone(e.target.value)}>
-                  {TIMEZONES.map(tz => <option key={tz} value={tz}>{tz}</option>)}
+                <select
+                  value={timezone}
+                  onChange={e => setTimezone(e.target.value)}
+                  style={{
+                    width: '100%', padding: '12px 14px', borderRadius: 10,
+                    border: '2px solid var(--fp-border)', background: '#fff',
+                    fontFamily: 'inherit', fontSize: 14, color: 'var(--fp-text)',
+                    outline: 'none', cursor: 'pointer',
+                    appearance: 'none',
+                    backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+                    backgroundRepeat: 'no-repeat',
+                    backgroundPosition: 'right 12px center',
+                    backgroundSize: '18px',
+                    paddingRight: 40,
+                  }}
+                >
+                  {TIMEZONES.map(tz => <option key={tz} value={tz}>{tz.replace(/_/g, ' ')}</option>)}
                 </select>
               </div>
 
-              <div className="setting-card fp">
-                <div className="setting-label-row">
+              {/* Buffer */}
+              <div className="card fp" style={{ padding: '24px' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 16 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(109,203,202,0.1)', color: 'var(--fp-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Icon path={icons.clock} size={18} />
+                  </div>
                   <div>
-                    <div className="setting-title fp">Booking Buffer</div>
-                    <div className="setting-hint fp">Minimum gap required before a new booking.</div>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)' }}>Booking Buffer</div>
+                    <div style={{ fontSize: 13, color: 'var(--fp-muted)', marginTop: 2 }}>Minimum gap between consecutive bookings to allow preparation time.</div>
                   </div>
                 </div>
-                <div className="buffer-options">
+                <div style={{ display: 'flex', gap: 8 }}>
                   {bufferOptions.map(b => (
                     <button
                       key={b}
-                      className={`buffer-chip fp${buffer === b ? ' selected' : ''}`}
                       onClick={() => setBuffer(b)}
+                      style={{
+                        flex: 1, padding: '12px 8px', borderRadius: 10, border: '2px solid',
+                        borderColor: buffer === b ? 'var(--fp-accent)' : 'var(--fp-border)',
+                        background: buffer === b ? 'rgba(109,203,202,0.1)' : '#fff',
+                        color: buffer === b ? 'var(--fp-accent)' : 'var(--fp-text)',
+                        fontFamily: 'inherit', fontSize: 14, fontWeight: 700, cursor: 'pointer',
+                        transition: 'all 0.15s',
+                      }}
                     >
                       {b === 0 ? 'None' : `${b} min`}
                     </button>
                   ))}
                 </div>
-                <div className="setting-hint fp" style={{ marginTop: 12 }}>
-                  Currently: <strong>{buffer === 0 ? 'No buffer' : `${buffer} minutes`}</strong>
-                </div>
               </div>
             </div>
 
-            <div className="save-bar" style={{ marginTop: 8 }}>
+            <div style={{ marginTop: 20 }}>
               <button className="btn btn-primary fp" onClick={async () => {
                 try {
-                  await saveAvailability(user.locationId?.toString() || user.id?.toString(), {
+                  await saveAvailability(locationId, {
                     schedule: availability,
                     timezone,
                     bufferMinutes: buffer,
+                    unavailableDates,
                   });
                   showToast('✓ Settings saved.');
                 } catch (err) {
@@ -2259,6 +2436,82 @@ function FranchisePortal({ user, onLogout }) {
           </>
         )}
       </main>
+
+      {/* Booking Detail Modal */}
+      {selectedBooking && (
+        <div className="modal-overlay" onClick={() => setSelectedBooking(null)}>
+          <div className="modal fp" onClick={e => e.stopPropagation()} style={{ maxWidth: 440 }}>
+            <div className="modal-header fp">
+              <div className="modal-title fp">Booking Details</div>
+              <button className="modal-close" onClick={() => setSelectedBooking(null)}>✕</button>
+            </div>
+            <div className="modal-body" style={{ padding: '24px' }}>
+              {(() => {
+                const b = selectedBooking;
+                const dateObj = new Date(b.date + 'T00:00:00');
+                const dateLabel = dateObj.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+                const timeLabel = fmtTime(b.time);
+                const [bh, bm] = b.time.split(':').map(Number);
+                const endMin = bh * 60 + bm + 40;
+                const endLabel = fmtTime(`${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`);
+                const refCode = b.id.slice(0, 8).toUpperCase();
+
+                return (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 }}>
+                      <div style={{ width: 52, height: 52, borderRadius: 12, background: 'linear-gradient(135deg, #E25D25, #f0845a)', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <div style={{ fontSize: 18, fontWeight: 800, lineHeight: 1 }}>{dateObj.getDate()}</div>
+                        <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase' }}>{dateObj.toLocaleDateString('en-AU', { month: 'short' })}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--fp-text)' }}>{b.customerName}</div>
+                        <div style={{ fontSize: 13, color: 'var(--fp-muted)' }}>{dateLabel}</div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 20 }}>
+                      {[
+                        { icon: icons.clock, label: 'Time', value: `${timeLabel} — ${endLabel} (40 min)` },
+                        { icon: icons.mail, label: 'Email', value: b.customerEmail, href: `mailto:${b.customerEmail}` },
+                        { icon: icons.phone, label: 'Phone', value: b.customerPhone, href: `tel:${b.customerPhone?.replace(/\s/g, '')}` },
+                      ].map((row, ri) => (
+                        <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'var(--fp-bg)', borderRadius: 8 }}>
+                          <Icon path={row.icon} size={15} style={{ color: 'var(--fp-accent)', flexShrink: 0 }} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 11, color: 'var(--fp-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{row.label}</div>
+                            {row.href ? (
+                              <a href={row.href} style={{ fontSize: 14, color: 'var(--fp-text)', textDecoration: 'none', fontWeight: 600 }}>{row.value}</a>
+                            ) : (
+                              <div style={{ fontSize: 14, color: 'var(--fp-text)', fontWeight: 600 }}>{row.value}</div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                      {b.notes && (
+                        <div style={{ padding: '10px 14px', background: 'var(--fp-bg)', borderRadius: 8 }}>
+                          <div style={{ fontSize: 11, color: 'var(--fp-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Notes</div>
+                          <div style={{ fontSize: 14, color: 'var(--fp-text)' }}>{b.notes}</div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ fontSize: 11, color: 'var(--fp-muted)', textAlign: 'center' }}>Ref: {refCode}</div>
+
+                    <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+                      <a href={`mailto:${b.customerEmail}`} className="btn btn-primary fp" style={{ flex: 1, textDecoration: 'none', textAlign: 'center', justifyContent: 'center' }}>
+                        <Icon path={icons.mail} size={14} /> Email Customer
+                      </a>
+                      <a href={`tel:${b.customerPhone?.replace(/\s/g, '')}`} className="btn btn-ghost fp" style={{ flex: 1, textDecoration: 'none', textAlign: 'center', justifyContent: 'center', border: '1px solid var(--fp-border)' }}>
+                        <Icon path={icons.phone} size={14} /> Call
+                      </a>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
 
       {toast && (
         <div className="toast hq toast-success" style={{ background: '#fff', border: '1px solid var(--fp-border)', color: 'var(--fp-text)' }}>
