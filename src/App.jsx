@@ -1178,7 +1178,7 @@ function AuthPage({ portal, onLogin, onBack }) {
     <div className={`auth-page ${t}`}>
       <div className={`auth-card ${t}`}>
         <div className={`auth-logo ${t}`}>
-          <div className="auth-logo-icon">{portal === 'hq' ? '⬡' : '◇'}</div>
+          <div className="auth-logo-icon"><img src="/logo-sticker.png" alt="Success Tutoring" style={{ width: 32, height: 32, objectFit: 'contain' }} /></div>
           <div className="auth-logo-text">{portal === 'hq' ? 'HQ Portal' : 'Partner Portal'}</div>
         </div>
         <div className="auth-subtitle">Sign in to your account</div>
@@ -2633,8 +2633,11 @@ function FranchisePortal({ user, onLogout }) {
     <div className="layout fp" style={{ background: 'var(--fp-bg)' }}>
       <aside className="sidebar fp">
         <div className="sidebar-header">
-          <div className="sidebar-logo">◇ Partner</div>
-          <div className="sidebar-subtitle">Franchise Portal</div>
+          <img src="/logo-sticker.png" alt="" className="sidebar-logo-img" />
+          <div className="sidebar-brand">
+            <div className="sidebar-logo"><span>Success</span> Tutoring</div>
+            <div className="sidebar-subtitle">Franchise Portal</div>
+          </div>
         </div>
         <nav className="sidebar-nav">
           <button className={`nav-item ${page === 'timetable' ? 'active' : ''}`} onClick={() => setPage('timetable')}>
