@@ -1620,6 +1620,7 @@ function HQPortal({ user, onLogout }) {
         <LocationModal
           portal="hq"
           editing={modal?.type === 'edit' ? modal.loc : null}
+          locations={locations}
           onSave={handleSave}
           onClose={() => setModal(null)}
         />
@@ -1672,7 +1673,7 @@ function HQPortal({ user, onLogout }) {
 }
 
 // ─── Location Modal ───────────────────────────────────────────────────────────
-function LocationModal({ portal, editing, onSave, onClose }) {
+function LocationModal({ portal, editing, locations = [], onSave, onClose }) {
   const [name, setName] = useState(editing?.name || '');
   const [address, setAddress] = useState(editing?.address || '');
   const [countryCode, setCountryCode] = useState(editing ? editing.phone.split(' ')[0] : '+61');
@@ -1681,9 +1682,40 @@ function LocationModal({ portal, editing, onSave, onClose }) {
   const [status, setStatus] = useState(editing?.status || 'coming_soon');
   const [resendEmail, setResendEmail] = useState(false);
   const [resending, setResending] = useState(false);
+  const [duplicateWarning, setDuplicateWarning] = useState(null);
+  const [confirmedDuplicate, setConfirmedDuplicate] = useState(false);
   const t = portal;
   const addressInputRef = useRef(null);
   const autocompleteRef = useRef(null);
+
+  // Check for duplicates whenever name, address, or phone changes
+  useEffect(() => {
+    if (editing) return; // Don't check when editing
+    const otherLocations = locations.filter(l => l.id !== editing?.id);
+    const warnings = [];
+    const fullPhone = `${countryCode} ${phoneNum}`.trim();
+
+    if (name.trim()) {
+      const match = otherLocations.find(l => l.name?.toLowerCase().trim() === name.toLowerCase().trim());
+      if (match) warnings.push(`Location name "${name}" already exists`);
+    }
+    if (address.trim()) {
+      const match = otherLocations.find(l => l.address?.toLowerCase().trim() === address.toLowerCase().trim());
+      if (match) warnings.push(`Address "${address}" is already used by "${match.name}"`);
+    }
+    if (phoneNum.trim() && phoneNum.trim().length > 3) {
+      const match = otherLocations.find(l => l.phone?.replace(/\s/g, '') === fullPhone.replace(/\s/g, ''));
+      if (match) warnings.push(`Phone number is already used by "${match.name}"`);
+    }
+
+    if (warnings.length > 0) {
+      setDuplicateWarning(warnings);
+      setConfirmedDuplicate(false);
+    } else {
+      setDuplicateWarning(null);
+      setConfirmedDuplicate(false);
+    }
+  }, [name, address, countryCode, phoneNum, editing, locations]);
 
   useEffect(() => {
     if (!addressInputRef.current || !window.google?.maps?.places) return;
@@ -1731,6 +1763,7 @@ function LocationModal({ portal, editing, onSave, onClose }) {
 
   const handleSave = async () => {
     if (!name || !address || !email) return;
+    if (duplicateWarning && !confirmedDuplicate) return; // Must confirm duplicate first
     setResending(true);
     if (editing && resendEmail) {
       try {
@@ -1807,6 +1840,30 @@ function LocationModal({ portal, editing, onSave, onClose }) {
                 <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>Re-send confirmation email</div>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Send a portal access email to {email || 'the franchise partner'}</div>
               </div>
+            </label>
+          </div>
+        )}
+
+        {/* Duplicate Warning */}
+        {duplicateWarning && (
+          <div style={{ margin: '12px 0', padding: '14px 16px', borderRadius: 10, background: '#fef3cd', border: '1.5px solid #f0d080' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 8 }}>
+              <span style={{ fontSize: 16, flexShrink: 0 }}>⚠️</span>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#856404', marginBottom: 4 }}>Possible duplicate detected</div>
+                {duplicateWarning.map((w, i) => (
+                  <div key={i} style={{ fontSize: 13, color: '#856404', lineHeight: 1.5 }}>• {w}</div>
+                ))}
+              </div>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(133,100,4,0.15)' }}>
+              <input
+                type="checkbox"
+                checked={confirmedDuplicate}
+                onChange={e => setConfirmedDuplicate(e.target.checked)}
+                style={{ width: 16, height: 16, accentColor: '#856404', cursor: 'pointer' }}
+              />
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#856404' }}>I understand — create this location anyway</span>
             </label>
           </div>
         )}
