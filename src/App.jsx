@@ -1839,6 +1839,31 @@ function FranchisePortal({ user, onLogout }) {
   const [buffer, setBuffer] = useState(15);
   const [saved, setSaved] = useState(false);
   const [toast, setToast] = useState(null);
+  const [bookings, setBookings] = useState([]);
+  const [bookingsLoading, setBookingsLoading] = useState(false);
+  const [calendarWeekOffset, setCalendarWeekOffset] = useState(0);
+
+  const locationId = user.locationId?.toString() || user.id?.toString();
+
+  // Load bookings for this location
+  useEffect(() => {
+    const loadBookings = async () => {
+      setBookingsLoading(true);
+      try {
+        const { collection, getDocs, query, where, orderBy } = await import('firebase/firestore');
+        const { db } = await import('./firebase.js');
+        const q = query(
+          collection(db, 'bookings'),
+          where('locationId', '==', locationId),
+          orderBy('date', 'asc')
+        );
+        const snap = await getDocs(q);
+        setBookings(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (e) { console.error("Failed to load bookings:", e); }
+      setBookingsLoading(false);
+    };
+    loadBookings();
+  }, [locationId]);
 
   const showToast = (msg) => {
     setToast(msg);
@@ -1879,6 +1904,9 @@ function FranchisePortal({ user, onLogout }) {
         <nav className="sidebar-nav">
           <button className={`nav-item ${page === 'timetable' ? 'active' : ''}`} onClick={() => setPage('timetable')}>
             <Icon path={icons.calendar} size={16} /> Timetable
+          </button>
+          <button className={`nav-item ${page === 'bookings' ? 'active' : ''}`} onClick={() => setPage('bookings')}>
+            <Icon path={icons.users} size={16} /> Bookings
           </button>
           <button className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => setPage('settings')}>
             <Icon path={icons.clock} size={16} /> Settings
@@ -1964,6 +1992,202 @@ function FranchisePortal({ user, onLogout }) {
                 </button>
               </div>
             </div>
+          </>
+        )}
+
+        {page === 'bookings' && (
+          <>
+            <div className="page-header">
+              <div className="page-header-left">
+                <div className="page-title" style={{ color: 'var(--fp-text)' }}>Upcoming Bookings</div>
+                <div className="page-desc" style={{ color: 'var(--fp-muted)' }}>View all assessment bookings for your centre.</div>
+              </div>
+            </div>
+
+            {bookingsLoading ? (
+              <div style={{ textAlign: 'center', padding: 48, color: 'var(--fp-muted)' }}>Loading bookings...</div>
+            ) : (() => {
+              // Build week view
+              const today = new Date();
+              const startOfWeek = new Date(today);
+              startOfWeek.setDate(today.getDate() - today.getDay() + 1 + calendarWeekOffset * 7); // Monday
+              const weekDays = [];
+              for (let i = 0; i < 7; i++) {
+                const d = new Date(startOfWeek);
+                d.setDate(startOfWeek.getDate() + i);
+                weekDays.push(d);
+              }
+              const weekLabel = `${weekDays[0].toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })} — ${weekDays[6].toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+
+              // Filter bookings for this week
+              const weekStart = weekDays[0].toISOString().split('T')[0];
+              const weekEnd = weekDays[6].toISOString().split('T')[0];
+              const weekBookings = bookings.filter(b => b.date >= weekStart && b.date <= weekEnd);
+
+              // Time slots for the grid (8am-6pm)
+              const hours = [];
+              for (let h = 8; h <= 18; h++) hours.push(h);
+
+              return (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+                    <button className="btn btn-ghost fp" style={{ padding: '8px 14px' }} onClick={() => setCalendarWeekOffset(w => w - 1)}>
+                      ← Previous
+                    </button>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)' }}>
+                      {weekLabel}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button className="btn btn-ghost fp" style={{ padding: '8px 14px' }} onClick={() => setCalendarWeekOffset(0)}>
+                        Today
+                      </button>
+                      <button className="btn btn-ghost fp" style={{ padding: '8px 14px' }} onClick={() => setCalendarWeekOffset(w => w + 1)}>
+                        Next →
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="card fp" style={{ padding: 0, overflow: 'hidden' }}>
+                    <div style={{ overflowX: 'auto' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '60px repeat(7, 1fr)', minWidth: 700 }}>
+                        {/* Header row */}
+                        <div style={{ padding: '12px 8px', borderBottom: '2px solid var(--fp-border)', borderRight: '1px solid var(--fp-border)', background: 'var(--fp-bg)' }} />
+                        {weekDays.map((d, i) => {
+                          const isToday = d.toDateString() === today.toDateString();
+                          return (
+                            <div key={i} style={{
+                              padding: '10px 8px', textAlign: 'center',
+                              borderBottom: '2px solid var(--fp-border)',
+                              borderRight: i < 6 ? '1px solid var(--fp-border)' : 'none',
+                              background: isToday ? 'rgba(109,203,202,0.1)' : 'var(--fp-bg)',
+                            }}>
+                              <div style={{ fontSize: 11, fontWeight: 600, color: isToday ? 'var(--fp-accent)' : 'var(--fp-muted)', textTransform: 'uppercase' }}>
+                                {d.toLocaleDateString('en-AU', { weekday: 'short' })}
+                              </div>
+                              <div style={{
+                                fontSize: 18, fontWeight: 800,
+                                color: isToday ? 'var(--fp-accent)' : 'var(--fp-text)',
+                                width: 32, height: 32, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                background: isToday ? 'var(--fp-accent)' : 'transparent',
+                                ...(isToday ? { color: '#fff' } : {}),
+                              }}>
+                                {d.getDate()}
+                              </div>
+                            </div>
+                          );
+                        })}
+
+                        {/* Time grid */}
+                        {hours.map(h => (
+                          <div key={h} style={{ display: 'contents' }}>
+                            <div style={{
+                              padding: '4px 8px', fontSize: 11, fontWeight: 600, color: 'var(--fp-muted)',
+                              borderRight: '1px solid var(--fp-border)', borderBottom: '1px solid var(--fp-border)',
+                              display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end',
+                              minHeight: 52,
+                            }}>
+                              {h > 12 ? h - 12 : h}{h >= 12 ? 'PM' : 'AM'}
+                            </div>
+                            {weekDays.map((d, di) => {
+                              const dateStr = d.toISOString().split('T')[0];
+                              const cellBookings = weekBookings.filter(b => {
+                                if (b.date !== dateStr) return false;
+                                const [bh] = b.time.split(':').map(Number);
+                                return bh === h;
+                              });
+                              const isToday = d.toDateString() === today.toDateString();
+                              return (
+                                <div key={di} style={{
+                                  borderRight: di < 6 ? '1px solid var(--fp-border)' : 'none',
+                                  borderBottom: '1px solid var(--fp-border)',
+                                  padding: 3, minHeight: 52, position: 'relative',
+                                  background: isToday ? 'rgba(109,203,202,0.03)' : 'transparent',
+                                }}>
+                                  {cellBookings.map((b, bi) => {
+                                    const [bh, bm] = b.time.split(':').map(Number);
+                                    const ampm = bh >= 12 ? 'PM' : 'AM';
+                                    const timeLabel = `${bh % 12 || 12}:${String(bm).padStart(2, '0')} ${ampm}`;
+                                    return (
+                                      <div key={bi} style={{
+                                        background: 'linear-gradient(135deg, #E25D25, #f0845a)',
+                                        color: '#fff', borderRadius: 6, padding: '6px 8px', fontSize: 11,
+                                        marginBottom: 2, cursor: 'default',
+                                        lineHeight: 1.3,
+                                      }} title={`${b.customerName} — ${b.customerEmail}\n${timeLabel} (40 min)\n${b.notes || ''}`}>
+                                        <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.customerName}</div>
+                                        <div style={{ opacity: 0.85, fontSize: 10 }}>{timeLabel}</div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Summary stats */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginTop: 20 }}>
+                    <div className="card fp" style={{ padding: '20px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--fp-accent)' }}>
+                        {weekBookings.length}
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 4 }}>This Week</div>
+                    </div>
+                    <div className="card fp" style={{ padding: '20px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--fp-accent)' }}>
+                        {bookings.filter(b => b.date >= today.toISOString().split('T')[0]).length}
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 4 }}>Total Upcoming</div>
+                    </div>
+                    <div className="card fp" style={{ padding: '20px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--fp-accent)' }}>
+                        {bookings.length}
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 4 }}>All Time</div>
+                    </div>
+                  </div>
+
+                  {/* Upcoming list */}
+                  {weekBookings.length > 0 && (
+                    <div style={{ marginTop: 20 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>This Week's Bookings</div>
+                      {weekBookings.sort((a, b) => a.date === b.date ? a.time.localeCompare(b.time) : a.date.localeCompare(b.date)).map(b => {
+                        const [bh, bm] = b.time.split(':').map(Number);
+                        const ampm = bh >= 12 ? 'PM' : 'AM';
+                        const timeLabel = `${bh % 12 || 12}:${String(bm).padStart(2, '0')} ${ampm}`;
+                        const dateObj = new Date(b.date + 'T00:00:00');
+                        const dateLabel = dateObj.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+                        return (
+                          <div key={b.id} className="card fp" style={{ padding: '14px 18px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 14 }}>
+                            <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(226,93,37,0.1)', color: '#E25D25', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                              <div style={{ fontSize: 14, fontWeight: 800, lineHeight: 1 }}>{dateObj.getDate()}</div>
+                              <div style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase' }}>{dateObj.toLocaleDateString('en-AU', { month: 'short' })}</div>
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--fp-text)' }}>{b.customerName}</div>
+                              <div style={{ fontSize: 12, color: 'var(--fp-muted)' }}>{dateLabel} at {timeLabel} · 40 min</div>
+                            </div>
+                            <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                              <a href={`mailto:${b.customerEmail}`} style={{ fontSize: 12, color: 'var(--fp-accent)', textDecoration: 'none', fontWeight: 600 }}>Email</a>
+                              <a href={`tel:${b.customerPhone?.replace(/\s/g, '')}`} style={{ fontSize: 12, color: 'var(--fp-accent)', textDecoration: 'none', fontWeight: 600 }}>Call</a>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {weekBookings.length === 0 && (
+                    <div style={{ textAlign: 'center', padding: 32, color: 'var(--fp-muted)', marginTop: 12, fontSize: 14 }}>
+                      No bookings this week. Bookings made via the assessment page will appear here.
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </>
         )}
 
