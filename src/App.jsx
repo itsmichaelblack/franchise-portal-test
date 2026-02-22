@@ -39,6 +39,21 @@ const INITIAL_AVAILABILITY = DAYS.map((day, i) => ({
   unavailable: [], // Array of { date: 'YYYY-MM-DD', reason: '' }
 }));
 
+const SERVICE_NAMES = [
+  'Free Assessment', 'One-on-One Tutoring', 'Small Group Tutoring', 'Homework Club',
+  'Exam Preparation', 'HSC Preparation', 'VCE Preparation', 'QCE Preparation',
+  'ATAR Preparation', 'Selective School Prep', 'Scholarship Prep', 'NAPLAN Preparation',
+  'Holiday Intensive', 'Reading Program', 'Writing Workshop', 'Maths Masterclass',
+  'Science Lab', 'English Workshop', 'Study Skills Workshop', 'Parent Information Session', 'Other',
+];
+
+const COUNTRIES_STATES = {
+  'Australia': ['New South Wales', 'Victoria', 'Queensland', 'Western Australia', 'South Australia', 'Tasmania', 'Northern Territory', 'ACT'],
+  'New Zealand': ['Auckland', 'Wellington', 'Canterbury', 'Waikato', 'Bay of Plenty', 'Otago'],
+  'United Kingdom': ['England', 'Scotland', 'Wales', 'Northern Ireland'],
+  'United States': ['California', 'New York', 'Texas', 'Florida', 'Illinois', 'Pennsylvania'],
+};
+
 // --- Icons ----------------------------------------------------------------------
 const Icon = ({ path, size = 20 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1210,7 +1225,9 @@ function HQPortal({ user, onLogout }) {
   // Services
   const [services, setServices] = useState([]);
   const [servicesLoading, setServicesLoading] = useState(false);
-  const [serviceModal, setServiceModal] = useState(null); // null | 'add' | { type: 'edit', svc } | { type: 'delete', svc }
+  const [serviceModal, setServiceModal] = useState(null);
+  const [svcFilterCountry, setSvcFilterCountry] = useState('all');
+  const [svcFilterState, setSvcFilterState] = useState('all');
 
   // Load HQ settings
   useEffect(() => {
@@ -1646,11 +1663,46 @@ function HQPortal({ user, onLogout }) {
             )}
           </div>
 
+          {/* Filters */}
+          {services.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>Filters:</span>
+              <select value={svcFilterCountry} onChange={e => { setSvcFilterCountry(e.target.value); setSvcFilterState('all'); }} style={{
+                padding: '7px 28px 7px 10px', borderRadius: 8, border: '1.5px solid var(--border)',
+                fontSize: 13, fontFamily: 'inherit', color: 'var(--text)', background: '#fff', cursor: 'pointer',
+                appearance: 'none',
+                backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+                backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center', backgroundSize: '14px',
+              }}>
+                <option value="all">All Countries</option>
+                {Object.keys(COUNTRIES_STATES).map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              {svcFilterCountry !== 'all' && (
+                <select value={svcFilterState} onChange={e => setSvcFilterState(e.target.value)} style={{
+                  padding: '7px 28px 7px 10px', borderRadius: 8, border: '1.5px solid var(--border)',
+                  fontSize: 13, fontFamily: 'inherit', color: 'var(--text)', background: '#fff', cursor: 'pointer',
+                  appearance: 'none',
+                  backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+                  backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center', backgroundSize: '14px',
+                }}>
+                  <option value="all">All States</option>
+                  {(COUNTRIES_STATES[svcFilterCountry] || []).map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              )}
+              {(svcFilterCountry !== 'all' || svcFilterState !== 'all') && (
+                <button onClick={() => { setSvcFilterCountry('all'); setSvcFilterState('all'); }} style={{
+                  padding: '7px 12px', borderRadius: 8, border: 'none', background: 'var(--orange-pale)',
+                  color: 'var(--orange)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+                }}>Clear Filters</button>
+              )}
+            </div>
+          )}
+
           {servicesLoading ? (
             <div style={{ textAlign: 'center', padding: 48, color: 'var(--text-muted)' }}>Loading services...</div>
           ) : services.length === 0 ? (
             <div style={{ textAlign: 'center', padding: 60 }}>
-              <div style={{ fontSize: 40, marginBottom: 12 }}>📋</div>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>&#x1F4CB;</div>
               <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>No services yet</div>
               <div style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 20 }}>Create your first service to get started.</div>
               {isMaster && (
@@ -1659,9 +1711,21 @@ function HQPortal({ user, onLogout }) {
                 </button>
               )}
             </div>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
-              {services.map(svc => (
+          ) : (() => {
+            let filtered = services;
+            if (svcFilterCountry !== 'all') {
+              filtered = filtered.filter(s => s.countries?.includes(svcFilterCountry));
+            }
+            if (svcFilterState !== 'all') {
+              filtered = filtered.filter(s => s.availability?.includes(svcFilterState));
+            }
+            return filtered.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 48, color: 'var(--text-muted)' }}>
+                No services match the selected filters.
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
+                {filtered.map(svc => (
                 <div key={svc.id} className="card hq" style={{ padding: 0, overflow: 'hidden' }}>
                   {svc.imageUrl ? (
                     <div style={{ height: 160, background: `url(${svc.imageUrl}) center/cover no-repeat`, borderBottom: '1px solid var(--border)' }} />
@@ -1699,7 +1763,8 @@ function HQPortal({ user, onLogout }) {
                 </div>
               ))}
             </div>
-          )}
+            );
+          })()}
         </>
       )}
 
@@ -1824,37 +1889,6 @@ function HQPortal({ user, onLogout }) {
 }
 
 // --- Service Modal --------------------------------------------------------------
-const SERVICE_NAMES = [
-  'Free Assessment',
-  'One-on-One Tutoring',
-  'Small Group Tutoring',
-  'Homework Club',
-  'Exam Preparation',
-  'HSC Preparation',
-  'VCE Preparation',
-  'QCE Preparation',
-  'ATAR Preparation',
-  'Selective School Prep',
-  'Scholarship Prep',
-  'NAPLAN Preparation',
-  'Holiday Intensive',
-  'Reading Program',
-  'Writing Workshop',
-  'Maths Masterclass',
-  'Science Lab',
-  'English Workshop',
-  'Study Skills Workshop',
-  'Parent Information Session',
-  'Other',
-];
-
-const COUNTRIES_STATES = {
-  'Australia': ['New South Wales', 'Victoria', 'Queensland', 'Western Australia', 'South Australia', 'Tasmania', 'Northern Territory', 'ACT'],
-  'New Zealand': ['Auckland', 'Wellington', 'Canterbury', 'Waikato', 'Bay of Plenty', 'Otago'],
-  'United Kingdom': ['England', 'Scotland', 'Wales', 'Northern Ireland'],
-  'United States': ['California', 'New York', 'Texas', 'Florida', 'Illinois', 'Pennsylvania'],
-};
-
 function ServiceModal({ editing, onSave, onClose }) {
   const [name, setName] = useState(editing?.name || '');
   const [customName, setCustomName] = useState(editing?.customName || '');
