@@ -655,7 +655,7 @@ export default function FindACentre() {
     }
   }, [locations, userPos]);
 
-  // ── Place/update user marker ───────────────────────────────────────────
+  // ── Place/update user marker and pan map to user ────────────────────────
   useEffect(() => {
     if (!mapInstance.current || !userPos || !window.google?.maps) return;
 
@@ -677,7 +677,34 @@ export default function FindACentre() {
         zIndex: 999,
       });
     }
-  }, [userPos]);
+
+    // Pan map to show user location + nearest centres
+    const locsWithCoords = locations.filter((l) => l.lat && l.lng);
+    if (locsWithCoords.length > 0) {
+      const bounds = new window.google.maps.LatLngBounds();
+      bounds.extend(userPos);
+
+      // Include up to 3 nearest locations
+      const nearby = locsWithCoords
+        .map((l) => ({ ...l, dist: distanceKm(userPos.lat, userPos.lng, l.lat, l.lng) }))
+        .sort((a, b) => a.dist - b.dist)
+        .slice(0, 3);
+
+      nearby.forEach((l) => bounds.extend({ lat: l.lat, lng: l.lng }));
+      mapInstance.current.fitBounds(bounds, { padding: 80 });
+
+      // Cap zoom so it doesn't go too close
+      const listener = mapInstance.current.addListener("idle", () => {
+        if (mapInstance.current.getZoom() > 13) {
+          mapInstance.current.setZoom(13);
+        }
+        window.google.maps.event.removeListener(listener);
+      });
+    } else {
+      mapInstance.current.panTo(userPos);
+      mapInstance.current.setZoom(12);
+    }
+  }, [userPos, locations]);
 
   // ── Init search autocomplete ───────────────────────────────────────────
   useEffect(() => {
