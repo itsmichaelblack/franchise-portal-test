@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { createLocation, updateLocation, deleteLocation, saveAvailability, getLocations, resendConfirmationEmail } from "./services/firestore";
 
-// ─── Simulated Data ───────────────────────────────────────────────────────────
+// --- Simulated Data -------------------------------------------------------------
 const SIMULATED_USERS = {
   hq: [
     { id: 1, email: "master@hq.com", password: "master123", role: "master_admin", name: "Sarah Chen" },
@@ -39,7 +39,7 @@ const INITIAL_AVAILABILITY = DAYS.map((day, i) => ({
   unavailable: [], // Array of { date: 'YYYY-MM-DD', reason: '' }
 }));
 
-// ─── Icons ────────────────────────────────────────────────────────────────────
+// --- Icons ----------------------------------------------------------------------
 const Icon = ({ path, size = 20 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d={path} />
@@ -67,7 +67,7 @@ const icons = {
   alert: "M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z M12 9v4 M12 17h.01",
 };
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+// --- Styles ---------------------------------------------------------------------
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
@@ -111,7 +111,7 @@ const styles = `
 
   .app { min-height: 100vh; }
 
-  /* ── Portal Selector ──────────────────────────────────────────── */
+  /* -- Portal Selector -------------------------------------------- */
   .portal-selector {
     min-height: 100vh;
     min-height: 100dvh;
@@ -246,7 +246,7 @@ const styles = `
     z-index: 1;
   }
 
-  /* ── Auth ─────────────────────────────────────────────────────── */
+  /* -- Auth ------------------------------------------------------- */
   .auth-page {
     min-height: 100vh;
     min-height: 100dvh;
@@ -342,7 +342,7 @@ const styles = `
     border: 1px solid #fecaca;
   }
 
-  /* ── Layout ───────────────────────────────────────────────────── */
+  /* -- Layout ----------------------------------------------------- */
   .layout {
     min-height: 100vh;
     min-height: 100dvh;
@@ -351,7 +351,7 @@ const styles = `
     background: var(--bg);
   }
 
-  /* ── Sidebar ──────────────────────────────────────────────────── */
+  /* -- Sidebar ---------------------------------------------------- */
   .sidebar {
     width: 256px;
     min-height: 100vh;
@@ -466,7 +466,7 @@ const styles = `
   .user-name { font-size: 13px; font-weight: 600; color: var(--text); }
   .user-role { font-size: 11px; color: var(--text-light); }
 
-  /* ── Main Content ─────────────────────────────────────────────── */
+  /* -- Main Content ----------------------------------------------- */
   .main {
     margin-left: 256px;
     flex: 1;
@@ -478,7 +478,7 @@ const styles = `
     max-width: calc(100vw - 256px);
   }
 
-  /* ── Mobile header ────────────────────────────────────────────── */
+  /* -- Mobile header ---------------------------------------------- */
   .mobile-header {
     display: none;
     align-items: center;
@@ -520,7 +520,7 @@ const styles = `
     z-index: 90;
   }
 
-  /* ── Page Header ──────────────────────────────────────────────── */
+  /* -- Page Header ------------------------------------------------ */
   .page-header {
     margin-bottom: 28px;
     display: flex;
@@ -538,7 +538,7 @@ const styles = `
   }
   .page-desc { font-size: 14px; color: var(--text-muted); margin-top: 4px; }
 
-  /* ── Stats ────────────────────────────────────────────────────── */
+  /* -- Stats ------------------------------------------------------ */
   .stats-row {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -564,7 +564,7 @@ const styles = `
   }
   .stat-label { font-size: 12px; font-weight: 600; color: var(--text-light); text-transform: uppercase; letter-spacing: 0.05em; }
 
-  /* ── Cards ────────────────────────────────────────────────────── */
+  /* -- Cards ------------------------------------------------------ */
   .card {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -574,7 +574,7 @@ const styles = `
     margin-bottom: 24px;
   }
 
-  /* ── Buttons ──────────────────────────────────────────────────── */
+  /* -- Buttons ---------------------------------------------------- */
   .btn {
     padding: 9px 18px;
     border-radius: var(--radius-sm);
@@ -602,7 +602,7 @@ const styles = `
   .btn-danger { background: var(--danger-pale); color: var(--danger); border: 1px solid #fecaca; }
   .btn-danger:hover { background: #fee2e2; }
 
-  /* ── Table ────────────────────────────────────────────────────── */
+  /* -- Table ------------------------------------------------------ */
   .table-wrap { overflow-x: auto; border-radius: var(--radius); }
   table { width: 100%; border-collapse: collapse; }
   th {
@@ -628,10 +628,10 @@ const styles = `
   tr:hover td { background: #fafafa; }
   .td-muted { font-size: 12px; color: var(--text-muted); }
 
-  /* ── Actions column ───────────────────────────────────────────── */
+  /* -- Actions column --------------------------------------------- */
   .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
-  /* ── Modal ────────────────────────────────────────────────────── */
+  /* -- Modal ------------------------------------------------------ */
   .modal-overlay {
     position: fixed; inset: 0;
     background: rgba(0,0,0,0.35);
@@ -665,7 +665,7 @@ const styles = `
     flex-wrap: wrap;
   }
 
-  /* ── Forms ────────────────────────────────────────────────────── */
+  /* -- Forms ------------------------------------------------------ */
   .form-group { margin-bottom: 18px; }
   .form-label {
     display: block;
@@ -704,11 +704,11 @@ const styles = `
     margin-top: 4px;
   }
 
-  /* ── Confirm modal ────────────────────────────────────────────── */
+  /* -- Confirm modal ---------------------------------------------- */
   .confirm-body { font-size: 14px; color: var(--text-muted); line-height: 1.6; margin-bottom: 4px; }
   .confirm-name { font-weight: 700; color: var(--text); }
 
-  /* ── Empty state ──────────────────────────────────────────────── */
+  /* -- Empty state ------------------------------------------------ */
   .empty-state {
     padding: 60px 20px;
     text-align: center;
@@ -716,7 +716,7 @@ const styles = `
   .empty-icon { font-size: 40px; margin-bottom: 12px; }
   .empty-text { font-size: 14px; color: var(--text-light); }
 
-  /* ── Toast ────────────────────────────────────────────────────── */
+  /* -- Toast ------------------------------------------------------ */
   .toast {
     position: fixed;
     bottom: 28px;
@@ -744,7 +744,7 @@ const styles = `
     to   { transform: translateX(-50%) translateY(0);   opacity: 1; }
   }
 
-  /* ── Timetable (Partner Portal) ───────────────────────────────── */
+  /* -- Timetable (Partner Portal) --------------------------------- */
   .timetable-row {
     display: flex;
     align-items: center;
@@ -802,7 +802,7 @@ const styles = `
   .time-input:focus { border-color: var(--teal-dark); }
   .time-separator { color: var(--text-light); font-size: 13px; }
 
-  /* ── Buffer chips ─────────────────────────────────────────────── */
+  /* -- Buffer chips ----------------------------------------------- */
   .buffer-chips { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
   .buffer-chip {
     padding: 8px 18px;
@@ -823,7 +823,7 @@ const styles = `
   }
   .buffer-chip:hover:not(.active) { border-color: var(--teal); color: var(--teal-dark); }
 
-  /* ── Info notice ──────────────────────────────────────────────── */
+  /* -- Info notice ------------------------------------------------ */
   .info-notice {
     padding: 12px 16px;
     border-radius: var(--radius-sm);
@@ -845,7 +845,7 @@ const styles = `
     color: var(--teal-dark);
   }
 
-  /* ── Section header inside card ───────────────────────────────── */
+  /* -- Section header inside card --------------------------------- */
   .card-header {
     display: flex;
     justify-content: space-between;
@@ -860,7 +860,7 @@ const styles = `
     color: var(--text);
   }
 
-  /* ── Role badge ───────────────────────────────────────────────── */
+  /* -- Role badge ------------------------------------------------- */
   .role-badge {
     font-size: 11px;
     font-weight: 700;
@@ -872,7 +872,7 @@ const styles = `
   .role-badge.master { background: var(--orange-pale); color: var(--orange); border: 1px solid var(--orange-border); }
   .role-badge.admin { background: var(--bg); color: var(--text-muted); border: 1px solid var(--border-dark); }
 
-  /* ── Responsive ───────────────────────────────────────────────── */
+  /* -- Responsive ------------------------------------------------- */
   @media (max-width: 768px) {
     .sidebar {
       transform: translateX(-100%);
@@ -1031,7 +1031,7 @@ const styles = `
   }
 `;
 
-// ─── App ──────────────────────────────────────────────────────────────────────
+// --- App ------------------------------------------------------------------------
 export default function App() {
   const [portal, setPortal] = useState(null); // 'hq' | 'fp'
   const [session, setSession] = useState(null);
@@ -1055,7 +1055,7 @@ export default function App() {
   );
 }
 
-// ─── Portal Selector ──────────────────────────────────────────────────────────
+// --- Portal Selector ------------------------------------------------------------
 function PortalSelector({ onSelect }) {
   return (
     <div className="portal-selector">
@@ -1087,7 +1087,7 @@ function PortalSelector({ onSelect }) {
   );
 }
 
-// ─── Auth Page ────────────────────────────────────────────────────────────────
+// --- Auth Page ------------------------------------------------------------------
 function AuthPage({ portal, onLogin, onBack }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -1187,7 +1187,7 @@ function AuthPage({ portal, onLogin, onBack }) {
   );
 }
 
-// ─── HQ Portal ────────────────────────────────────────────────────────────────
+// --- HQ Portal ------------------------------------------------------------------
 function HQPortal({ user, onLogout }) {
   const [page, setPage] = useState('locations');
   const [locations, setLocations] = useState([]);
@@ -1823,7 +1823,7 @@ function HQPortal({ user, onLogout }) {
   );
 }
 
-// ─── Service Modal ────────────────────────────────────────────────────────────
+// --- Service Modal --------------------------------------------------------------
 const SERVICE_NAMES = [
   'Free Assessment',
   'One-on-One Tutoring',
@@ -2101,7 +2101,8 @@ function ServiceModal({ editing, onSave, onClose }) {
   );
 }
 
-// ─── Location Modal ───────────────────────────────────────────────────────────
+// --- Location Modal -------------------------------------------------------------
+function LocationModal({ portal, editing, locations = [], onSave, onClose }) {
   const [name, setName] = useState(editing?.name || '');
   const [address, setAddress] = useState(editing?.address || '');
   const [countryCode, setCountryCode] = useState(editing ? editing.phone.split(' ')[0] : '+61');
@@ -2308,7 +2309,7 @@ function ServiceModal({ editing, onSave, onClose }) {
   );
 }
 
-// ─── Confirm Modal ────────────────────────────────────────────────────────────
+// --- Confirm Modal --------------------------------------------------------------
 function ConfirmModal({ portal, title, body, confirmLabel, danger, onConfirm, onClose }) {
   const t = portal;
   return (
@@ -2328,7 +2329,7 @@ function ConfirmModal({ portal, title, body, confirmLabel, danger, onConfirm, on
   );
 }
 
-// ─── Users Page ──────────────────────────────────────────────────────────────
+// --- Users Page ----------------------------------------------------------------
 function UsersPage({ currentUser, hqUsers, setHqUsers, loading, setLoading, onInvite, onRemove }) {
   useEffect(() => {
     const loadUsers = async () => {
@@ -2412,7 +2413,7 @@ function UsersPage({ currentUser, hqUsers, setHqUsers, loading, setLoading, onIn
   );
 }
 
-// ─── Invite User Modal ────────────────────────────────────────────────────────
+// --- Invite User Modal ----------------------------------------------------------
 function InviteUserModal({ onClose, onInvited }) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -2475,7 +2476,7 @@ function InviteUserModal({ onClose, onInvited }) {
   );
 }
 
-// ─── Franchise Partner Portal ─────────────────────────────────────────────────
+// --- Franchise Partner Portal ---------------------------------------------------
 function FranchisePortal({ user, onLogout }) {
   const [page, setPage] = useState('timetable');
   const [availability, setAvailability] = useState(INITIAL_AVAILABILITY);
@@ -2627,7 +2628,7 @@ function FranchisePortal({ user, onLogout }) {
       </aside>
 
       <main className="main fp">
-        {/* ═══ TIMETABLE PAGE ═══ */}
+        {/* === TIMETABLE PAGE === */}
         {page === 'timetable' && (
           <>
             <div className="page-header">
@@ -2806,7 +2807,7 @@ function FranchisePortal({ user, onLogout }) {
           </>
         )}
 
-        {/* ═══ BOOKINGS PAGE ═══ */}
+        {/* === BOOKINGS PAGE === */}
         {page === 'bookings' && (
           <>
             <div className="page-header">
@@ -3034,7 +3035,7 @@ function FranchisePortal({ user, onLogout }) {
           </>
         )}
 
-        {/* ═══ SETTINGS PAGE ═══ */}
+        {/* === SETTINGS PAGE === */}
         {page === 'settings' && (
           <>
             <div className="page-header">
