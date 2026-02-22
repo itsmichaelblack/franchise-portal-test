@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { createLocation, updateLocation, deleteLocation, saveAvailability, getLocations } from "./services/firestore";
+import { createLocation, updateLocation, deleteLocation, saveAvailability, getLocations, resendConfirmationEmail } from "./services/firestore";
 
 // ─── Simulated Data ───────────────────────────────────────────────────────────
 const SIMULATED_USERS = {
@@ -1097,7 +1097,7 @@ function AuthPage({ portal, onLogin, onBack }) {
     setLoading(true);
     try {
       const { signInWithPopup, GoogleAuthProvider, getAuth } = await import('firebase/auth');
-      const { doc, getDoc } = await import('firebase/firestore');
+      const { doc, getDoc, setDoc, collection, getDocs, query, where, serverTimestamp } = await import('firebase/firestore');
       const firebaseModule = await import('./firebase.js');
       const auth = firebaseModule.auth;
       const db = firebaseModule.db;
@@ -1105,7 +1105,30 @@ function AuthPage({ portal, onLogin, onBack }) {
       const result = await signInWithPopup(auth, provider);
       const firebaseUser = result.user;
       const profileSnap = await getDoc(doc(db, 'users', firebaseUser.uid));
+
       if (!profileSnap.exists()) {
+        // Check if this user's email matches any location (franchise partner auto-registration)
+        if (portal === 'fp') {
+          const locQuery = query(collection(db, 'locations'), where('email', '==', firebaseUser.email));
+          const locSnap = await getDocs(locQuery);
+
+          if (!locSnap.empty) {
+            const matchedLoc = locSnap.docs[0];
+            // Auto-create franchise partner profile
+            const partnerProfile = {
+              name: firebaseUser.displayName || matchedLoc.data().name,
+              email: firebaseUser.email,
+              role: 'franchise_partner',
+              locationId: matchedLoc.id,
+              updatedAt: serverTimestamp(),
+            };
+            await setDoc(doc(db, 'users', firebaseUser.uid), partnerProfile);
+            onLogin({ ...partnerProfile, uid: firebaseUser.uid });
+            setLoading(false);
+            return;
+          }
+        }
+
         setError('Your account has not been set up yet. Please contact HQ.');
         await auth.signOut();
         setLoading(false);
@@ -1196,12 +1219,16 @@ function HQPortal({ user, onLogout }) {
     setTimeout(() => setToast(null), 4000);
   };
 
-  const handleSave = async (data, editingId) => {
+  const handleSave = async (data, editingId, resendEmail) => {
     if (editingId) {
       try {
         await updateLocation(editingId, data);
         setLocations(prev => prev.map(l => l.id === editingId ? { ...l, ...data } : l));
-        showToast(`✓ Location "${data.name}" updated.`);
+        if (resendEmail) {
+          showToast(`✓ Location "${data.name}" updated & confirmation email re-sent to ${data.email}.`);
+        } else {
+          showToast(`✓ Location "${data.name}" updated.`);
+        }
       } catch (err) {
         console.error("Failed to update location:", err);
         showToast(`✗ Failed to update location. Please try again.`);
@@ -1446,6 +1473,8 @@ function LocationModal({ portal, editing, onSave, onClose }) {
   const [countryCode, setCountryCode] = useState(editing ? editing.phone.split(' ')[0] : '+61');
   const [phoneNum, setPhoneNum] = useState(editing ? editing.phone.split(' ').slice(1).join(' ') : '');
   const [email, setEmail] = useState(editing?.email || '');
+  const [resendEmail, setResendEmail] = useState(false);
+  const [resending, setResending] = useState(false);
   const t = portal;
   const addressInputRef = useRef(null);
   const autocompleteRef = useRef(null);
@@ -1472,9 +1501,18 @@ function LocationModal({ portal, editing, onSave, onClose }) {
     };
   }, []);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!name || !address || !email) return;
-    onSave({ name, address, phone: `${countryCode} ${phoneNum}`, email }, editing?.id);
+    setResending(true);
+    if (editing && resendEmail) {
+      try {
+        await resendConfirmationEmail(editing.id);
+      } catch (err) {
+        console.error("Failed to resend confirmation email:", err);
+      }
+    }
+    onSave({ name, address, phone: `${countryCode} ${phoneNum}`, email }, editing?.id, resendEmail);
+    setResending(false);
   };
 
   return (
@@ -1515,11 +1553,28 @@ function LocationModal({ portal, editing, onSave, onClose }) {
           <input className={`form-input ${t}`} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="location@franchise.com" />
         </div>
 
+        {editing && (
+          <div className="form-group" style={{ marginTop: 4 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', padding: '12px 14px', borderRadius: 'var(--radius-sm)', background: resendEmail ? 'var(--orange-pale)' : 'var(--bg)', border: resendEmail ? '1.5px solid var(--orange-border)' : '1.5px solid var(--border)', transition: 'all 0.15s' }}>
+              <input
+                type="checkbox"
+                checked={resendEmail}
+                onChange={e => setResendEmail(e.target.checked)}
+                style={{ width: 18, height: 18, accentColor: 'var(--orange)', cursor: 'pointer' }}
+              />
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>Re-send confirmation email</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Send a portal access email to {email || 'the franchise partner'}</div>
+              </div>
+            </label>
+          </div>
+        )}
+
         <div className="modal-actions">
           <button className={`btn btn-ghost ${t}`} onClick={onClose}>Cancel</button>
-          <button className={`btn btn-primary ${t}`} onClick={handleSave}>
+          <button className={`btn btn-primary ${t}`} onClick={handleSave} disabled={resending}>
             <Icon path={icons.check} size={14} />
-            {editing ? 'Save Changes' : 'Create Location'}
+            {resending ? 'Saving...' : editing ? 'Save Changes' : 'Create Location'}
           </button>
         </div>
       </div>
