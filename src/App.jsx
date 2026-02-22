@@ -1995,39 +1995,75 @@ function FranchisePortal({ user, onLogout }) {
             <div className="card fp" style={{ padding: '28px' }}>
               <div style={{ fontWeight: 700, color: 'var(--fp-text)', fontSize: 15, marginBottom: 20 }}>Weekly Schedule</div>
               <div className="timetable">
-                {availability.map((day, i) => (
-                  <div className="day-row fp" key={day.day}>
-                    <div className="day-toggle">
-                      <div
-                        className={`toggle-track ${day.enabled ? 'on' : 'off'}`}
-                        onClick={() => toggleDay(i)}
-                      >
-                        <div className={`toggle-thumb ${day.enabled ? 'on' : 'off'}`} />
+                {availability.map((day, i) => {
+                  // Generate half-hour time options
+                  const timeOptions = [];
+                  for (let h = 6; h <= 22; h++) {
+                    for (let m = 0; m < 60; m += 30) {
+                      const val = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+                      const ampm = h >= 12 ? 'PM' : 'AM';
+                      const label = `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`;
+                      timeOptions.push({ val, label });
+                    }
+                  }
+                  return (
+                    <div key={day.day} style={{
+                      display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0',
+                      borderBottom: i < availability.length - 1 ? '1px solid var(--fp-border)' : 'none',
+                    }}>
+                      <div style={{ width: 100, flexShrink: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: day.enabled ? 'var(--fp-text)' : 'var(--fp-muted)' }}>{day.day}</div>
                       </div>
+                      <div
+                        onClick={() => toggleDay(i)}
+                        style={{
+                          padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                          background: day.enabled ? 'rgba(109,203,202,0.12)' : 'rgba(226,93,37,0.08)',
+                          color: day.enabled ? '#3d9695' : '#c0552a',
+                          border: `1px solid ${day.enabled ? 'rgba(109,203,202,0.3)' : 'rgba(226,93,37,0.2)'}`,
+                          userSelect: 'none', transition: 'all 0.15s', flexShrink: 0,
+                        }}
+                      >
+                        {day.enabled ? 'Available' : 'Unavailable'}
+                      </div>
+                      {day.enabled ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+                          <select
+                            value={day.start}
+                            onChange={e => updateTime(i, 'start', e.target.value)}
+                            style={{
+                              padding: '10px 32px 10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)',
+                              background: '#fff', fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
+                              color: 'var(--fp-text)', outline: 'none', cursor: 'pointer',
+                              appearance: 'none',
+                              backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+                              backgroundRepeat: 'no-repeat', backgroundPosition: 'right 8px center', backgroundSize: '16px',
+                            }}
+                          >
+                            {timeOptions.map(t => <option key={t.val} value={t.val}>{t.label}</option>)}
+                          </select>
+                          <span style={{ color: 'var(--fp-muted)', fontSize: 14 }}>→</span>
+                          <select
+                            value={day.end}
+                            onChange={e => updateTime(i, 'end', e.target.value)}
+                            style={{
+                              padding: '10px 32px 10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)',
+                              background: '#fff', fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
+                              color: 'var(--fp-text)', outline: 'none', cursor: 'pointer',
+                              appearance: 'none',
+                              backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+                              backgroundRepeat: 'no-repeat', backgroundPosition: 'right 8px center', backgroundSize: '16px',
+                            }}
+                          >
+                            {timeOptions.map(t => <option key={t.val} value={t.val}>{t.label}</option>)}
+                          </select>
+                        </div>
+                      ) : (
+                        <div style={{ flex: 1, fontSize: 13, color: 'var(--fp-muted)', fontStyle: 'italic' }}>No bookings on this day</div>
+                      )}
                     </div>
-                    <div className={`day-name fp${day.enabled ? '' : ' disabled'}`}>{day.day}</div>
-                    <div className="time-inputs">
-                      <input
-                        type="time"
-                        className="time-input fp"
-                        value={day.start}
-                        disabled={!day.enabled}
-                        onChange={e => updateTime(i, 'start', e.target.value)}
-                      />
-                      <span className="time-sep fp">→</span>
-                      <input
-                        type="time"
-                        className="time-input fp"
-                        value={day.end}
-                        disabled={!day.enabled}
-                        onChange={e => updateTime(i, 'end', e.target.value)}
-                      />
-                    </div>
-                    {!day.enabled && (
-                      <span style={{ fontSize: 12, color: 'var(--fp-muted)', marginLeft: 'auto' }}>Unavailable</span>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
