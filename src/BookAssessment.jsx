@@ -665,7 +665,11 @@ export default function BookAssessment() {
     if (!availability?.schedule) return false;
     const dayName = DAYS_MAP[date.getDay()];
     const daySched = availability.schedule.find((s) => s.day === dayName);
-    return !!daySched?.enabled;
+    if (!daySched?.enabled) return false;
+    // Check if this specific date is blocked
+    const dateStr = date.toISOString().split("T")[0];
+    if (availability.unavailableDates?.some(u => u.date === dateStr)) return false;
+    return true;
   };
 
   const timeSlots = getTimeSlotsForDate(selectedDate);
