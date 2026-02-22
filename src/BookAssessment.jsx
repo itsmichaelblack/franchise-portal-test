@@ -547,6 +547,17 @@ export default function BookAssessment() {
         const snap = await getDocs(q);
         const locs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         setLocations(locs);
+
+        // Check for ?location=ID parameter to auto-select and skip step 1
+        const params = new URLSearchParams(window.location.search);
+        const preselectedId = params.get("location");
+        if (preselectedId) {
+          const match = locs.find((l) => l.id === preselectedId);
+          if (match) {
+            setSelectedLocation(match);
+            setStep(2);
+          }
+        }
       } catch (e) { console.error(e); }
       setLoading(false);
     };
