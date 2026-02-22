@@ -94,8 +94,8 @@ service cloud.firestore {
         && request.resource.data.status == 'confirmed'
         && request.resource.data.duration == 40;
 
-      // HQ admins and franchise partners can read bookings
-      allow read: if isAdmin() || (isAuth() && isFranchisePartner(resource.data.locationId));
+      // Public can read bookings (needed to check available slots)
+      allow read: if true;
 
       // HQ admins can update/delete bookings
       allow update, delete: if isAdmin();
