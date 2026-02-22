@@ -204,3 +204,153 @@ exports.onInviteCreated = functions.firestore
       console.error("SendGrid error:", err?.response?.body ?? err);
     }
   });
+
+// ── Trigger: send confirmation emails when a booking is created ─────────────
+exports.onBookingCreated = functions.firestore
+  .document("bookings/{bookingId}")
+  .onCreate(async (snap, context) => {
+    const booking = snap.data();
+    const bookingId = context.params.bookingId;
+
+    const apiKey = functions.config().sendgrid?.api_key;
+    if (!apiKey) {
+      console.error("SendGrid API key not set.");
+      return;
+    }
+    sgMail.setApiKey(apiKey);
+
+    // Format date and time
+    const dateObj = new Date(booking.date + "T00:00:00");
+    const dateStr = dateObj.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+    const [h, m] = booking.time.split(":").map(Number);
+    const ampm = h >= 12 ? "PM" : "AM";
+    const timeStr = `${h % 12 || 12}:${String(m).padStart(2, "0")} ${ampm}`;
+    const refCode = bookingId.slice(0, 8).toUpperCase();
+
+    // ── 1. Email to the CUSTOMER ─────────────────────────────────────────
+    const customerHtml = `
+      <!DOCTYPE html><html><head><meta charset="utf-8" />
+      <style>
+        body { margin: 0; padding: 0; background: #f7f8fa; font-family: Arial, sans-serif; }
+        .wrapper { max-width: 560px; margin: 40px auto; background: #ffffff; border-radius: 16px; overflow: hidden; }
+        .header { background: linear-gradient(135deg, #E25D25 0%, #c94f1f 100%); padding: 40px; text-align: center; }
+        .header h1 { color: #ffffff; font-size: 24px; margin: 0; }
+        .header p { color: rgba(255,255,255,0.8); font-size: 14px; margin: 8px 0 0; }
+        .body { padding: 40px; }
+        .body p { color: #444; font-size: 15px; line-height: 1.7; }
+        .detail-card { background: #fdf0ea; border-radius: 12px; padding: 24px; margin: 24px 0; }
+        .detail-row { margin-bottom: 10px; font-size: 14px; color: #333; }
+        .detail-label { font-weight: 600; color: #E25D25; }
+        .ref { font-size: 12px; color: #999; margin-top: 16px; }
+        .cta { text-align: center; margin: 28px 0; }
+        .cta a { display: inline-block; background: #E25D25; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 10px; font-weight: 600; font-size: 14px; }
+        .footer { background: #f7f8fa; padding: 24px; text-align: center; font-size: 12px; color: #999; }
+      </style></head>
+      <body>
+        <div class="wrapper">
+          <div class="header">
+            <h1>Assessment Confirmed!</h1>
+            <p>Your booking is all set</p>
+          </div>
+          <div class="body">
+            <p>Hi ${booking.customerName},</p>
+            <p>Your free 40-minute assessment has been confirmed. Here are your booking details:</p>
+            <div class="detail-card">
+              <div class="detail-row"><span class="detail-label">Location: </span>${booking.locationName}</div>
+              <div class="detail-row"><span class="detail-label">Address: </span>${booking.locationAddress}</div>
+              <div class="detail-row"><span class="detail-label">Date: </span>${dateStr}</div>
+              <div class="detail-row"><span class="detail-label">Time: </span>${timeStr} (40 minutes)</div>
+              <div class="ref">Booking Ref: ${refCode}</div>
+            </div>
+            <p>Please arrive a few minutes early. If you need to reschedule, contact your centre directly.</p>
+            <div class="cta"><a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(booking.locationAddress)}">Get Directions →</a></div>
+          </div>
+          <div class="footer">&copy; ${new Date().getFullYear()} Success Tutoring. All rights reserved.</div>
+        </div>
+      </body></html>
+    `;
+
+    // ── 2. Email to the FRANCHISE PARTNER ────────────────────────────────
+    const locationDoc = await getFirestore().doc(`locations/${booking.locationId}`).get();
+    const locationEmail = locationDoc.exists ? locationDoc.data().email : null;
+
+    const partnerHtml = `
+      <!DOCTYPE html><html><head><meta charset="utf-8" />
+      <style>
+        body { margin: 0; padding: 0; background: #f7f8fa; font-family: Arial, sans-serif; }
+        .wrapper { max-width: 560px; margin: 40px auto; background: #ffffff; border-radius: 16px; overflow: hidden; }
+        .header { background: linear-gradient(135deg, #6dcbca 0%, #4fa8a7 100%); padding: 40px; text-align: center; }
+        .header h1 { color: #ffffff; font-size: 24px; margin: 0; }
+        .header p { color: rgba(255,255,255,0.8); font-size: 14px; margin: 8px 0 0; }
+        .body { padding: 40px; }
+        .body p { color: #444; font-size: 15px; line-height: 1.7; }
+        .detail-card { background: #f0fafa; border-radius: 12px; padding: 24px; margin: 24px 0; }
+        .detail-row { margin-bottom: 10px; font-size: 14px; color: #333; }
+        .detail-label { font-weight: 600; color: #4fa8a7; }
+        .ref { font-size: 12px; color: #999; margin-top: 16px; }
+        .cta { text-align: center; margin: 28px 0; }
+        .cta a { display: inline-block; background: #6dcbca; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 10px; font-weight: 600; font-size: 14px; }
+        .footer { background: #f7f8fa; padding: 24px; text-align: center; font-size: 12px; color: #999; }
+      </style></head>
+      <body>
+        <div class="wrapper">
+          <div class="header">
+            <h1>New Assessment Booking!</h1>
+            <p>A customer has booked an assessment at your centre</p>
+          </div>
+          <div class="body">
+            <p>Hi there,</p>
+            <p>A new assessment has been booked at <strong>${booking.locationName}</strong>:</p>
+            <div class="detail-card">
+              <div class="detail-row"><span class="detail-label">Customer: </span>${booking.customerName}</div>
+              <div class="detail-row"><span class="detail-label">Email: </span>${booking.customerEmail}</div>
+              <div class="detail-row"><span class="detail-label">Phone: </span>${booking.customerPhone}</div>
+              <div class="detail-row"><span class="detail-label">Date: </span>${dateStr}</div>
+              <div class="detail-row"><span class="detail-label">Time: </span>${timeStr} (40 minutes)</div>
+              ${booking.notes ? `<div class="detail-row"><span class="detail-label">Notes: </span>${booking.notes}</div>` : ""}
+              <div class="ref">Booking Ref: ${refCode}</div>
+            </div>
+            <p>Log in to your Partner Portal to view all upcoming bookings.</p>
+            <div class="cta"><a href="${PORTAL_URL}">Open Partner Portal &rarr;</a></div>
+          </div>
+          <div class="footer">&copy; ${new Date().getFullYear()} Success Tutoring. All rights reserved.</div>
+        </div>
+      </body></html>
+    `;
+
+    try {
+      await sgMail.send({
+        to: booking.customerEmail,
+        from: { email: FROM_EMAIL, name: FROM_NAME },
+        subject: `Assessment Confirmed — ${dateStr} at ${timeStr}`,
+        text: `Hi ${booking.customerName}, your assessment at ${booking.locationName} on ${dateStr} at ${timeStr} is confirmed. Ref: ${refCode}`,
+        html: customerHtml,
+      });
+      console.log(`Customer email sent to ${booking.customerEmail}`);
+    } catch (err) {
+      console.error("Customer email error:", err?.response?.body ?? err);
+    }
+
+    if (locationEmail) {
+      try {
+        await sgMail.send({
+          to: locationEmail,
+          from: { email: FROM_EMAIL, name: FROM_NAME },
+          subject: `New Booking — ${booking.customerName} on ${dateStr} at ${timeStr}`,
+          text: `New assessment at ${booking.locationName}. Customer: ${booking.customerName}, ${dateStr} at ${timeStr}. Ref: ${refCode}`,
+          html: partnerHtml,
+        });
+        console.log(`Partner email sent to ${locationEmail}`);
+      } catch (err) {
+        console.error("Partner email error:", err?.response?.body ?? err);
+      }
+    }
+
+    try {
+      await getFirestore().doc(`bookings/${bookingId}`).update({
+        emailsSentAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error("Failed to update booking:", err);
+    }
+  });
