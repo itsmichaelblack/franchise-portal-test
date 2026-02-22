@@ -1945,10 +1945,11 @@ function FranchisePortal({ user, onLogout }) {
     return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
   };
 
-  // Current time position for the time indicator line
-  const now = new Date();
-  const currentHour = now.getHours();
-  const currentMin = now.getMinutes();
+  // Current time in the franchise location's timezone
+  const nowInTz = new Date(new Date().toLocaleString('en-US', { timeZone: timezone }));
+  const currentHour = nowInTz.getHours();
+  const currentMin = nowInTz.getMinutes();
+  const todayInTz = nowInTz; // "today" based on the location timezone
 
   return (
     <div className="layout fp" style={{ background: 'var(--fp-bg)' }}>
@@ -2139,7 +2140,7 @@ function FranchisePortal({ user, onLogout }) {
             {bookingsLoading ? (
               <div style={{ textAlign: 'center', padding: 48, color: 'var(--fp-muted)' }}>Loading bookings...</div>
             ) : (() => {
-              const today = new Date();
+              const today = todayInTz;
               const startOfWeek = new Date(today);
               startOfWeek.setDate(today.getDate() - today.getDay() + 1 + calendarWeekOffset * 7);
               const weekDays = [];
