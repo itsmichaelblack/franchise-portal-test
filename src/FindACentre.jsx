@@ -396,6 +396,40 @@ const css = `
     font-size: 13px !important;
     font-weight: 600 !important;
   }
+
+  /* ── InfoWindow styling ──────────────────────────────────── */
+  .gm-style-iw button.gm-ui-hover-effect {
+    top: 4px !important;
+    right: 4px !important;
+    width: 28px !important;
+    height: 28px !important;
+    border-radius: 50% !important;
+    background: #f3f4f6 !important;
+    opacity: 1 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+  .gm-style-iw button.gm-ui-hover-effect > span {
+    margin: 0 !important;
+    background-color: #6b7280 !important;
+    width: 16px !important;
+    height: 16px !important;
+  }
+  .gm-style-iw button.gm-ui-hover-effect:hover {
+    background: #e5e7eb !important;
+  }
+  .gm-style .gm-style-iw-c {
+    border-radius: 14px !important;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.12) !important;
+    padding: 4px !important;
+  }
+  .gm-style .gm-style-iw-d {
+    overflow: auto !important;
+  }
+  .gm-style .gm-style-iw-tc::after {
+    background: #fff !important;
+  }
 `;
 
 // ─── Main Component ──────────────────────────────────────────────────────────
@@ -519,23 +553,22 @@ export default function FindACentre() {
         title: loc.name,
         icon: {
           url: "/logo-sticker.png",
-          scaledSize: new window.google.maps.Size(40, 40),
-          anchor: new window.google.maps.Point(20, 20),
+          scaledSize: new window.google.maps.Size(32, 32),
+          anchor: new window.google.maps.Point(16, 16),
         },
       });
 
       marker.addListener("click", () => {
         setSelectedLoc(loc.id);
-        const dist = loc.distance ? ` - ${loc.distance.toFixed(1)} km away` : "";
+        const dist = loc.distance ? `${loc.distance.toFixed(1)} km away` : "";
         infoWindowRef.current.setContent(`
-          <div style="font-family:'Plus Jakarta Sans',sans-serif;padding:6px 4px;max-width:260px;position:relative;">
-            <button onclick="document.querySelector('.gm-ui-hover-effect').click()" style="position:absolute;top:-2px;right:-2px;width:26px;height:26px;border:none;background:rgba(0,0,0,0.06);border-radius:50%;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;color:#6b7280;line-height:1;" title="Close">&times;</button>
-            <div style="font-weight:800;font-size:14px;color:#1a1d23;margin-bottom:4px;padding-right:28px;">${loc.name}</div>
-            <div style="font-size:12px;color:#6b7280;line-height:1.4;margin-bottom:4px;">${loc.address}</div>
-            ${loc.phone ? `<div style="font-size:12px;color:#6b7280;">${loc.phone}</div>` : ""}
-            ${dist ? `<div style="font-size:12px;font-weight:700;color:#E25D25;margin-top:4px;">${dist.replace(" - ", "")}</div>` : ""}
+          <div style="font-family:'Plus Jakarta Sans',sans-serif;padding:8px 6px;max-width:270px;">
+            <div style="font-weight:800;font-size:15px;color:#1a1d23;margin-bottom:6px;padding-right:8px;">${loc.name}</div>
+            <div style="font-size:12px;color:#6b7280;line-height:1.5;margin-bottom:6px;">${loc.address}</div>
+            ${loc.phone ? `<div style="font-size:12px;color:#6b7280;margin-bottom:4px;">${loc.phone}</div>` : ""}
+            ${dist ? `<div style="font-size:12px;font-weight:700;color:#E25D25;margin-top:6px;">${dist}</div>` : ""}
             <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(loc.address)}" target="_blank"
-              style="display:inline-block;margin-top:8px;padding:6px 14px;border-radius:6px;background:#E25D25;color:#fff;font-size:12px;font-weight:700;text-decoration:none;">
+              style="display:inline-block;margin-top:10px;padding:8px 16px;border-radius:8px;background:#E25D25;color:#fff;font-size:12px;font-weight:700;text-decoration:none;">
               Get Directions
             </a>
           </div>
@@ -554,22 +587,23 @@ export default function FindACentre() {
         markers: markersRef.current,
         renderer: {
           render: ({ count, position }) => {
+            const size = Math.min(22 + Math.log2(count) * 6, 40);
             return new window.google.maps.Marker({
               position,
               label: {
                 text: String(count),
                 color: "#fff",
                 fontWeight: "800",
-                fontSize: "13px",
+                fontSize: "12px",
                 fontFamily: "Plus Jakarta Sans, sans-serif",
               },
               icon: {
-                path: "M-20,0a20,20 0 1,0 40,0a20,20 0 1,0 -40,0",
+                path: window.google.maps.SymbolPath.CIRCLE,
                 fillColor: "#E25D25",
-                fillOpacity: 1,
+                fillOpacity: 0.9,
                 strokeColor: "#fff",
-                strokeWeight: 3,
-                scale: 1,
+                strokeWeight: 2.5,
+                scale: size,
                 labelOrigin: new window.google.maps.Point(0, 0),
               },
               zIndex: Number(window.google.maps.Marker.MAX_ZINDEX) + count,
