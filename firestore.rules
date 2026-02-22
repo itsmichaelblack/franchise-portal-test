@@ -74,16 +74,31 @@ service cloud.firestore {
     // ── Availability collection ─────────────────────────────────────────────
     // Each document ID matches a locationId
     match /availability/{locationId} {
-      // HQ admins can read all availability
-      allow read: if isAdmin();
+      // Public read access (needed for booking page)
+      allow read: if true;
 
-      // Franchise partners can read and write their own availability
-      allow read, write: if isFranchisePartner(locationId)
+      // Franchise partners can write their own availability
+      allow write: if isFranchisePartner(locationId)
         && request.resource.data.keys().hasAll(['schedule', 'timezone', 'bufferMinutes'])
         && request.resource.data.bufferMinutes is int
         && request.resource.data.bufferMinutes >= 0
         && request.resource.data.bufferMinutes <= 120
         && request.resource.data.timezone is string;
+    }
+
+    // ── Bookings collection ──────────────────────────────────────────────
+    match /bookings/{bookingId} {
+      // Anyone can create a booking (public booking form)
+      allow create: if true
+        && request.resource.data.keys().hasAll(['locationId', 'date', 'time', 'duration', 'customerName', 'customerEmail', 'customerPhone', 'status', 'createdAt'])
+        && request.resource.data.status == 'confirmed'
+        && request.resource.data.duration == 40;
+
+      // HQ admins and franchise partners can read bookings
+      allow read: if isAdmin() || (isAuth() && isFranchisePartner(resource.data.locationId));
+
+      // HQ admins can update/delete bookings
+      allow update, delete: if isAdmin();
     }
 
     // ── Deny everything else ────────────────────────────────────────────────
