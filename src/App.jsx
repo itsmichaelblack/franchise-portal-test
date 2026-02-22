@@ -1199,6 +1199,43 @@ function HQPortal({ user, onLogout }) {
   const [usersLoading, setUsersLoading] = useState(false);
   const [userModal, setUserModal] = useState(null); // null | 'invite' | { type:'remove', u }
 
+  // HQ Settings
+  const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [settingsLoading, setSettingsLoading] = useState(false);
+
+  // Load HQ settings
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const { doc, getDoc } = await import('firebase/firestore');
+        const { db } = await import('./firebase.js');
+        const snap = await getDoc(doc(db, 'settings', 'hq'));
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data.youtubeUrl) setYoutubeUrl(data.youtubeUrl);
+        }
+      } catch (e) { console.error("Failed to load settings:", e); }
+    };
+    loadSettings();
+  }, []);
+
+  const handleSaveSettings = async () => {
+    setSettingsLoading(true);
+    try {
+      const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
+      const { db } = await import('./firebase.js');
+      await setDoc(doc(db, 'settings', 'hq'), {
+        youtubeUrl,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      showToast('✓ Settings saved.');
+    } catch (err) {
+      console.error("Failed to save settings:", err);
+      showToast('✗ Failed to save settings.');
+    }
+    setSettingsLoading(false);
+  };
+
   useEffect(() => {
     const loadLocations = async () => {
       setLocationsLoading(true);
@@ -1289,6 +1326,10 @@ function HQPortal({ user, onLogout }) {
               <Icon path={icons.users} size={16} /> Users
             </button>
           )}
+          <div className="nav-section-label">Configuration</div>
+          <button className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => setPage('settings')}>
+            <Icon path={icons.clock} size={16} /> Settings
+          </button>
         </nav>
         <div className="sidebar-footer">
           <div className="user-info">
@@ -1406,6 +1447,47 @@ function HQPortal({ user, onLogout }) {
           onInvite={() => setUserModal('invite')}
           onRemove={(u) => setUserModal({ type: 'remove', u })}
         />
+      )}
+
+      {/* Settings Page */}
+      {page === 'settings' && (
+        <>
+          <div className="page-header">
+            <div className="page-header-left">
+              <div className="page-title">Settings</div>
+              <div className="page-desc">Configure booking page and portal-wide settings.</div>
+            </div>
+          </div>
+          <div className="settings-grid">
+            <div className="setting-card hq" style={{ gridColumn: '1 / -1' }}>
+              <div className="setting-label-row">
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)', marginBottom: 4 }}>Confirmation Page Video</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>YouTube video shown to customers after they book an assessment. Paste the full YouTube URL.</div>
+                </div>
+              </div>
+              <div style={{ marginTop: 14 }}>
+                <input
+                  className="form-input hq"
+                  style={{ width: '100%' }}
+                  value={youtubeUrl}
+                  onChange={e => setYoutubeUrl(e.target.value)}
+                  placeholder="https://www.youtube.com/watch?v=..."
+                />
+              </div>
+              {youtubeUrl && (
+                <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
+                  Preview: <a href={youtubeUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--orange)' }}>{youtubeUrl}</a>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="save-bar" style={{ marginTop: 16 }}>
+            <button className="btn btn-primary hq" onClick={handleSaveSettings} disabled={settingsLoading}>
+              <Icon path={icons.check} size={14} /> {settingsLoading ? 'Saving...' : 'Save Settings'}
+            </button>
+          </div>
+        </>
       )}
 
       </main>
