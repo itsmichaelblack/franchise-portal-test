@@ -84,6 +84,9 @@ service cloud.firestore {
         && request.resource.data.bufferMinutes >= 0
         && request.resource.data.bufferMinutes <= 120
         && request.resource.data.timezone is string;
+
+      // Admins can also write availability
+      allow write: if isAdmin();
     }
 
     // ── Bookings collection ──────────────────────────────────────────────
