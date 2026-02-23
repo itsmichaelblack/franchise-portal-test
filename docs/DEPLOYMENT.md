@@ -188,6 +188,8 @@ Deploy when security rules change:
 firebase deploy --only firestore:rules
 ```
 
+Rules can also be updated directly in the Firebase Console under Firestore Database > Rules > Publish.
+
 Rules enforce role-based access across all collections. See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full rules breakdown.
 
 ### Indexes (`firestore.indexes.json`)
@@ -198,12 +200,17 @@ Deploy when composite indexes change:
 firebase deploy --only firestore:indexes
 ```
 
+Indexes can also be created manually in the Firebase Console under Firestore Database > Indexes > Add Index.
+
 Current composite indexes:
 
-| Collection     | Fields                              |
-| -------------- | ----------------------------------- |
-| `locations`    | `createdAt` DESC, `name` ASC       |
-| `availability` | `locationId` ASC, `updatedAt` DESC |
+| Collection       | Fields                                  | Query Scope |
+| ---------------- | --------------------------------------- | ----------- |
+| `locations`      | `createdAt` DESC, `name` ASC           | Collection  |
+| `availability`   | `locationId` ASC, `updatedAt` DESC     | Collection  |
+| `activity_logs`  | `locationId` ASC, `timestamp` DESC     | Collection  |
+
+The `activity_logs` index is required for the User Logs tab to query logs by location sorted by most recent first.
 
 ---
 
@@ -234,6 +241,7 @@ firebase deploy --only functions
 | Firestore usage       | Firebase Console > Firestore                           |
 | Auth users            | Firebase Console > Authentication                      |
 | Error tracking        | Google Cloud Console > Error Reporting                 |
+| Activity logs         | HQ Portal > Location > View > User Logs tab            |
 
 ---
 
