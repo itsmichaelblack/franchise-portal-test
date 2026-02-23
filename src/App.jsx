@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { createLocation, updateLocation, deleteLocation, saveAvailability, getLocations, resendConfirmationEmail } from "./services/firestore";
+import { createLocation, updateLocation, deleteLocation, saveAvailability, getLocations, resendConfirmationEmail, logUserAction, getActivityLogs } from "./services/firestore";
 
 // --- Simulated Data -------------------------------------------------------------
 const SIMULATED_USERS = {
@@ -1044,6 +1044,178 @@ const styles = `
       padding: 20px 16px;
     }
   }
+
+  /* --- Location Detail View --- */
+  .location-detail-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .location-detail-header .back-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: none;
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s;
+  }
+  .location-detail-header .back-btn:hover {
+    background: var(--bg);
+    color: var(--text);
+    border-color: var(--text-muted);
+  }
+  .location-detail-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid var(--border);
+    margin-bottom: 24px;
+  }
+  .location-detail-tabs .tab-btn {
+    padding: 12px 20px;
+    border: none;
+    background: none;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-family: inherit;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .location-detail-tabs .tab-btn:hover {
+    color: var(--text);
+    background: var(--bg);
+  }
+  .location-detail-tabs .tab-btn.active {
+    color: var(--orange);
+    border-bottom-color: var(--orange);
+  }
+
+  /* --- User Logs --- */
+  .logs-container { display: flex; flex-direction: column; gap: 12px; }
+  .log-user-card {
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: #fff;
+    overflow: hidden;
+    transition: border-color 0.15s;
+  }
+  .log-user-card:hover { border-color: var(--orange-border); }
+  .log-user-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    cursor: pointer;
+    gap: 16px;
+  }
+  .log-user-header:hover { background: var(--bg); }
+  .log-user-info { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 0; }
+  .log-user-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--orange);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .log-user-details { flex: 1; min-width: 0; }
+  .log-user-name { font-size: 14px; font-weight: 700; color: var(--text); }
+  .log-user-email { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .log-user-meta { display: flex; gap: 16px; align-items: center; flex-shrink: 0; }
+  .log-meta-item { text-align: right; }
+  .log-meta-label { font-size: 11px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
+  .log-meta-value { font-size: 13px; color: var(--text); font-weight: 600; margin-top: 2px; }
+  .log-summary-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 700;
+    background: var(--orange-pale);
+    color: var(--orange);
+  }
+  .log-expand-icon {
+    font-size: 18px;
+    color: var(--text-muted);
+    transition: transform 0.2s;
+    flex-shrink: 0;
+  }
+  .log-expand-icon.open { transform: rotate(180deg); }
+  .log-detail-panel {
+    border-top: 1px solid var(--border);
+    padding: 0;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+  .log-detail-table { width: 100%; border-collapse: collapse; }
+  .log-detail-table th {
+    text-align: left;
+    padding: 10px 20px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+  }
+  .log-detail-table td {
+    padding: 10px 20px;
+    font-size: 13px;
+    color: var(--text);
+    border-bottom: 1px solid var(--border);
+  }
+  .log-detail-table tr:last-child td { border-bottom: none; }
+  .log-action-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .log-action-badge.sign_in { background: rgba(16,185,129,0.1); color: #059669; }
+  .log-action-badge.sign_out { background: rgba(107,114,128,0.1); color: #6b7280; }
+  .log-action-badge.edit { background: rgba(59,130,246,0.1); color: #3b82f6; }
+  .log-action-badge.create { background: rgba(139,92,246,0.1); color: #8b5cf6; }
+  .log-action-badge.delete { background: rgba(239,68,68,0.1); color: #dc2626; }
+  .log-action-badge.update { background: rgba(217,119,6,0.1); color: #d97706; }
+  .log-action-badge.view { background: rgba(107,114,128,0.1); color: #6b7280; }
+  .log-action-badge.default { background: var(--bg); color: var(--text-muted); }
+  .log-empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-muted);
+  }
+  .log-empty-icon { font-size: 40px; margin-bottom: 12px; }
+  .log-empty-text { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+  .log-empty-desc { font-size: 14px; color: var(--text-muted); }
+  .log-filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
 `;
 
 // --- App ------------------------------------------------------------------------
@@ -1139,6 +1311,16 @@ function AuthPage({ portal, onLogin, onBack }) {
               updatedAt: serverTimestamp(),
             };
             await setDoc(doc(db, 'users', firebaseUser.uid), partnerProfile);
+            // Log sign-in
+            logUserAction({
+              locationId: matchedLoc.id,
+              userId: firebaseUser.uid,
+              userName: partnerProfile.name,
+              userEmail: firebaseUser.email,
+              action: 'sign_in',
+              category: 'auth',
+              details: 'First sign-in (auto-registered as franchise partner)',
+            });
             onLogin({ ...partnerProfile, uid: firebaseUser.uid });
             setLoading(false);
             return;
@@ -1164,6 +1346,30 @@ function AuthPage({ portal, onLogin, onBack }) {
         return;
       }
       onLogin({ ...profile, uid: firebaseUser.uid, name: profile.name || firebaseUser.displayName });
+      // Log sign-in for franchise partners
+      if (profile.role === 'franchise_partner' && profile.locationId) {
+        logUserAction({
+          locationId: profile.locationId,
+          userId: firebaseUser.uid,
+          userName: profile.name || firebaseUser.displayName,
+          userEmail: firebaseUser.email || profile.email,
+          action: 'sign_in',
+          category: 'auth',
+          details: 'Signed in to franchise portal',
+        });
+      }
+      // Log sign-in for HQ users (log against a generic "hq" location marker)
+      if (profile.role === 'master_admin' || profile.role === 'admin') {
+        logUserAction({
+          locationId: 'hq',
+          userId: firebaseUser.uid,
+          userName: profile.name || firebaseUser.displayName,
+          userEmail: firebaseUser.email || profile.email,
+          action: 'sign_in',
+          category: 'auth',
+          details: `Signed in to HQ portal as ${profile.role}`,
+        });
+      }
     } catch (err) {
       if (err.code === 'auth/popup-closed-by-user') {
         setError('Sign-in was cancelled. Please try again.');
@@ -1212,6 +1418,10 @@ function HQPortal({ user, onLogout }) {
   const [filterCountry, setFilterCountry] = useState('all');
   const [filterState, setFilterState] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
+
+  // Location detail view state
+  const [selectedLocation, setSelectedLocation] = useState(null); // null or location object
+  const [locationTab, setLocationTab] = useState('details'); // 'details' | 'user_logs'
 
   const isMaster = user.role === 'master_admin';
   const [hqUsers, setHqUsers] = useState([]);
@@ -1336,6 +1546,20 @@ function HQPortal({ user, onLogout }) {
       try {
         await updateLocation(editingId, data);
         setLocations(prev => prev.map(l => l.id === editingId ? { ...l, ...data } : l));
+        // Update selectedLocation if it's the one being edited
+        if (selectedLocation?.id === editingId) {
+          setSelectedLocation(prev => ({ ...prev, ...data }));
+        }
+        // Log the edit action
+        logUserAction({
+          locationId: editingId,
+          userId: user.uid || user.id?.toString(),
+          userName: user.name,
+          userEmail: user.email,
+          action: 'edit',
+          category: 'location',
+          details: `Updated location "${data.name}"`,
+        });
         if (resendEmail) {
           showToast(`✓ Location "${data.name}" updated & confirmation email re-sent to ${data.email}.`);
         } else {
@@ -1350,6 +1574,16 @@ function HQPortal({ user, onLogout }) {
         const newId = await createLocation(data);
         const newLoc = { ...data, id: newId, createdAt: new Date().toISOString().split('T')[0] };
         setLocations(prev => [...prev, newLoc]);
+        // Log the create action
+        logUserAction({
+          locationId: newId,
+          userId: user.uid || user.id?.toString(),
+          userName: user.name,
+          userEmail: user.email,
+          action: 'create',
+          category: 'location',
+          details: `Created location "${data.name}"`,
+        });
         showToast(`✓ Location created. Confirmation email sent to ${data.email} via SendGrid.`);
       } catch (err) {
         console.error("Failed to create location:", err);
@@ -1364,6 +1598,18 @@ function HQPortal({ user, onLogout }) {
     try {
       await deleteLocation(id);
       setLocations(prev => prev.filter(l => l.id !== id));
+      // Close detail view if deleting the currently viewed location
+      if (selectedLocation?.id === id) setSelectedLocation(null);
+      // Log the delete action
+      logUserAction({
+        locationId: id,
+        userId: user.uid || user.id?.toString(),
+        userName: user.name,
+        userEmail: user.email,
+        action: 'delete',
+        category: 'location',
+        details: `Deleted location "${loc.name}"`,
+      });
       showToast(`Location "${loc.name}" deleted.`);
     } catch (err) {
       console.error("Failed to delete location:", err);
@@ -1393,7 +1639,7 @@ function HQPortal({ user, onLogout }) {
           </div>
         </div>
         <nav className="sidebar-nav">
-          <button className={`nav-item ${page === 'locations' ? 'active' : ''}`} onClick={() => setPage('locations')}>
+          <button className={`nav-item ${page === 'locations' ? 'active' : ''}`} onClick={() => { setPage('locations'); setSelectedLocation(null); }}>
             <Icon path={icons.map} size={16} /> Locations
           </button>
           {isMaster && (
@@ -1424,7 +1670,7 @@ function HQPortal({ user, onLogout }) {
       </aside>
 
       <main className="main hq">
-        {(page === 'locations' || page === 'users') && (
+        {(page === 'locations' || page === 'users') && !selectedLocation && (
         <div className="page-header">
           <div className="page-header-left">
             <div className="page-title">{page === 'users' ? 'HQ Users' : 'Franchise Locations'}</div>
@@ -1444,7 +1690,7 @@ function HQPortal({ user, onLogout }) {
         </div>
         )}
 
-        {page === 'locations' && (<>
+        {page === 'locations' && !selectedLocation && (<>
         <div className="stats-row">
           <div className="stat-card hq">
             <div className="stat-num" style={{color:"var(--orange)"}}>{locations.length}</div>
@@ -1609,6 +1855,9 @@ function HQPortal({ user, onLogout }) {
                         <td className="hq"><span className="td-muted hq">{loc.createdAt}</span></td>
                         <td className="hq">
                           <div className="actions">
+                            <button className="btn btn-ghost hq" style={{ padding: '7px 12px' }} onClick={() => { setSelectedLocation(loc); setLocationTab('details'); }}>
+                              <Icon path={icons.building} size={13} /> View
+                            </button>
                             <button className="btn btn-ghost hq" style={{ padding: '7px 12px' }} onClick={() => setModal({ type: 'edit', loc })}>
                               <Icon path={icons.edit} size={13} /> Edit
                             </button>
@@ -1634,6 +1883,22 @@ function HQPortal({ user, onLogout }) {
           );
         })()}
         </>)}
+
+        {/* Location Detail View */}
+        {page === 'locations' && selectedLocation && (
+          <LocationDetailView
+            location={selectedLocation}
+            locations={locations}
+            user={user}
+            isMaster={isMaster}
+            onBack={() => setSelectedLocation(null)}
+            locationTab={locationTab}
+            setLocationTab={setLocationTab}
+            onEdit={(loc) => setModal({ type: 'edit', loc })}
+            onDelete={(loc) => setModal({ type: 'delete', loc })}
+            showToast={showToast}
+          />
+        )}
 
       {/* Users Page */}
       {page === 'users' && isMaster && (
@@ -2136,6 +2401,367 @@ function ServiceModal({ editing, onSave, onClose }) {
 }
 
 // --- Location Modal -------------------------------------------------------------
+// --- Location Detail View --------------------------------------------------------
+function LocationDetailView({ location, locations, user, isMaster, onBack, locationTab, setLocationTab, onEdit, onDelete, showToast }) {
+  const statusBadge = (s) => {
+    const cfg = {
+      open: { label: 'Open', bg: 'rgba(16,185,129,0.1)', color: '#059669', border: 'rgba(16,185,129,0.2)' },
+      coming_soon: { label: 'Coming Soon', bg: 'rgba(217,119,6,0.1)', color: '#d97706', border: 'rgba(217,119,6,0.2)' },
+      temporary_closed: { label: 'Temp. Closed', bg: 'rgba(239,68,68,0.1)', color: '#dc2626', border: 'rgba(239,68,68,0.2)' },
+    };
+    const c = cfg[s] || cfg.open;
+    return (
+      <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700, background: c.bg, color: c.color, border: `1px solid ${c.border}` }}>
+        {c.label}
+      </span>
+    );
+  };
+
+  return (
+    <>
+      {/* Header with back button */}
+      <div className="location-detail-header">
+        <button className="back-btn" onClick={onBack}>
+          <span style={{ fontSize: 16 }}>←</span> Back to Locations
+        </button>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--text)' }}>{location.name}</div>
+            {statusBadge(location.status || 'open')}
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>{location.address}</div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-ghost hq" style={{ padding: '8px 14px' }} onClick={() => onEdit(location)}>
+            <Icon path={icons.edit} size={13} /> Edit
+          </button>
+          {isMaster && (
+            <button className="btn btn-danger" style={{ padding: '8px 14px' }} onClick={() => onDelete(location)}>
+              <Icon path={icons.trash} size={13} /> Delete
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="location-detail-tabs">
+        <button className={`tab-btn ${locationTab === 'details' ? 'active' : ''}`} onClick={() => setLocationTab('details')}>
+          <Icon path={icons.building} size={15} /> Details
+        </button>
+        <button className={`tab-btn ${locationTab === 'user_logs' ? 'active' : ''}`} onClick={() => setLocationTab('user_logs')}>
+          <Icon path={icons.clock} size={15} /> User Logs
+        </button>
+      </div>
+
+      {/* Details Tab */}
+      {locationTab === 'details' && (
+        <div className="card hq" style={{ padding: 24 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px 40px' }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 6 }}>Location Name</div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>{location.name}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 6 }}>Status</div>
+              <div>{statusBadge(location.status || 'open')}</div>
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 6 }}>Address</div>
+              <div style={{ fontSize: 15, color: 'var(--text)' }}>{location.address}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 6 }}>Contact Number</div>
+              <div style={{ fontSize: 15, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Icon path={icons.phone} size={14} /> {location.phone}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 6 }}>Email Address</div>
+              <div style={{ fontSize: 15, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Icon path={icons.mail} size={14} /> {location.email}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 6 }}>Created</div>
+              <div style={{ fontSize: 15, color: 'var(--text)' }}>{location.createdAt || '—'}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 6 }}>Location ID</div>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{location.id}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* User Logs Tab */}
+      {locationTab === 'user_logs' && (
+        <UserLogsTab locationId={location.id} locationName={location.name} />
+      )}
+    </>
+  );
+}
+
+// --- User Logs Tab ---------------------------------------------------------------
+function UserLogsTab({ locationId, locationName }) {
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedUser, setExpandedUser] = useState(null);
+  const [filterAction, setFilterAction] = useState('all');
+
+  useEffect(() => {
+    const loadLogs = async () => {
+      setLoading(true);
+      try {
+        const data = await getActivityLogs(locationId);
+        setLogs(data);
+      } catch (e) {
+        console.error("Failed to load activity logs:", e);
+      }
+      setLoading(false);
+    };
+    loadLogs();
+  }, [locationId]);
+
+  // Group logs by user
+  const userMap = {};
+  logs.forEach(log => {
+    const key = log.userEmail || log.userId;
+    if (!userMap[key]) {
+      userMap[key] = {
+        userId: log.userId,
+        userName: log.userName || 'Unknown User',
+        userEmail: log.userEmail || '',
+        logs: [],
+        lastActivity: null,
+        lastSignIn: null,
+        actionCounts: {},
+      };
+    }
+    userMap[key].logs.push(log);
+
+    // Track timestamps
+    const ts = log.timestamp?.toDate ? log.timestamp.toDate() : log.timestamp ? new Date(log.timestamp) : null;
+    if (ts) {
+      if (!userMap[key].lastActivity || ts > userMap[key].lastActivity) {
+        userMap[key].lastActivity = ts;
+      }
+      if (log.action === 'sign_in' && (!userMap[key].lastSignIn || ts > userMap[key].lastSignIn)) {
+        userMap[key].lastSignIn = ts;
+      }
+    }
+
+    // Count actions
+    const action = log.action || 'other';
+    userMap[key].actionCounts[action] = (userMap[key].actionCounts[action] || 0) + 1;
+  });
+
+  const users = Object.values(userMap).sort((a, b) => {
+    const aTime = a.lastActivity?.getTime() || 0;
+    const bTime = b.lastActivity?.getTime() || 0;
+    return bTime - aTime;
+  });
+
+  // Filter logs for the expanded user
+  const getFilteredLogs = (userLogs) => {
+    if (filterAction === 'all') return userLogs;
+    return userLogs.filter(l => l.action === filterAction);
+  };
+
+  const formatUTCDate = (date) => {
+    if (!date) return '—';
+    return date.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+  };
+
+  const formatRelativeTime = (date) => {
+    if (!date) return '';
+    const now = new Date();
+    const diff = now - date;
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    if (days < 30) return `${days}d ago`;
+    return `${Math.floor(days / 30)}mo ago`;
+  };
+
+  const getActionBadgeClass = (action) => {
+    const map = { sign_in: 'sign_in', sign_out: 'sign_out', edit: 'edit', create: 'create', delete: 'delete', update: 'update', view: 'view' };
+    return map[action] || 'default';
+  };
+
+  const getActionLabel = (action) => {
+    const map = { sign_in: 'Sign In', sign_out: 'Sign Out', edit: 'Edit', create: 'Create', delete: 'Delete', update: 'Update', view: 'View', resend_email: 'Resend Email' };
+    return map[action] || action;
+  };
+
+  const buildSummary = (actionCounts) => {
+    const parts = [];
+    if (actionCounts.sign_in) parts.push(`${actionCounts.sign_in} sign-in${actionCounts.sign_in > 1 ? 's' : ''}`);
+    if (actionCounts.edit) parts.push(`${actionCounts.edit} edit${actionCounts.edit > 1 ? 's' : ''}`);
+    if (actionCounts.create) parts.push(`${actionCounts.create} create${actionCounts.create > 1 ? 's' : ''}`);
+    if (actionCounts.delete) parts.push(`${actionCounts.delete} deletion${actionCounts.delete > 1 ? 's' : ''}`);
+    const otherCount = Object.entries(actionCounts).filter(([k]) => !['sign_in', 'edit', 'create', 'delete'].includes(k)).reduce((s, [, v]) => s + v, 0);
+    if (otherCount) parts.push(`${otherCount} other`);
+    return parts.join(', ') || 'No actions';
+  };
+
+  // Gather unique action types for filter
+  const allActionTypes = [...new Set(logs.map(l => l.action).filter(Boolean))].sort();
+
+  if (loading) {
+    return (
+      <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
+        <div style={{ fontSize: 24, marginBottom: 8 }}>⏳</div>
+        Loading user logs...
+      </div>
+    );
+  }
+
+  if (users.length === 0) {
+    return (
+      <div className="log-empty">
+        <div className="log-empty-icon">📋</div>
+        <div className="log-empty-text">No user activity logs yet</div>
+        <div className="log-empty-desc">
+          Activity logs will appear here as users interact with this location.
+          <br />
+          Logged events include sign-ins, edits, creates, deletions, and more.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* Summary stats */}
+      <div className="stats-row" style={{ marginBottom: 20 }}>
+        <div className="stat-card hq">
+          <div className="stat-num" style={{ color: 'var(--orange)' }}>{users.length}</div>
+          <div className="stat-label">Active Users</div>
+        </div>
+        <div className="stat-card hq">
+          <div className="stat-num" style={{ color: 'var(--orange)' }}>{logs.length}</div>
+          <div className="stat-label">Total Actions</div>
+        </div>
+        <div className="stat-card hq">
+          <div className="stat-num" style={{ color: '#059669', fontSize: 14, paddingTop: 6 }}>
+            {users[0]?.lastActivity ? formatRelativeTime(users[0].lastActivity) : '—'}
+          </div>
+          <div className="stat-label">Last Activity</div>
+        </div>
+      </div>
+
+      {/* Filter */}
+      {allActionTypes.length > 1 && (
+        <div className="log-filter-bar">
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>Filter by action:</span>
+          <select value={filterAction} onChange={e => setFilterAction(e.target.value)} style={{
+            padding: '7px 28px 7px 10px', borderRadius: 8, border: '1.5px solid var(--border)',
+            fontSize: 13, fontFamily: 'inherit', color: 'var(--text)', background: '#fff', cursor: 'pointer',
+            appearance: 'none',
+            backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+            backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center', backgroundSize: '14px',
+          }}>
+            <option value="all">All Actions</option>
+            {allActionTypes.map(a => <option key={a} value={a}>{getActionLabel(a)}</option>)}
+          </select>
+          {filterAction !== 'all' && (
+            <button onClick={() => setFilterAction('all')} style={{
+              padding: '7px 12px', borderRadius: 8, border: 'none', background: 'var(--orange-pale)',
+              color: 'var(--orange)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+            }}>Clear</button>
+          )}
+        </div>
+      )}
+
+      {/* User cards */}
+      <div className="logs-container">
+        {users.map((u) => {
+          const isExpanded = expandedUser === u.userId;
+          const filteredLogs = getFilteredLogs(u.logs);
+
+          return (
+            <div key={u.userId} className="log-user-card">
+              {/* Collapsed header */}
+              <div className="log-user-header" onClick={() => setExpandedUser(isExpanded ? null : u.userId)}>
+                <div className="log-user-info">
+                  <div className="log-user-avatar">
+                    {u.userName?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || '?'}
+                  </div>
+                  <div className="log-user-details">
+                    <div className="log-user-name">{u.userName}</div>
+                    <div className="log-user-email">{u.userEmail}</div>
+                  </div>
+                </div>
+                <div className="log-user-meta">
+                  <div className="log-meta-item">
+                    <div className="log-meta-label">Last Sign In</div>
+                    <div className="log-meta-value">{u.lastSignIn ? formatUTCDate(u.lastSignIn) : '—'}</div>
+                  </div>
+                  <div className="log-meta-item">
+                    <div className="log-meta-label">Last Activity</div>
+                    <div className="log-meta-value">{formatUTCDate(u.lastActivity)}</div>
+                  </div>
+                  <div className="log-meta-item">
+                    <div className="log-meta-label">Summary</div>
+                    <div className="log-meta-value">
+                      <span className="log-summary-badge">{buildSummary(u.actionCounts)}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className={`log-expand-icon ${isExpanded ? 'open' : ''}`}>▾</div>
+              </div>
+
+              {/* Expanded detail panel */}
+              {isExpanded && (
+                <div className="log-detail-panel">
+                  {filteredLogs.length === 0 ? (
+                    <div style={{ padding: '24px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+                      No actions match the selected filter.
+                    </div>
+                  ) : (
+                    <table className="log-detail-table">
+                      <thead>
+                        <tr>
+                          <th>Timestamp (UTC)</th>
+                          <th>Action</th>
+                          <th>Category</th>
+                          <th>Details</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredLogs.map((log) => {
+                          const ts = log.timestamp?.toDate ? log.timestamp.toDate() : log.timestamp ? new Date(log.timestamp) : null;
+                          return (
+                            <tr key={log.id}>
+                              <td style={{ whiteSpace: 'nowrap', fontFamily: 'monospace', fontSize: 12 }}>
+                                {ts ? formatUTCDate(ts) : '—'}
+                              </td>
+                              <td>
+                                <span className={`log-action-badge ${getActionBadgeClass(log.action)}`}>
+                                  {getActionLabel(log.action)}
+                                </span>
+                              </td>
+                              <td style={{ color: 'var(--text-muted)' }}>{log.category || '—'}</td>
+                              <td>{log.details || '—'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function LocationModal({ portal, editing, locations = [], onSave, onClose }) {
   const [name, setName] = useState(editing?.name || '');
   const [address, setAddress] = useState(editing?.address || '');
