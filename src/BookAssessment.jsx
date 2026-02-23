@@ -93,6 +93,7 @@ const ic = {
   mail: "M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z M22 6l-10 7L2 6",
   phone: "M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.15 13a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.06 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z",
   back: "M15 18l-6-6 6-6",
+  next: "M9 18l6-6-6-6",
   forward: "M9 18l6-6-6-6",
   star: "M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z",
 };
@@ -300,13 +301,42 @@ const css = `
   .ba-loc-dist { font-size: 13px; font-weight: 700; color: #E25D25; flex-shrink: 0; margin-top: 2px; }
 
   /* ── Step 2: Date/Time picker ────────────────────────── */
+  .ba-date-slider {
+    position: relative;
+    margin-bottom: 24px;
+  }
   .ba-date-row {
     display: flex;
     gap: 8px;
-    margin-bottom: 24px;
     overflow-x: auto;
     padding-bottom: 4px;
+    scroll-behavior: smooth;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
   }
+  .ba-date-row::-webkit-scrollbar { display: none; }
+  .ba-date-arrow {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid #e8eaed;
+    background: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    font-family: inherit;
+    color: #6b7280;
+    transition: all 0.15s;
+  }
+  .ba-date-arrow:hover { background: #f9fafb; border-color: #E25D25; color: #E25D25; }
+  .ba-date-arrow.left { left: -12px; }
+  .ba-date-arrow.right { right: -12px; }
   .ba-date-btn {
     min-width: 80px;
     padding: 14px 12px;
@@ -521,6 +551,7 @@ export default function BookAssessment() {
   const [selectedLocation, setSelectedLocation] = useState(null);
   const searchRef = useRef(null);
   const acRef = useRef(null);
+  const dateRowRef = useRef(null);
 
   // Step 2 state
   const [availability, setAvailability] = useState(null);
@@ -930,23 +961,31 @@ export default function BookAssessment() {
                     <div className="ba-time-label">
                       <Icon d={ic.calendar} size={15} /> Select a date
                     </div>
-                    <div className="ba-date-row">
-                      {dates.map((d) => {
-                        const available = isDayAvailable(d);
-                        const isSelected = selectedDate?.toDateString() === d.toDateString();
-                        return (
-                          <button
-                            key={d.toISOString()}
-                            className={`ba-date-btn ${isSelected ? "selected" : ""} ${!available ? "disabled" : ""}`}
-                            onClick={() => { if (available) { setSelectedDate(d); setSelectedTime(null); } }}
-                            disabled={!available}
-                          >
-                            <div className="ba-date-day">{d.toLocaleDateString("en-AU", { weekday: "short" })}</div>
-                            <div className="ba-date-num">{d.getDate()}</div>
-                            <div className="ba-date-month">{d.toLocaleDateString("en-AU", { month: "short" })}</div>
-                          </button>
-                        );
-                      })}
+                    <div className="ba-date-slider">
+                      <button className="ba-date-arrow left" onClick={() => { if (dateRowRef.current) dateRowRef.current.scrollLeft -= 200; }}>
+                        <Icon d={ic.back} size={14} />
+                      </button>
+                      <div className="ba-date-row" ref={dateRowRef}>
+                        {dates.map((d) => {
+                          const available = isDayAvailable(d);
+                          const isSelected = selectedDate?.toDateString() === d.toDateString();
+                          return (
+                            <button
+                              key={d.toISOString()}
+                              className={`ba-date-btn ${isSelected ? "selected" : ""} ${!available ? "disabled" : ""}`}
+                              onClick={() => { if (available) { setSelectedDate(d); setSelectedTime(null); } }}
+                              disabled={!available}
+                            >
+                              <div className="ba-date-day">{d.toLocaleDateString("en-AU", { weekday: "short" })}</div>
+                              <div className="ba-date-num">{d.getDate()}</div>
+                              <div className="ba-date-month">{d.toLocaleDateString("en-AU", { month: "short" })}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <button className="ba-date-arrow right" onClick={() => { if (dateRowRef.current) dateRowRef.current.scrollLeft += 200; }}>
+                        <Icon d={ic.next} size={14} />
+                      </button>
                     </div>
 
                     {selectedDate && (
