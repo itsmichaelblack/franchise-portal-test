@@ -29,6 +29,39 @@ Accessible to users with `master_admin` or `admin` roles.
 - **Resend confirmation email** to a location's email address.
 - **Automatic geocoding**: Address is converted to lat/lng for map display.
 
+### Location Detail View
+
+Click **"View"** on any location row to open a dedicated detail page with two tabs:
+
+**Details Tab**
+- Read-only overview of the location's information: name, status, address, phone, email, created date, and location ID.
+- Quick-access Edit and Delete buttons in the header.
+
+**User Logs Tab**
+- Displays all user activity for that location, grouped by user.
+- Each user card shows:
+  - User avatar, name, and email.
+  - **Last Sign In** timestamp in UTC.
+  - **Last Activity** timestamp in UTC.
+  - **Summary badge** — e.g. "3 sign-ins, 2 edits, 1 create".
+- Click a user card to **expand** a detailed action log table with:
+  - Timestamp (UTC).
+  - Action type (color-coded badge: Sign In, Edit, Create, Delete, etc.).
+  - Category (auth, location, etc.).
+  - Human-readable description.
+- **Filter by action type** (e.g. show only sign-ins or edits).
+- **Summary stats** at the top: Active Users count, Total Actions count, most recent activity.
+
+#### Events Currently Logged
+
+| Event | Action | Category | Trigger |
+|-------|--------|----------|---------|
+| Franchise partner signs in | `sign_in` | `auth` | Google sign-in (AuthPage) |
+| HQ user signs in | `sign_in` | `auth` | Google sign-in (AuthPage) |
+| Location created | `create` | `location` | Create location (HQPortal) |
+| Location edited | `edit` | `location` | Edit location (HQPortal) |
+| Location deleted | `delete` | `location` | Delete location (HQPortal) |
+
 ### User Management (Master Admin Only)
 
 - **View HQ users** in a table with role badges.
@@ -148,6 +181,7 @@ All emails are sent via SendGrid from Cloud Functions.
 | View all locations            | Yes          | Yes   | Own only          |
 | Create/edit locations         | Yes          | Yes   | No                |
 | Delete locations              | Yes          | No    | No                |
+| View location user logs       | Yes          | Yes   | Own location      |
 | Manage HQ users               | Yes          | No    | No                |
 | Manage services               | Yes          | Yes   | No                |
 | Manage settings               | Yes          | Yes   | No                |
@@ -185,6 +219,8 @@ Firestore CRUD helpers:
 - `saveAvailability(locationId, data)` -- Save schedule.
 - `getUserProfile(uid)` -- Fetch user profile.
 - `resendConfirmationEmail(locationId)` -- Invoke callable Cloud Function.
+- `logUserAction(logEntry)` -- Write an activity log entry to the `activity_logs` collection.
+- `getActivityLogs(locationId)` -- Fetch all activity logs for a location, ordered by most recent first.
 
 ### `src/firebase.js`
 
@@ -205,3 +241,4 @@ Four Cloud Functions handling email notifications on Firestore document creation
 5. **Reporting/Analytics**: Is there a planned dashboard for booking statistics, location performance, or revenue tracking?
 6. **Multi-language support**: The UI is English-only. Is internationalization on the roadmap?
 7. **Image storage**: Service images are stored as base64 strings in Firestore documents. Is migration to Firebase Storage / Cloud Storage planned for larger files?
+8. **Extended activity logging**: Should additional events be logged (e.g. availability changes, booking status updates, pricing changes)?
