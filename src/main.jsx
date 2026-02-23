@@ -8,12 +8,16 @@ import BookAssessment from './BookAssessment.jsx'
 const path = window.location.pathname;
 
 function Root() {
+  console.log('PATH:', path);
   if (path === '/find-a-centre' || path === '/find-a-center') {
+    console.log('RENDERING: FindACentre');
     return <FindACentre />;
   }
   if (path === '/book-assessment' || path === '/book') {
+    console.log('RENDERING: BookAssessment');
     return <BookAssessment />;
   }
+  console.log('RENDERING: App (Portal)');
   return <App />;
 }
 
