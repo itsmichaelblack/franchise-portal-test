@@ -18,9 +18,3 @@ jobs:
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_SUCCESS_TUTORING_TEST }}
           channelId: live
           projectId: success-tutoring-test
-      - name: Deploy Firestore Rules
-        run: |
-          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_SUCCESS_TUTORING_TEST }}' > /tmp/sa.json
-          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json
-          npx firebase-tools deploy --only firestore:rules --project success-tutoring-test --non-interactive
-          rm /tmp/sa.json
