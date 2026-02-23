@@ -127,3 +127,36 @@ export async function resendConfirmationEmail(locationId) {
   const fn = httpsCallable(functions, "resendConfirmationEmail");
   return fn({ locationId });
 }
+
+// ── Activity Logs ─────────────────────────────────────────────────────────────
+
+/**
+ * Log a user action for a specific location.
+ * @param {{ locationId: string, userId: string, userName: string, userEmail: string, action: string, category: string, details?: string, metadata?: object }} logEntry
+ */
+export async function logUserAction(logEntry) {
+  try {
+    await addDoc(collection(db, "activity_logs"), {
+      ...logEntry,
+      timestamp: serverTimestamp(),
+    });
+  } catch (e) {
+    console.error("Failed to log action:", e);
+  }
+}
+
+/**
+ * Fetch activity logs for a specific location, ordered by most recent first.
+ * @param {string} locationId
+ * @returns {Promise<Array>}
+ */
+export async function getActivityLogs(locationId) {
+  const { where } = await import("firebase/firestore");
+  const q = query(
+    collection(db, "activity_logs"),
+    where("locationId", "==", locationId),
+    orderBy("timestamp", "desc")
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
