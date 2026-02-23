@@ -2527,8 +2527,11 @@ function FranchisePortal({ user, onLogout }) {
   const [members, setMembers] = useState([]);
   const [membersLoading, setMembersLoading] = useState(false);
   const [memberSearch, setMemberSearch] = useState('');
+  const [memberFilter, setMemberFilter] = useState('all');
   const [selectedMember, setSelectedMember] = useState(null);
   const [memberTab, setMemberTab] = useState('profile'); // profile | timetable | payments
+  const [editingMember, setEditingMember] = useState(null); // temp edit state
+  const [memberSaving, setMemberSaving] = useState(false);
 
   // Unavailable dates state
   const [unavailableDates, setUnavailableDates] = useState([]); // [{ date, reason }]
@@ -2595,8 +2598,55 @@ function FranchisePortal({ user, onLogout }) {
         memberMap[email].phone = b.customerPhone;
       }
     });
-    setMembers(Object.values(memberMap).sort((a, b) => a.name.localeCompare(b.name)));
+    // Classify member status
+    const now = new Date();
+    const vals = Object.values(memberMap).map(m => {
+      const latestBooking = m.bookings.reduce((latest, b) => {
+        const d = new Date(b.date);
+        return d > latest ? d : latest;
+      }, new Date(0));
+      const daysSince = Math.floor((now - latestBooking) / (1000 * 60 * 60 * 24));
+      // Lead = 1 booking only, Active = recent (within 60 days), Inactive = older than 60 days
+      let status = 'active';
+      if (m.bookings.length === 1 && daysSince < 30) status = 'lead';
+      else if (daysSince > 60) status = 'inactive';
+      return { ...m, status };
+    });
+    setMembers(vals.sort((a, b) => a.name.localeCompare(b.name)));
   }, [bookings]);
+
+  // Save member profile edits to all their bookings
+  const saveMemberProfile = async (edited) => {
+    setMemberSaving(true);
+    try {
+      const { doc, updateDoc } = await import('firebase/firestore');
+      const { db } = await import('./firebase.js');
+      const updates = {
+        customerName: `${edited.parentFirstName} ${edited.parentLastName}`.trim(),
+        parentFirstName: edited.parentFirstName,
+        parentLastName: edited.parentLastName,
+        customerEmail: edited.email,
+        customerPhone: edited.phone,
+        children: edited.children,
+      };
+      // Update all bookings for this member
+      for (const b of selectedMember.bookings) {
+        await updateDoc(doc(db, 'bookings', b.id), updates);
+      }
+      // Update local state
+      setBookings(prev => prev.map(b =>
+        selectedMember.bookings.some(sb => sb.id === b.id) ? { ...b, ...updates } : b
+      ));
+      setSelectedMember({ ...selectedMember, ...updates, name: updates.customerName, children: edited.children });
+      setEditingMember(null);
+      setToast('Member profile updated');
+      setTimeout(() => setToast(null), 3000);
+    } catch (e) {
+      console.error('Failed to save member:', e);
+      alert('Failed to save. Please try again.');
+    }
+    setMemberSaving(false);
+  };
 
   // Load availability (including unavailable dates)
   useEffect(() => {
@@ -3222,15 +3272,15 @@ function FranchisePortal({ user, onLogout }) {
               <div className="page-desc" style={{ color: 'var(--fp-muted)' }}>View parent and child profiles from bookings at your centre.</div>
             </div>
 
-            {/* Search */}
-            <div style={{ marginBottom: 20, maxWidth: 420 }}>
+            {/* Search & Filter */}
+            <div style={{ display: 'flex', gap: 10, marginBottom: 20, alignItems: 'center' }}>
               <input
                 type="text"
                 placeholder="Search by name, email, or phone..."
                 value={memberSearch}
                 onChange={e => setMemberSearch(e.target.value)}
                 style={{
-                  width: '100%', padding: '12px 16px 12px 40px', borderRadius: 10,
+                  width: 360, padding: '12px 16px 12px 40px', borderRadius: 10,
                   border: '2px solid var(--fp-border)', background: '#fff',
                   fontFamily: 'inherit', fontSize: 14, color: 'var(--fp-text)',
                   outline: 'none',
@@ -3240,19 +3290,43 @@ function FranchisePortal({ user, onLogout }) {
                   backgroundSize: '18px',
                 }}
               />
+              <select
+                value={memberFilter}
+                onChange={e => setMemberFilter(e.target.value)}
+                style={{
+                  padding: '12px 36px 12px 14px', borderRadius: 10,
+                  border: '2px solid var(--fp-border)', background: '#fff',
+                  fontFamily: 'inherit', fontSize: 14, color: 'var(--fp-text)',
+                  outline: 'none', cursor: 'pointer', fontWeight: 600,
+                  appearance: 'none',
+                  backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+                  backgroundRepeat: 'no-repeat',
+                  backgroundPosition: 'right 10px center',
+                  backgroundSize: '16px',
+                }}
+              >
+                <option value="all">All Members</option>
+                <option value="lead">Lead</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
             </div>
 
             {/* Members List */}
             {(() => {
               const q = memberSearch.toLowerCase().trim();
-              const filtered = q
-                ? members.filter(m =>
+              let filtered = members;
+              if (memberFilter !== 'all') {
+                filtered = filtered.filter(m => m.status === memberFilter);
+              }
+              if (q) {
+                filtered = filtered.filter(m =>
                     m.name.toLowerCase().includes(q) ||
                     m.email.toLowerCase().includes(q) ||
                     (m.phone || '').includes(q) ||
                     m.children.some(c => c.name.toLowerCase().includes(q))
-                  )
-                : members;
+                  );
+              }
 
               if (!filtered.length) {
                 return (
@@ -3272,6 +3346,7 @@ function FranchisePortal({ user, onLogout }) {
                         <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Parent</th>
                         <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Children</th>
                         <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Contact</th>
+                        <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Status</th>
                         <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Bookings</th>
                         <th style={{ padding: '12px 16px', width: 100 }}></th>
                       </tr>
@@ -3302,6 +3377,21 @@ function FranchisePortal({ user, onLogout }) {
                           <td style={{ padding: '14px 16px' }}>
                             <div style={{ fontSize: 13, color: 'var(--fp-text)' }}>{m.email}</div>
                             {m.phone && <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 2 }}>{m.phone}</div>}
+                          </td>
+                          <td style={{ padding: '14px 16px' }}>
+                            {(() => {
+                              const styles = {
+                                lead: { bg: 'rgba(59,130,246,0.1)', color: '#3b82f6', label: 'Lead' },
+                                active: { bg: 'rgba(5,150,105,0.1)', color: '#059669', label: 'Active' },
+                                inactive: { bg: 'rgba(156,163,175,0.1)', color: '#6b7280', label: 'Inactive' },
+                              };
+                              const s = styles[m.status] || styles.lead;
+                              return (
+                                <span style={{ padding: '4px 12px', borderRadius: 20, background: s.bg, color: s.color, fontSize: 12, fontWeight: 700 }}>
+                                  {s.label}
+                                </span>
+                              );
+                            })()}
                           </td>
                           <td style={{ padding: '14px 16px' }}>
                             <span style={{ padding: '3px 10px', borderRadius: 20, background: 'rgba(226,93,37,0.1)', color: '#E25D25', fontSize: 12, fontWeight: 700 }}>
@@ -3335,11 +3425,11 @@ function FranchisePortal({ user, onLogout }) {
 
       {/* Member Detail Modal */}
       {selectedMember && (
-        <div className="modal-overlay" onClick={() => setSelectedMember(null)}>
+        <div className="modal-overlay" onClick={() => { setSelectedMember(null); setEditingMember(null); }}>
           <div className="modal fp" onClick={e => e.stopPropagation()} style={{ maxWidth: 560 }}>
             <div className="modal-header fp" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div className="modal-title fp">{selectedMember.name}</div>
-              <button className="modal-close" onClick={() => setSelectedMember(null)} style={{ marginLeft: 'auto' }}>✕</button>
+              <button className="modal-close" onClick={() => { setSelectedMember(null); setEditingMember(null); }} style={{ marginLeft: 'auto' }}>✕</button>
             </div>
             <div style={{ display: 'flex', borderBottom: '1px solid var(--fp-border)' }}>
               {[
@@ -3363,35 +3453,126 @@ function FranchisePortal({ user, onLogout }) {
               {/* Profile Tab */}
               {memberTab === 'profile' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {[
-                    { icon: icons.mail, label: 'Email', value: selectedMember.email, href: `mailto:${selectedMember.email}` },
-                    { icon: icons.phone, label: 'Phone', value: selectedMember.phone || '—', href: selectedMember.phone ? `tel:${selectedMember.phone.replace(/\s/g, '')}` : null },
-                  ].map((row, ri) => (
-                    <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'var(--fp-bg)', borderRadius: 8 }}>
-                      <Icon path={row.icon} size={15} style={{ color: 'var(--fp-accent)', flexShrink: 0 }} />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 11, color: 'var(--fp-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{row.label}</div>
-                        {row.href ? (
-                          <a href={row.href} style={{ fontSize: 14, color: 'var(--fp-text)', textDecoration: 'none', fontWeight: 600 }}>{row.value}</a>
-                        ) : (
-                          <div style={{ fontSize: 14, color: 'var(--fp-text)', fontWeight: 600 }}>{row.value}</div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                  {selectedMember.children.length > 0 && (
-                    <div style={{ marginTop: 8 }}>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Children</div>
-                      {selectedMember.children.map((c, i) => (
-                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'var(--fp-bg)', borderRadius: 8, marginBottom: 6 }}>
-                          <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(109,203,202,0.15)', color: 'var(--fp-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 14 }}>{c.name[0]}</div>
-                          <div>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--fp-text)' }}>{c.name}</div>
-                            {c.grade && <div style={{ fontSize: 12, color: 'var(--fp-muted)' }}>{c.grade}</div>}
+                  {/* Edit / View toggle */}
+                  {!editingMember ? (
+                    <>
+                      {/* View mode */}
+                      {[
+                        { icon: icons.mail, label: 'Email', value: selectedMember.email, href: `mailto:${selectedMember.email}` },
+                        { icon: icons.phone, label: 'Phone', value: selectedMember.phone || '—', href: selectedMember.phone ? `tel:${selectedMember.phone.replace(/\s/g, '')}` : null },
+                      ].map((row, ri) => (
+                        <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'var(--fp-bg)', borderRadius: 8 }}>
+                          <Icon path={row.icon} size={15} style={{ color: 'var(--fp-accent)', flexShrink: 0 }} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 11, color: 'var(--fp-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{row.label}</div>
+                            {row.href ? (
+                              <a href={row.href} style={{ fontSize: 14, color: 'var(--fp-text)', textDecoration: 'none', fontWeight: 600 }}>{row.value}</a>
+                            ) : (
+                              <div style={{ fontSize: 14, color: 'var(--fp-text)', fontWeight: 600 }}>{row.value}</div>
+                            )}
                           </div>
                         </div>
                       ))}
-                    </div>
+                      {selectedMember.children.length > 0 && (
+                        <div style={{ marginTop: 8 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Children</div>
+                          {selectedMember.children.map((c, i) => (
+                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'var(--fp-bg)', borderRadius: 8, marginBottom: 6 }}>
+                              <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(109,203,202,0.15)', color: 'var(--fp-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 14 }}>{c.name?.[0] || '?'}</div>
+                              <div>
+                                <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--fp-text)' }}>{c.name}</div>
+                                {c.grade && <div style={{ fontSize: 12, color: 'var(--fp-muted)' }}>{c.grade}</div>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <button
+                        onClick={() => setEditingMember({
+                          parentFirstName: selectedMember.parentFirstName || selectedMember.name?.split(' ')[0] || '',
+                          parentLastName: selectedMember.parentLastName || selectedMember.name?.split(' ').slice(1).join(' ') || '',
+                          email: selectedMember.email,
+                          phone: selectedMember.phone || '',
+                          children: selectedMember.children.length > 0 ? [...selectedMember.children] : [{ name: '', grade: '' }],
+                        })}
+                        className="btn btn-ghost fp"
+                        style={{ alignSelf: 'flex-start', border: '1px solid var(--fp-border)', marginTop: 4 }}
+                      >
+                        <Icon path={icons.edit} size={14} /> Edit Profile
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      {/* Edit mode */}
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Parent / Guardian</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>First Name</label>
+                          <input value={editingMember.parentFirstName} onChange={e => setEditingMember({ ...editingMember, parentFirstName: e.target.value })}
+                            style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Last Name</label>
+                          <input value={editingMember.parentLastName} onChange={e => setEditingMember({ ...editingMember, parentLastName: e.target.value })}
+                            style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
+                        </div>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Email</label>
+                          <input type="email" value={editingMember.email} onChange={e => setEditingMember({ ...editingMember, email: e.target.value })}
+                            style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Phone</label>
+                          <input type="tel" value={editingMember.phone} onChange={e => setEditingMember({ ...editingMember, phone: e.target.value })}
+                            style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
+                        </div>
+                      </div>
+
+                      <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Children</div>
+                      {editingMember.children.map((c, i) => (
+                        <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                          <div style={{ flex: 1 }}>
+                            {i === 0 && <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Name</label>}
+                            <input value={c.name} onChange={e => {
+                              const updated = [...editingMember.children];
+                              updated[i] = { ...updated[i], name: e.target.value };
+                              setEditingMember({ ...editingMember, children: updated });
+                            }} placeholder="Child's name"
+                              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            {i === 0 && <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Grade</label>}
+                            <select value={c.grade || ''} onChange={e => {
+                              const updated = [...editingMember.children];
+                              updated[i] = { ...updated[i], grade: e.target.value };
+                              setEditingMember({ ...editingMember, children: updated });
+                            }}
+                              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none', appearance: 'auto', cursor: 'pointer' }}>
+                              <option value="">Select grade...</option>
+                              {["Kindergarten","Grade 1","Grade 2","Grade 3","Grade 4","Grade 5","Grade 6","Grade 7","Grade 8","Grade 9","Grade 10","Grade 11","Grade 12","Grade 13"].map(g => <option key={g} value={g}>{g}</option>)}
+                            </select>
+                          </div>
+                          {editingMember.children.length > 1 && (
+                            <button onClick={() => {
+                              setEditingMember({ ...editingMember, children: editingMember.children.filter((_, idx) => idx !== i) });
+                            }} style={{ padding: '10px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', flexShrink: 0 }}>Remove</button>
+                          )}
+                        </div>
+                      ))}
+                      <button onClick={() => setEditingMember({ ...editingMember, children: [...editingMember.children, { name: '', grade: '' }] })}
+                        style={{ alignSelf: 'flex-start', background: 'none', border: '1px dashed var(--fp-border)', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 600, color: 'var(--fp-accent)', cursor: 'pointer', fontFamily: 'inherit' }}>
+                        + Add Child
+                      </button>
+
+                      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                        <button onClick={() => setEditingMember(null)} className="btn btn-ghost fp" style={{ border: '1px solid var(--fp-border)' }}>Cancel</button>
+                        <button onClick={() => saveMemberProfile(editingMember)} className="btn btn-primary fp" disabled={memberSaving || !editingMember.parentFirstName || !editingMember.email}>
+                          <Icon path={icons.check} size={14} /> {memberSaving ? 'Saving...' : 'Save Changes'}
+                        </button>
+                      </div>
+                    </>
                   )}
                 </div>
               )}
