@@ -1060,8 +1060,8 @@ export default function BookAssessment() {
 
                 <div style={{ fontSize: 13, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '20px 0 8px' }}>Child Details</div>
                 {children.map((child, i) => (
-                  <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 10, padding: i > 0 ? '12px 0 0' : 0, borderTop: i > 0 ? '1px solid #e8eaed' : 'none' }}>
-                    <div style={{ flex: 1 }}>
+                  <div key={i} className="ba-form-grid" style={{ marginBottom: children.length > 1 ? 12 : 0, paddingTop: i > 0 ? 12 : 0, borderTop: i > 0 ? '1px solid #e8eaed' : 'none' }}>
+                    <div className="ba-form-group">
                       <label className="ba-form-label">Child's Full Name *</label>
                       <input
                         className={`ba-form-input ${formErrors[`child_${i}_name`] ? 'ba-input-error' : ''}`}
@@ -1071,27 +1071,29 @@ export default function BookAssessment() {
                       />
                       {formErrors[`child_${i}_name`] && <div className="ba-field-error">{formErrors[`child_${i}_name`]}</div>}
                     </div>
-                    <div style={{ flex: 1 }}>
-                      <label className="ba-form-label">Grade Level *</label>
-                      <select
-                        className={`ba-form-input ${formErrors[`child_${i}_grade`] ? 'ba-input-error' : ''}`}
-                        value={child.grade}
-                        onChange={(e) => updateChild(i, 'grade', e.target.value)}
-                        style={{ appearance: 'auto' }}
-                      >
-                        <option value="">Select grade...</option>
-                        {GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
-                      </select>
-                      {formErrors[`child_${i}_grade`] && <div className="ba-field-error">{formErrors[`child_${i}_grade`]}</div>}
+                    <div className="ba-form-group" style={{ display: 'flex', gap: 8 }}>
+                      <div style={{ flex: 1 }}>
+                        <label className="ba-form-label">Grade Level *</label>
+                        <select
+                          className={`ba-form-input ${formErrors[`child_${i}_grade`] ? 'ba-input-error' : ''}`}
+                          value={child.grade}
+                          onChange={(e) => updateChild(i, 'grade', e.target.value)}
+                          style={{ appearance: 'auto', width: '100%' }}
+                        >
+                          <option value="">Select grade...</option>
+                          {GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
+                        </select>
+                        {formErrors[`child_${i}_grade`] && <div className="ba-field-error">{formErrors[`child_${i}_grade`]}</div>}
+                      </div>
+                      {children.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeChild(i)}
+                          style={{ marginTop: 22, background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: '4px 6px', flexShrink: 0 }}
+                          title="Remove child"
+                        >&times;</button>
+                      )}
                     </div>
-                    {children.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => removeChild(i)}
-                        style={{ marginTop: 22, background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: '4px 6px' }}
-                        title="Remove child"
-                      >&times;</button>
-                    )}
                   </div>
                 ))}
                 <button
@@ -1102,16 +1104,18 @@ export default function BookAssessment() {
                   + Add Another Child
                 </button>
 
-                <div style={{ marginTop: 8 }}>
-                  <label className="ba-form-label">Additional Comments (optional)</label>
-                  <textarea
-                    className="ba-form-input"
-                    value={comments}
-                    onChange={(e) => setComments(e.target.value)}
-                    placeholder="Any additional information, e.g. learning goals, specific subjects..."
-                    rows={3}
-                    style={{ resize: 'vertical', minHeight: 60 }}
-                  />
+                <div className="ba-form-grid" style={{ marginTop: 8 }}>
+                  <div className="ba-form-group" style={{ gridColumn: '1 / -1' }}>
+                    <label className="ba-form-label">Additional Comments (optional)</label>
+                    <textarea
+                      className="ba-form-input"
+                      value={comments}
+                      onChange={(e) => setComments(e.target.value)}
+                      placeholder="e.g. Learning goals, specific subjects, anything else we should know"
+                      rows={3}
+                      style={{ resize: 'vertical', minHeight: 60, width: '100%' }}
+                    />
+                  </div>
                 </div>
 
                 <div className="ba-nav">
