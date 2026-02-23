@@ -151,15 +151,25 @@ If setting up from scratch on a new Firebase project:
    firebase deploy --only firestore:indexes
    ```
 
-5. **Set up Cloud Functions**:
+5. **Create the `activity_logs` composite index**:
+
+   Go to Firebase Console > Firestore > Indexes > Add Index:
+   - Collection ID: `activity_logs`
+   - Field 1: `locationId` — Ascending
+   - Field 2: `timestamp` — Descending
+   - Query scope: Collection
+
+   Alternatively, this index will be auto-prompted with a creation link in the browser console the first time the User Logs query runs.
+
+6. **Set up Cloud Functions**:
    ```bash
    firebase functions:config:set sendgrid.api_key="SG.your-key-here"
    firebase deploy --only functions
    ```
 
-6. **Enable Google Maps APIs** in the Google Cloud project linked to your Firebase project.
+7. **Enable Google Maps APIs** in the Google Cloud project linked to your Firebase project.
 
-7. **Create a Master Admin user**:
+8. **Create a Master Admin user**:
    - Sign in with Google through the HQ portal.
    - Manually create a `users/{uid}` document in Firestore with:
      ```json
@@ -177,12 +187,12 @@ If setting up from scratch on a new Firebase project:
 ```
 src/
 ├── main.jsx              # Entry point, URL-based routing
-├── App.jsx               # All portal components (~3,800 lines)
+├── App.jsx               # All portal components (~4,400 lines)
 ├── BookAssessment.jsx    # Public booking wizard
 ├── FindACentre.jsx       # Public location finder
 ├── firebase.js           # Firebase SDK init
 ├── hooks/useAuth.js      # Authentication hook
-└── services/firestore.js # Firestore CRUD helpers
+└── services/firestore.js # Firestore CRUD helpers + activity logging
 ```
 
 ---
@@ -205,6 +215,12 @@ Firebase Console > Authentication > Settings > Authorized domains.
 - Verify the API key in `index.html` is valid.
 - Ensure Maps JavaScript API, Places API, and Geocoding API are enabled.
 - Check the browser console for API key restriction errors.
+
+### User Logs tab shows "No user activity logs yet"
+
+- Activity logs populate automatically as users sign in and perform actions.
+- Verify the `activity_logs` composite index exists in Firestore > Indexes.
+- Check the browser console for Firestore permission errors — ensure the updated `firestore.rules` have been published.
 
 ### Vite dev server port conflict
 
