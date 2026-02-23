@@ -1048,7 +1048,7 @@ export default function BookAssessment() {
                   </div>
                   <div className="ba-form-group">
                     <label className="ba-form-label">Phone *</label>
-                    <input className={`ba-form-input ${formErrors.parentPhone ? 'ba-input-error' : ''}`} type="tel" value={parentPhone} onChange={(e) => setParentPhone(e.target.value)} placeholder="0400 000 000" />
+                    <input className={`ba-form-input ${formErrors.parentPhone ? 'ba-input-error' : ''}`} type="tel" value={parentPhone} onChange={(e) => setParentPhone(e.target.value)} placeholder="Phone number" />
                     {formErrors.parentPhone && <div className="ba-field-error">{formErrors.parentPhone}</div>}
                   </div>
                 </div>
@@ -1060,19 +1060,29 @@ export default function BookAssessment() {
 
                 <div style={{ fontSize: 13, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '20px 0 8px' }}>Child Details</div>
                 {children.map((child, i) => (
-                  <div key={i} className="ba-form-grid" style={{ marginBottom: children.length > 1 ? 12 : 0, paddingTop: i > 0 ? 12 : 0, borderTop: i > 0 ? '1px solid #e8eaed' : 'none' }}>
-                    <div className="ba-form-group">
-                      <label className="ba-form-label">Child's Full Name *</label>
-                      <input
-                        className={`ba-form-input ${formErrors[`child_${i}_name`] ? 'ba-input-error' : ''}`}
-                        value={child.name}
-                        onChange={(e) => updateChild(i, 'name', e.target.value)}
-                        placeholder="Child's full name"
-                      />
-                      {formErrors[`child_${i}_name`] && <div className="ba-field-error">{formErrors[`child_${i}_name`]}</div>}
-                    </div>
-                    <div className="ba-form-group" style={{ display: 'flex', gap: 8 }}>
-                      <div style={{ flex: 1 }}>
+                  <div key={i} style={{ marginBottom: 8, paddingTop: i > 0 ? 12 : 0, borderTop: i > 0 ? '1px solid #e8eaed' : 'none' }}>
+                    {children.length > 1 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: '#9ca3af' }}>Child {i + 1}</span>
+                        <button
+                          type="button"
+                          onClick={() => removeChild(i)}
+                          style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', padding: '2px 6px' }}
+                        >Remove</button>
+                      </div>
+                    )}
+                    <div className="ba-form-grid">
+                      <div className="ba-form-group">
+                        <label className="ba-form-label">Child's Full Name *</label>
+                        <input
+                          className={`ba-form-input ${formErrors[`child_${i}_name`] ? 'ba-input-error' : ''}`}
+                          value={child.name}
+                          onChange={(e) => updateChild(i, 'name', e.target.value)}
+                          placeholder="Child's full name"
+                        />
+                        {formErrors[`child_${i}_name`] && <div className="ba-field-error">{formErrors[`child_${i}_name`]}</div>}
+                      </div>
+                      <div className="ba-form-group">
                         <label className="ba-form-label">Grade Level *</label>
                         <select
                           className={`ba-form-input ${formErrors[`child_${i}_grade`] ? 'ba-input-error' : ''}`}
@@ -1085,14 +1095,6 @@ export default function BookAssessment() {
                         </select>
                         {formErrors[`child_${i}_grade`] && <div className="ba-field-error">{formErrors[`child_${i}_grade`]}</div>}
                       </div>
-                      {children.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => removeChild(i)}
-                          style={{ marginTop: 22, background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: '4px 6px', flexShrink: 0 }}
-                          title="Remove child"
-                        >&times;</button>
-                      )}
                     </div>
                   </div>
                 ))}
