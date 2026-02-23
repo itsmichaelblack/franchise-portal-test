@@ -402,6 +402,8 @@ const css = `
     transition: border-color 0.2s;
   }
   .ba-form-input:focus { border-color: #E25D25; }
+  .ba-input-error { border-color: #dc2626 !important; }
+  .ba-field-error { color: #dc2626; font-size: 12px; margin-top: 4px; }
 
   .ba-summary {
     padding: 20px;
@@ -528,13 +530,16 @@ export default function BookAssessment() {
   const [existingBookings, setExistingBookings] = useState([]);
 
   // Step 3 state
-  const [custName, setCustName] = useState("");
-  const [custEmail, setCustEmail] = useState("");
-  const [custPhone, setCustPhone] = useState("");
-  const [notes, setNotes] = useState("");
+  const [parentFirst, setParentFirst] = useState("");
+  const [parentLast, setParentLast] = useState("");
+  const [parentEmail, setParentEmail] = useState("");
+  const [parentPhone, setParentPhone] = useState("");
+  const [children, setChildren] = useState([{ name: "", grade: "" }]);
+  const [comments, setComments] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [bookingRef, setBookingRef] = useState(null);
+  const [formErrors, setFormErrors] = useState({});
 
   // HQ Settings (YouTube video)
   const [youtubeUrl, setYoutubeUrl] = useState("");
@@ -686,8 +691,51 @@ export default function BookAssessment() {
   const timeSlots = getTimeSlotsForDate(selectedDate);
 
   // ── Submit booking ────────────────────────────────────────────────────
+  // ── Grade levels based on location country ─────────────────────────────
+  const isNZ = selectedLocation && (selectedLocation.address || "").toLowerCase().includes("new zealand");
+  const GRADES = isNZ
+    ? ["Grade 1", "Grade 2", "Grade 3", "Grade 4", "Grade 5", "Grade 6", "Grade 7", "Grade 8", "Grade 9", "Grade 10", "Grade 11", "Grade 12", "Grade 13"]
+    : ["Kindergarten", "Grade 1", "Grade 2", "Grade 3", "Grade 4", "Grade 5", "Grade 6", "Grade 7", "Grade 8", "Grade 9", "Grade 10", "Grade 11", "Grade 12"];
+
+  const addChild = () => setChildren([...children, { name: "", grade: "" }]);
+  const removeChild = (i) => setChildren(children.filter((_, idx) => idx !== i));
+  const updateChild = (i, field, val) => {
+    const updated = [...children];
+    updated[i] = { ...updated[i], [field]: val };
+    setChildren(updated);
+  };
+
+  // ── Validation ────────────────────────────────────────────────────────
+  const validateForm = () => {
+    const errors = {};
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const phoneRegex = /^[+\d\s()-]{6,20}$/;
+
+    if (!parentFirst.trim()) errors.parentFirst = "First name is required";
+    if (!parentLast.trim()) errors.parentLast = "Last name is required";
+    if (!parentEmail.trim()) errors.parentEmail = "Email is required";
+    else if (!emailRegex.test(parentEmail.trim())) errors.parentEmail = "Enter a valid email address";
+    if (!parentPhone.trim()) errors.parentPhone = "Phone number is required";
+    else if (!phoneRegex.test(parentPhone.trim())) errors.parentPhone = "Enter a valid phone number";
+
+    children.forEach((child, i) => {
+      if (!child.name.trim()) errors[`child_${i}_name`] = "Child's name is required";
+      if (!child.grade) errors[`child_${i}_grade`] = "Please select a grade level";
+    });
+
+    // Simple spam check: honeypot is handled via hidden field, also check for URLs in names
+    const urlRegex = /https?:\/\/|www\./i;
+    if (urlRegex.test(parentFirst) || urlRegex.test(parentLast)) errors.spam = "Invalid input detected";
+    children.forEach((child) => {
+      if (urlRegex.test(child.name)) errors.spam = "Invalid input detected";
+    });
+
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
   const handleSubmit = async () => {
-    if (!custName || !custEmail || !custPhone) return;
+    if (!validateForm()) return;
     setSubmitting(true);
     try {
       const bookingData = {
@@ -697,10 +745,14 @@ export default function BookAssessment() {
         date: selectedDate.toISOString().split("T")[0],
         time: selectedTime,
         duration: ASSESSMENT_DURATION,
-        customerName: custName,
-        customerEmail: custEmail,
-        customerPhone: custPhone,
-        notes: notes,
+        parentFirstName: parentFirst.trim(),
+        parentLastName: parentLast.trim(),
+        customerName: `${parentFirst.trim()} ${parentLast.trim()}`,
+        customerEmail: parentEmail.trim(),
+        customerPhone: parentPhone.trim(),
+        children: children.map((c) => ({ name: c.name.trim(), grade: c.grade })),
+        comments: comments.trim(),
+        notes: comments.trim(),
         status: "confirmed",
         createdAt: serverTimestamp(),
       };
@@ -975,23 +1027,91 @@ export default function BookAssessment() {
                   </div>
                 </div>
 
+                {formErrors.spam && <div style={{ color: '#dc2626', fontSize: 13, fontWeight: 600, marginBottom: 12 }}>Invalid input detected. Please check your entries.</div>}
+
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Parent / Guardian Details</div>
                 <div className="ba-form-grid">
                   <div className="ba-form-group">
-                    <label className="ba-form-label">Full Name</label>
-                    <input className="ba-form-input" value={custName} onChange={(e) => setCustName(e.target.value)} placeholder="John Smith" />
+                    <label className="ba-form-label">First Name *</label>
+                    <input className={`ba-form-input ${formErrors.parentFirst ? 'ba-input-error' : ''}`} value={parentFirst} onChange={(e) => setParentFirst(e.target.value)} placeholder="First name" />
+                    {formErrors.parentFirst && <div className="ba-field-error">{formErrors.parentFirst}</div>}
                   </div>
                   <div className="ba-form-group">
-                    <label className="ba-form-label">Email</label>
-                    <input className="ba-form-input" type="email" value={custEmail} onChange={(e) => setCustEmail(e.target.value)} placeholder="john@example.com" />
+                    <label className="ba-form-label">Last Name *</label>
+                    <input className={`ba-form-input ${formErrors.parentLast ? 'ba-input-error' : ''}`} value={parentLast} onChange={(e) => setParentLast(e.target.value)} placeholder="Last name" />
+                    {formErrors.parentLast && <div className="ba-field-error">{formErrors.parentLast}</div>}
                   </div>
                   <div className="ba-form-group">
-                    <label className="ba-form-label">Phone</label>
-                    <input className="ba-form-input" type="tel" value={custPhone} onChange={(e) => setCustPhone(e.target.value)} placeholder="0400 000 000" />
+                    <label className="ba-form-label">Email *</label>
+                    <input className={`ba-form-input ${formErrors.parentEmail ? 'ba-input-error' : ''}`} type="email" value={parentEmail} onChange={(e) => setParentEmail(e.target.value)} placeholder="parent@example.com" />
+                    {formErrors.parentEmail && <div className="ba-field-error">{formErrors.parentEmail}</div>}
                   </div>
                   <div className="ba-form-group">
-                    <label className="ba-form-label">Notes (optional)</label>
-                    <input className="ba-form-input" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. Year level, subjects" />
+                    <label className="ba-form-label">Phone *</label>
+                    <input className={`ba-form-input ${formErrors.parentPhone ? 'ba-input-error' : ''}`} type="tel" value={parentPhone} onChange={(e) => setParentPhone(e.target.value)} placeholder="0400 000 000" />
+                    {formErrors.parentPhone && <div className="ba-field-error">{formErrors.parentPhone}</div>}
                   </div>
+                </div>
+
+                {/* Honeypot anti-spam field */}
+                <div style={{ position: 'absolute', left: '-9999px', opacity: 0, height: 0, overflow: 'hidden' }} aria-hidden="true">
+                  <input type="text" name="website" tabIndex={-1} autoComplete="off" />
+                </div>
+
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '20px 0 8px' }}>Child Details</div>
+                {children.map((child, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 10, padding: i > 0 ? '12px 0 0' : 0, borderTop: i > 0 ? '1px solid #e8eaed' : 'none' }}>
+                    <div style={{ flex: 1 }}>
+                      <label className="ba-form-label">Child's Full Name *</label>
+                      <input
+                        className={`ba-form-input ${formErrors[`child_${i}_name`] ? 'ba-input-error' : ''}`}
+                        value={child.name}
+                        onChange={(e) => updateChild(i, 'name', e.target.value)}
+                        placeholder="Child's full name"
+                      />
+                      {formErrors[`child_${i}_name`] && <div className="ba-field-error">{formErrors[`child_${i}_name`]}</div>}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label className="ba-form-label">Grade Level *</label>
+                      <select
+                        className={`ba-form-input ${formErrors[`child_${i}_grade`] ? 'ba-input-error' : ''}`}
+                        value={child.grade}
+                        onChange={(e) => updateChild(i, 'grade', e.target.value)}
+                        style={{ appearance: 'auto' }}
+                      >
+                        <option value="">Select grade...</option>
+                        {GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
+                      </select>
+                      {formErrors[`child_${i}_grade`] && <div className="ba-field-error">{formErrors[`child_${i}_grade`]}</div>}
+                    </div>
+                    {children.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeChild(i)}
+                        style={{ marginTop: 22, background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: '4px 6px' }}
+                        title="Remove child"
+                      >&times;</button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={addChild}
+                  style={{ background: 'none', border: '1px dashed #d1d5db', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 600, color: '#E25D25', cursor: 'pointer', fontFamily: 'inherit', marginBottom: 16 }}
+                >
+                  + Add Another Child
+                </button>
+
+                <div style={{ marginTop: 8 }}>
+                  <label className="ba-form-label">Additional Comments (optional)</label>
+                  <textarea
+                    className="ba-form-input"
+                    value={comments}
+                    onChange={(e) => setComments(e.target.value)}
+                    placeholder="Any additional information, e.g. learning goals, specific subjects..."
+                    rows={3}
+                    style={{ resize: 'vertical', minHeight: 60 }}
+                  />
                 </div>
 
                 <div className="ba-nav">
@@ -1000,7 +1120,7 @@ export default function BookAssessment() {
                   </button>
                   <button
                     className="ba-btn ba-btn-primary"
-                    disabled={!custName || !custEmail || !custPhone || submitting}
+                    disabled={submitting}
                     onClick={handleSubmit}
                   >
                     {submitting ? "Booking..." : "Confirm Booking"} <Icon d={ic.check} size={16} />
@@ -1045,13 +1165,20 @@ export default function BookAssessment() {
                   <div className="ba-summary-row">
                     <Icon d={ic.user} size={16} />
                     <span className="ba-summary-label">Name</span>
-                    <span>{custName}</span>
+                    <span>{parentFirst} {parentLast}</span>
                   </div>
                   <div className="ba-summary-row">
                     <Icon d={ic.mail} size={16} />
                     <span className="ba-summary-label">Email</span>
-                    <span>{custEmail}</span>
+                    <span>{parentEmail}</span>
                   </div>
+                  {children.length > 0 && children.map((child, i) => (
+                    <div className="ba-summary-row" key={i}>
+                      <Icon d={ic.user} size={16} />
+                      <span className="ba-summary-label">Child {children.length > 1 ? i + 1 : ''}</span>
+                      <span>{child.name} ({child.grade})</span>
+                    </div>
+                  ))}
                   {bookingRef && (
                     <div className="ba-summary-row" style={{ color: "#9ca3af", fontSize: 12 }}>
                       <span>Ref: {bookingRef.slice(0, 8).toUpperCase()}</span>
