@@ -2523,6 +2523,13 @@ function FranchisePortal({ user, onLogout }) {
   const [calendarWeekOffset, setCalendarWeekOffset] = useState(0);
   const [selectedBooking, setSelectedBooking] = useState(null);
 
+  // Members state
+  const [members, setMembers] = useState([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [memberSearch, setMemberSearch] = useState('');
+  const [selectedMember, setSelectedMember] = useState(null);
+  const [memberTab, setMemberTab] = useState('profile'); // profile | timetable | payments
+
   // Unavailable dates state
   const [unavailableDates, setUnavailableDates] = useState([]); // [{ date, reason }]
   const [showUnavailModal, setShowUnavailModal] = useState(false);
@@ -2551,6 +2558,45 @@ function FranchisePortal({ user, onLogout }) {
     };
     if (locationId) loadBookings();
   }, [locationId]);
+
+  // Load members (derived from bookings for this location)
+  useEffect(() => {
+    if (!bookings.length) { setMembers([]); return; }
+    // Group bookings by email to create member profiles
+    const memberMap = {};
+    bookings.forEach(b => {
+      const email = (b.customerEmail || '').toLowerCase().trim();
+      if (!email) return;
+      if (!memberMap[email]) {
+        memberMap[email] = {
+          id: email,
+          parentFirstName: b.parentFirstName || b.customerName?.split(' ')[0] || '',
+          parentLastName: b.parentLastName || b.customerName?.split(' ').slice(1).join(' ') || '',
+          name: b.customerName || `${b.parentFirstName || ''} ${b.parentLastName || ''}`.trim(),
+          email: b.customerEmail,
+          phone: b.customerPhone || '',
+          children: b.children || [],
+          bookings: [],
+          createdAt: b.createdAt,
+        };
+      }
+      memberMap[email].bookings.push(b);
+      // Merge children from all bookings
+      if (b.children && b.children.length) {
+        b.children.forEach(c => {
+          const exists = memberMap[email].children.some(
+            ec => ec.name.toLowerCase() === c.name.toLowerCase()
+          );
+          if (!exists) memberMap[email].children.push(c);
+        });
+      }
+      // Update phone if newer booking has one
+      if (b.customerPhone && !memberMap[email].phone) {
+        memberMap[email].phone = b.customerPhone;
+      }
+    });
+    setMembers(Object.values(memberMap).sort((a, b) => a.name.localeCompare(b.name)));
+  }, [bookings]);
 
   // Load availability (including unavailable dates)
   useEffect(() => {
@@ -2645,6 +2691,9 @@ function FranchisePortal({ user, onLogout }) {
           </button>
           <button className={`nav-item ${page === 'bookings' ? 'active' : ''}`} onClick={() => setPage('bookings')}>
             <Icon path={icons.users} size={16} /> Bookings
+          </button>
+          <button className={`nav-item ${page === 'members' ? 'active' : ''}`} onClick={() => setPage('members')}>
+            <Icon path={icons.users} size={16} /> Members
           </button>
           <button className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => setPage('settings')}>
             <Icon path={icons.clock} size={16} /> Settings
@@ -3164,7 +3213,241 @@ function FranchisePortal({ user, onLogout }) {
             </div>
           </>
         )}
+
+        {/* === MEMBERS PAGE === */}
+        {page === 'members' && (
+          <>
+            <div className="page-header">
+              <div className="page-title" style={{ color: 'var(--fp-text)' }}>Members</div>
+              <div className="page-desc" style={{ color: 'var(--fp-muted)' }}>View parent and child profiles from bookings at your centre.</div>
+            </div>
+
+            {/* Search */}
+            <div style={{ marginBottom: 20, maxWidth: 420 }}>
+              <input
+                type="text"
+                placeholder="Search by name, email, or phone..."
+                value={memberSearch}
+                onChange={e => setMemberSearch(e.target.value)}
+                style={{
+                  width: '100%', padding: '12px 16px 12px 40px', borderRadius: 10,
+                  border: '2px solid var(--fp-border)', background: '#fff',
+                  fontFamily: 'inherit', fontSize: 14, color: 'var(--fp-text)',
+                  outline: 'none',
+                  backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%239ca3af%27 stroke-width=%272%27 stroke-linecap=%27round%27%3e%3ccircle cx=%2711%27 cy=%2711%27 r=%278%27/%3e%3cline x1=%2721%27 y1=%2721%27 x2=%2716.65%27 y2=%2716.65%27/%3e%3c/svg%3e")',
+                  backgroundRepeat: 'no-repeat',
+                  backgroundPosition: '12px center',
+                  backgroundSize: '18px',
+                }}
+              />
+            </div>
+
+            {/* Members List */}
+            {(() => {
+              const q = memberSearch.toLowerCase().trim();
+              const filtered = q
+                ? members.filter(m =>
+                    m.name.toLowerCase().includes(q) ||
+                    m.email.toLowerCase().includes(q) ||
+                    (m.phone || '').includes(q) ||
+                    m.children.some(c => c.name.toLowerCase().includes(q))
+                  )
+                : members;
+
+              if (!filtered.length) {
+                return (
+                  <div className="card fp" style={{ padding: 40, textAlign: 'center', color: 'var(--fp-muted)' }}>
+                    <div style={{ fontSize: 32, marginBottom: 12 }}>👤</div>
+                    <div style={{ fontWeight: 700, fontSize: 15 }}>{q ? 'No members match your search' : 'No members yet'}</div>
+                    <div style={{ fontSize: 13, marginTop: 4 }}>Members appear here once they book an assessment.</div>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="card fp" style={{ padding: 0, overflow: 'hidden' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid var(--fp-border)', textAlign: 'left' }}>
+                        <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Parent</th>
+                        <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Children</th>
+                        <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Contact</th>
+                        <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Bookings</th>
+                        <th style={{ padding: '12px 16px', width: 100 }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map(m => (
+                        <tr key={m.id} style={{ borderBottom: '1px solid var(--fp-border)', cursor: 'pointer', transition: 'background 0.1s' }}
+                          onMouseEnter={e => e.currentTarget.style.background = 'var(--fp-bg)'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                          onClick={() => { setSelectedMember(m); setMemberTab('profile'); }}
+                        >
+                          <td style={{ padding: '14px 16px' }}>
+                            <div style={{ fontWeight: 700, color: 'var(--fp-text)' }}>{m.name}</div>
+                          </td>
+                          <td style={{ padding: '14px 16px' }}>
+                            {m.children.length > 0 ? (
+                              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                {m.children.map((c, i) => (
+                                  <span key={i} style={{ padding: '3px 10px', borderRadius: 20, background: 'rgba(109,203,202,0.12)', color: 'var(--fp-accent)', fontSize: 12, fontWeight: 600 }}>
+                                    {c.name}{c.grade ? ` (${c.grade})` : ''}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span style={{ color: 'var(--fp-muted)', fontSize: 13 }}>—</span>
+                            )}
+                          </td>
+                          <td style={{ padding: '14px 16px' }}>
+                            <div style={{ fontSize: 13, color: 'var(--fp-text)' }}>{m.email}</div>
+                            {m.phone && <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 2 }}>{m.phone}</div>}
+                          </td>
+                          <td style={{ padding: '14px 16px' }}>
+                            <span style={{ padding: '3px 10px', borderRadius: 20, background: 'rgba(226,93,37,0.1)', color: '#E25D25', fontSize: 12, fontWeight: 700 }}>
+                              {m.bookings.length}
+                            </span>
+                          </td>
+                          <td style={{ padding: '14px 16px' }}>
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              <a href={`mailto:${m.email}`} onClick={e => e.stopPropagation()} title="Email" style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid var(--fp-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fp-muted)', textDecoration: 'none', transition: 'all 0.15s' }}
+                                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--fp-accent)'; e.currentTarget.style.color = 'var(--fp-accent)'; }}
+                                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--fp-border)'; e.currentTarget.style.color = 'var(--fp-muted)'; }}
+                              ><Icon path={icons.mail} size={14} /></a>
+                              {m.phone && (
+                                <a href={`tel:${m.phone.replace(/\s/g, '')}`} onClick={e => e.stopPropagation()} title="Call" style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid var(--fp-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fp-muted)', textDecoration: 'none', transition: 'all 0.15s' }}
+                                  onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--fp-accent)'; e.currentTarget.style.color = 'var(--fp-accent)'; }}
+                                  onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--fp-border)'; e.currentTarget.style.color = 'var(--fp-muted)'; }}
+                                ><Icon path={icons.phone} size={14} /></a>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
+          </>
+        )}
       </main>
+
+      {/* Member Detail Modal */}
+      {selectedMember && (
+        <div className="modal-overlay" onClick={() => setSelectedMember(null)}>
+          <div className="modal fp" onClick={e => e.stopPropagation()} style={{ maxWidth: 560 }}>
+            <div className="modal-header fp" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div className="modal-title fp">{selectedMember.name}</div>
+              <button className="modal-close" onClick={() => setSelectedMember(null)} style={{ marginLeft: 'auto' }}>✕</button>
+            </div>
+            <div style={{ display: 'flex', borderBottom: '1px solid var(--fp-border)' }}>
+              {[
+                { key: 'profile', icon: icons.users, label: 'Profile' },
+                { key: 'timetable', icon: icons.calendar, label: 'Timetable' },
+                { key: 'payments', icon: icons.settings, label: 'Payments' },
+              ].map(t => (
+                <button key={t.key} onClick={() => setMemberTab(t.key)} title={t.label}
+                  style={{
+                    flex: 1, padding: '12px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    background: 'none', border: 'none', borderBottom: memberTab === t.key ? '2px solid var(--fp-accent)' : '2px solid transparent',
+                    color: memberTab === t.key ? 'var(--fp-accent)' : 'var(--fp-muted)',
+                    fontFamily: 'inherit', fontSize: 13, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s',
+                  }}
+                >
+                  <Icon path={t.icon} size={15} /> {t.label}
+                </button>
+              ))}
+            </div>
+            <div className="modal-body" style={{ padding: '24px' }}>
+              {/* Profile Tab */}
+              {memberTab === 'profile' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {[
+                    { icon: icons.mail, label: 'Email', value: selectedMember.email, href: `mailto:${selectedMember.email}` },
+                    { icon: icons.phone, label: 'Phone', value: selectedMember.phone || '—', href: selectedMember.phone ? `tel:${selectedMember.phone.replace(/\s/g, '')}` : null },
+                  ].map((row, ri) => (
+                    <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'var(--fp-bg)', borderRadius: 8 }}>
+                      <Icon path={row.icon} size={15} style={{ color: 'var(--fp-accent)', flexShrink: 0 }} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 11, color: 'var(--fp-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{row.label}</div>
+                        {row.href ? (
+                          <a href={row.href} style={{ fontSize: 14, color: 'var(--fp-text)', textDecoration: 'none', fontWeight: 600 }}>{row.value}</a>
+                        ) : (
+                          <div style={{ fontSize: 14, color: 'var(--fp-text)', fontWeight: 600 }}>{row.value}</div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {selectedMember.children.length > 0 && (
+                    <div style={{ marginTop: 8 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Children</div>
+                      {selectedMember.children.map((c, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'var(--fp-bg)', borderRadius: 8, marginBottom: 6 }}>
+                          <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(109,203,202,0.15)', color: 'var(--fp-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 14 }}>{c.name[0]}</div>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--fp-text)' }}>{c.name}</div>
+                            {c.grade && <div style={{ fontSize: 12, color: 'var(--fp-muted)' }}>{c.grade}</div>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Timetable Tab */}
+              {memberTab === 'timetable' && (
+                <div>
+                  {selectedMember.bookings.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: 24, color: 'var(--fp-muted)' }}>No bookings found</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {selectedMember.bookings
+                        .sort((a, b) => new Date(b.date) - new Date(a.date))
+                        .map((b, i) => {
+                          const dateObj = new Date(b.date + 'T00:00:00');
+                          const [h, m] = (b.time || '00:00').split(':').map(Number);
+                          const isPast = new Date(b.date) < new Date(new Date().toISOString().split('T')[0]);
+                          return (
+                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: 'var(--fp-bg)', borderRadius: 8, opacity: isPast ? 0.6 : 1 }}>
+                              <div style={{ width: 40, height: 40, borderRadius: 10, background: isPast ? 'rgba(156,163,175,0.1)' : 'rgba(109,203,202,0.12)', color: isPast ? 'var(--fp-muted)' : 'var(--fp-accent)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                <div style={{ fontSize: 14, fontWeight: 800, lineHeight: 1 }}>{dateObj.getDate()}</div>
+                                <div style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase' }}>{dateObj.toLocaleDateString('en-AU', { month: 'short' })}</div>
+                              </div>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--fp-text)' }}>
+                                  {dateObj.toLocaleDateString('en-AU', { weekday: 'long' })}
+                                  {isPast && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--fp-muted)', fontWeight: 600 }}>Past</span>}
+                                </div>
+                                <div style={{ fontSize: 12, color: 'var(--fp-muted)' }}>
+                                  {h > 12 ? h - 12 : h}:{String(m).padStart(2, '0')} {h >= 12 ? 'PM' : 'AM'} — {b.duration || 40} min
+                                </div>
+                              </div>
+                              <div style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700, background: b.status === 'confirmed' ? 'rgba(5,150,105,0.1)' : 'rgba(226,93,37,0.1)', color: b.status === 'confirmed' ? '#059669' : '#E25D25' }}>
+                                {b.status || 'confirmed'}
+                              </div>
+                            </div>
+                          );
+                        })
+                      }
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Payments Tab */}
+              {memberTab === 'payments' && (
+                <div style={{ textAlign: 'center', padding: 32, color: 'var(--fp-muted)' }}>
+                  <div style={{ fontSize: 32, marginBottom: 12 }}>💳</div>
+                  <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Payment options coming soon</div>
+                  <div style={{ fontSize: 13 }}>Stripe integration for credit card and direct debit payments will be available here.</div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Booking Detail Modal */}
       {selectedBooking && (
