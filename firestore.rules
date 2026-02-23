@@ -109,6 +109,22 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // ── Activity Logs collection ────────────────────────────────────────────
+    // Stores user activity logs per location (sign-ins, edits, etc.)
+    match /activity_logs/{logId} {
+      // HQ admins can read all logs
+      allow read: if isAdmin();
+
+      // Franchise partners can read logs for their location
+      allow read: if isAuth() && resource.data.locationId == userDoc().locationId;
+
+      // Authenticated users can create logs (logging their own actions)
+      allow create: if isAuth();
+
+      // Nobody can update or delete logs
+      allow update, delete: if false;
+    }
+
     // ── Deny everything else ────────────────────────────────────────────────
     match /{document=**} {
       allow read, write: if false;
