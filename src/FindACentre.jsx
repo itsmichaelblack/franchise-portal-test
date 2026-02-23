@@ -52,7 +52,6 @@ const ic = {
   x: "M18 6L6 18 M6 6l12 12",
   directions: "M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z",
   clock: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z M12 6v6l4 2",
-  back: "M15 18l-6-6 6-6",
   calendar: "M3 4h18v18H3z M16 2v4 M8 2v4 M3 10h18",
 };
 
@@ -326,27 +325,6 @@ const css = `
     height: 100%;
   }
 
-  /* ── Back link ──────────────────────────────────────────────── */
-  .fac-back {
-    padding: 12px 24px;
-    border-top: 1px solid #e8eaed;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    color: #9ca3af;
-    cursor: pointer;
-    background: none;
-    border-left: none;
-    border-right: none;
-    border-bottom: none;
-    font-family: inherit;
-    transition: color 0.15s;
-    width: 100%;
-    text-align: left;
-  }
-  .fac-back:hover { color: #E25D25; }
-
   /* ── Mobile ────────────────────────────────────────────────── */
   .fac-mobile-toggle {
     display: none;
@@ -532,6 +510,13 @@ export default function FindACentre() {
       styles: [
         { featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] },
         { featureType: "transit", stylers: [{ visibility: "off" }] },
+        // Desaturate & lighten all map features so orange markers pop
+        { featureType: "all", elementType: "geometry", stylers: [{ saturation: -50 }, { lightness: 20 }] },
+        { featureType: "all", elementType: "labels.text.fill", stylers: [{ saturation: -60 }, { lightness: 10 }] },
+        { featureType: "water", elementType: "geometry", stylers: [{ saturation: -40 }, { lightness: 30 }] },
+        { featureType: "road", elementType: "geometry", stylers: [{ saturation: -60 }, { lightness: 25 }] },
+        { featureType: "road", elementType: "labels", stylers: [{ saturation: -70 }, { lightness: 15 }] },
+        { featureType: "landscape", elementType: "geometry", stylers: [{ saturation: -50 }, { lightness: 25 }] },
       ],
       mapTypeControl: false,
       streetViewControl: false,
@@ -946,10 +931,6 @@ export default function FindACentre() {
             )}
           </div>
 
-          {/* Back to portal */}
-          <button className="fac-back" onClick={() => (window.location.href = "/")}>
-            <Icon d={ic.back} size={14} /> Back to portal
-          </button>
         </div>
 
         {/* ── Map ──────────────────────────────────────────── */}
