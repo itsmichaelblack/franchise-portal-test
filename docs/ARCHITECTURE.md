@@ -87,16 +87,19 @@ Firebase Hosting rewrites all URLs to `/index.html` to support this SPA pattern.
 
 ### App.jsx (Authenticated Portal)
 
-`App.jsx` is a monolithic file (~3,800 lines) containing all portal components. It manages two portals behind authentication:
+`App.jsx` is a monolithic file (~4,400 lines) containing all portal components. It manages two portals behind authentication:
 
 ```
 App
 ├── PortalSelector          # Choose HQ or Franchise Partner portal
-├── AuthPage                # Google Sign-In, role validation
+├── AuthPage                # Google Sign-In, role validation, activity logging
 ├── HQPortal                # Admin interface
 │   ├── Sidebar / TopBar
 │   ├── LocationsPage       # CRUD for franchise locations
-│   │   └── LocationModal   # Create/edit location form
+│   │   ├── LocationModal   # Create/edit location form
+│   │   └── LocationDetailView  # Location detail page with tabs
+│   │       ├── Details Tab     # Read-only location info
+│   │       └── User Logs Tab   # Activity log viewer (UserLogsTab)
 │   ├── UsersPage           # HQ staff management
 │   │   └── InviteUserModal # Invite new HQ user
 │   ├── ServicesPage        # Service catalog management
@@ -107,6 +110,20 @@ App
     ├── Availability/Timetable management
     └── Booking requests view
 ```
+
+### LocationDetailView
+
+Opened by clicking "View" on a location row. Displays a tabbed interface:
+- **Details Tab**: Read-only overview of location info (name, status, address, phone, email, created date, location ID).
+- **User Logs Tab**: Renders `UserLogsTab` component.
+
+### UserLogsTab
+
+Fetches activity logs from the `activity_logs` collection for the given location. Groups logs by user and displays:
+- Summary cards with last sign-in (UTC), last activity (UTC), and action summary badges.
+- Expandable detail tables with full action history.
+- Filter by action type.
+- Summary stats (active users, total actions, most recent activity).
 
 ### FindACentre.jsx (Public)
 
@@ -236,6 +253,20 @@ status: "pending" | "accepted" | "declined"
 createdAt: timestamp
 ```
 
+### `activity_logs/{logId}`
+```
+locationId: string           # Franchise location ID, or "hq" for HQ-level events
+userId: string               # Firebase Auth UID
+userName: string             # Display name
+userEmail: string            # Email address
+action: string               # "sign_in" | "sign_out" | "edit" | "create" | "delete" | "update" | "view"
+category: string             # "auth" | "location" | etc.
+details: string              # Human-readable description
+timestamp: timestamp         # Server timestamp (Firestore)
+```
+
+Logs are immutable — they cannot be updated or deleted. New entries are created via `logUserAction()` in `src/services/firestore.js`.
+
 ---
 
 ## Authentication & Authorization
@@ -249,6 +280,7 @@ createdAt: timestamp
    - **Franchise Partners**: Auto-created if their email matches a location's email.
 4. The user's `role` is validated against the selected portal.
 5. Optional TOTP MFA enrollment/verification via `useAuth` hook.
+6. A `sign_in` activity log entry is created for the user.
 
 ### Authorization Layers
 
@@ -263,9 +295,9 @@ createdAt: timestamp
 
 | Role               | Access                                        |
 | ------------------ | --------------------------------------------- |
-| `master_admin`     | Full HQ access: CRUD locations, users, services, settings, delete |
-| `admin`            | HQ access: add/edit locations, services, settings (no delete, no user management) |
-| `franchise_partner`| Partner portal only: manage own availability, view own bookings |
+| `master_admin`     | Full HQ access: CRUD locations, users, services, settings, delete, view all activity logs |
+| `admin`            | HQ access: add/edit locations, services, settings, view all activity logs (no delete, no user management) |
+| `franchise_partner`| Partner portal only: manage own availability, view own bookings, activity logged for their location |
 
 ---
 
@@ -309,6 +341,7 @@ All email functions use SendGrid. The API key is stored in Firebase Functions co
 - **bookings**: Public create (anonymous); read/update by admins or location's franchise partner.
 - **settings**: Public read; admin write.
 - **services**: Public read; admin write.
+- **activity_logs**: Read by admins (all) or franchise partner (own location); create by any authenticated user; update/delete denied (immutable audit trail).
 
 ### Hosting Headers
 
@@ -322,7 +355,7 @@ Referrer-Policy: strict-origin-when-cross-origin
 
 ## Open Questions
 
-1. **Monolithic App.jsx**: At ~3,800 lines, `App.jsx` contains all portal components. Is there a plan to split it into separate files/modules?
+1. **Monolithic App.jsx**: At ~4,400 lines, `App.jsx` contains all portal components. Is there a plan to split it into separate files/modules?
 2. **Hardcoded Config**: Firebase config and the Google Maps API key are hardcoded in source files rather than using environment variables. Is this intentional for this test project, or should it be parameterized?
 3. **No React Router**: The URL-based routing in `main.jsx` has no support for deep linking, query parameters, or navigation guards. Is a router library planned?
 4. **No Global State**: With data fetched directly in components and passed via props, is there a plan to introduce Context API or a state library as complexity grows?
