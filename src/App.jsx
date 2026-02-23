@@ -2621,29 +2621,35 @@ function FranchisePortal({ user, onLogout }) {
     try {
       const { doc, updateDoc } = await import('firebase/firestore');
       const { db } = await import('./firebase.js');
+      // Clean children - remove empty entries
+      const cleanChildren = edited.children
+        .filter(c => c.name && c.name.trim())
+        .map(c => ({ name: c.name.trim(), grade: c.grade || '' }));
       const updates = {
-        customerName: `${edited.parentFirstName} ${edited.parentLastName}`.trim(),
-        parentFirstName: edited.parentFirstName,
-        parentLastName: edited.parentLastName,
-        customerEmail: edited.email,
-        customerPhone: edited.phone,
-        children: edited.children,
+        customerName: `${edited.parentFirstName.trim()} ${edited.parentLastName.trim()}`.trim(),
+        parentFirstName: edited.parentFirstName.trim(),
+        parentLastName: edited.parentLastName.trim(),
+        customerEmail: edited.email.trim(),
+        customerPhone: edited.phone.trim(),
+        children: cleanChildren,
       };
       // Update all bookings for this member
       for (const b of selectedMember.bookings) {
+        if (!b.id) { console.warn('Booking missing ID, skipping:', b); continue; }
         await updateDoc(doc(db, 'bookings', b.id), updates);
       }
       // Update local state
       setBookings(prev => prev.map(b =>
         selectedMember.bookings.some(sb => sb.id === b.id) ? { ...b, ...updates } : b
       ));
-      setSelectedMember({ ...selectedMember, ...updates, name: updates.customerName, children: edited.children });
+      setSelectedMember({ ...selectedMember, ...updates, name: updates.customerName, phone: updates.customerPhone, email: updates.customerEmail, children: cleanChildren });
       setEditingMember(null);
       setToast('Member profile updated');
       setTimeout(() => setToast(null), 3000);
     } catch (e) {
       console.error('Failed to save member:', e);
-      alert('Failed to save. Please try again.');
+      console.error('Error details:', e.code, e.message);
+      alert('Failed to save: ' + (e.message || 'Unknown error. Check console for details.'));
     }
     setMemberSaving(false);
   };
