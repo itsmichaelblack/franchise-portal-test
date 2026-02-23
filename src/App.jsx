@@ -2518,6 +2518,40 @@ function FranchisePortal({ user, onLogout }) {
   const [buffer, setBuffer] = useState(15);
   const [saved, setSaved] = useState(false);
   const [toast, setToast] = useState(null);
+
+  // Pricing options state
+  const PRICING_OPTIONS = {
+    membership: {
+      label: 'Membership',
+      items: [
+        { id: 'foundation_phase_1', name: 'Foundation Memberships Phase 1', desc: 'Introductory membership for new students starting their learning journey. Includes foundational assessment and personalised learning plan.' },
+        { id: 'foundation_phase_2', name: 'Foundation Memberships Phase 2', desc: 'Building on Phase 1 foundations with expanded subject coverage and increased session frequency.' },
+        { id: 'foundation_phase_3', name: 'Foundation Memberships Phase 3', desc: 'Advanced foundation program with comprehensive subject mastery and exam preparation support.' },
+        { id: 'membership_1_session', name: 'Membership (1 session)', desc: 'Standard weekly membership with one tutoring session per week covering core subjects.' },
+        { id: 'membership_2_sessions', name: 'Membership (2 sessions)', desc: 'Enhanced weekly membership with two tutoring sessions per week for accelerated learning progress.' },
+        { id: 'membership_unlimited', name: 'Membership (Unlimited)', desc: 'Premium all-access membership with unlimited tutoring sessions across all available subjects.' },
+      ]
+    },
+    one_on_one: {
+      label: 'Membership (One-on-one)',
+      items: [
+        { id: 'one_on_one_primary', name: 'One-on-One Session (Primary)', desc: 'Dedicated one-on-one tutoring for primary school students (K-6) tailored to individual learning needs.' },
+        { id: 'one_on_one_secondary', name: 'One-on-One Session (Secondary)', desc: 'Personalised one-on-one tutoring for secondary school students (7-12) with subject-specific focus.' },
+      ]
+    },
+    holiday_camps: {
+      label: 'Holiday Camps',
+      items: [
+        { id: 'camp_coding', name: 'Coding', desc: 'Fun and engaging coding camp teaching programming fundamentals through hands-on projects and games.' },
+        { id: 'camp_public_speaking', name: 'Public Speaking', desc: 'Build confidence and communication skills through structured public speaking exercises and presentations.' },
+        { id: 'camp_creative_writing', name: 'Creative Writing', desc: 'Unlock creativity through storytelling, poetry, and narrative writing workshops with published author mentors.' },
+        { id: 'camp_learn_ai', name: 'Learn AI', desc: 'Introduction to artificial intelligence concepts with age-appropriate activities and real-world applications.' },
+        { id: 'camp_speed_typing', name: 'Speed Typing', desc: 'Develop fast and accurate typing skills through gamified lessons and timed challenges.' },
+      ]
+    }
+  };
+  const [pricing, setPricing] = useState({});
+  const [pricingSaving, setPricingSaving] = useState(false);
   const [bookings, setBookings] = useState([]);
   const [bookingsLoading, setBookingsLoading] = useState(false);
   const [calendarWeekOffset, setCalendarWeekOffset] = useState(0);
@@ -2671,6 +2705,19 @@ function FranchisePortal({ user, onLogout }) {
       } catch (e) { console.error("Failed to load availability:", e); }
     };
     if (locationId) loadAvail();
+  }, [locationId]);
+
+  // Load pricing settings
+  useEffect(() => {
+    const loadPricing = async () => {
+      try {
+        const { doc, getDoc } = await import('firebase/firestore');
+        const { db } = await import('./firebase.js');
+        const snap = await getDoc(doc(db, 'pricing', locationId));
+        if (snap.exists()) setPricing(snap.data());
+      } catch (e) { console.error("Failed to load pricing:", e); }
+    };
+    if (locationId) loadPricing();
   }, [locationId]);
 
   const showToast = (msg) => {
@@ -3265,6 +3312,75 @@ function FranchisePortal({ user, onLogout }) {
                 }
               }}>
                 <Icon path={icons.check} size={14} /> Save Settings
+              </button>
+            </div>
+
+            {/* Pricing Options */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 700, marginTop: 32 }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 18, color: 'var(--fp-text)', marginBottom: 4 }}>Pricing Options</div>
+                <div style={{ fontSize: 13, color: 'var(--fp-muted)' }}>Toggle services on or off and set pricing for your centre.</div>
+              </div>
+
+              {Object.entries(PRICING_OPTIONS).map(([catKey, category]) => (
+                <div key={catKey} className="card fp" style={{ padding: 0, overflow: 'hidden' }}>
+                  <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--fp-border)', background: 'var(--fp-bg)' }}>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)' }}>{category.label}</div>
+                  </div>
+                  {category.items.map((item, idx) => {
+                    const enabled = pricing[item.id]?.enabled ?? false;
+                    const price = pricing[item.id]?.price ?? '';
+                    return (
+                      <div key={item.id} style={{ padding: '16px 20px', borderBottom: idx < category.items.length - 1 ? '1px solid var(--fp-border)' : 'none', display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+                        {/* Toggle */}
+                        <div onClick={() => setPricing(prev => ({ ...prev, [item.id]: { ...prev[item.id], enabled: !enabled, price: prev[item.id]?.price || '' } }))}
+                          style={{ width: 44, height: 24, borderRadius: 12, background: enabled ? 'var(--fp-accent)' : '#d1d5db', cursor: 'pointer', position: 'relative', transition: 'background 0.2s', flexShrink: 0, marginTop: 2 }}>
+                          <div style={{ width: 20, height: 20, borderRadius: '50%', background: '#fff', position: 'absolute', top: 2, left: enabled ? 22 : 2, transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }} />
+                        </div>
+                        {/* Info */}
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: enabled ? 'var(--fp-text)' : 'var(--fp-muted)' }}>{item.name}</div>
+                          <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 2, lineHeight: 1.4 }}>{item.desc}</div>
+                        </div>
+                        {/* Price input */}
+                        <div style={{ flexShrink: 0, width: 110, opacity: enabled ? 1 : 0.4 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Price</div>
+                          <div style={{ display: 'flex', alignItems: 'center', border: '2px solid var(--fp-border)', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
+                            <span style={{ padding: '8px 8px 8px 10px', color: 'var(--fp-muted)', fontSize: 14, fontWeight: 700 }}>$</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={price}
+                              disabled={!enabled}
+                              onChange={e => setPricing(prev => ({ ...prev, [item.id]: { ...prev[item.id], enabled, price: e.target.value } }))}
+                              placeholder="0.00"
+                              style={{ width: '100%', padding: '8px 8px 8px 0', border: 'none', outline: 'none', fontFamily: 'inherit', fontSize: 14, fontWeight: 600, color: 'var(--fp-text)', background: 'transparent' }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+
+              <button className="btn btn-primary fp" style={{ alignSelf: 'flex-start' }}
+                disabled={pricingSaving}
+                onClick={async () => {
+                  setPricingSaving(true);
+                  try {
+                    const { doc, setDoc } = await import('firebase/firestore');
+                    const { db } = await import('./firebase.js');
+                    await setDoc(doc(db, 'pricing', locationId), pricing);
+                    showToast('✓ Pricing saved.');
+                  } catch (e) {
+                    console.error('Failed to save pricing:', e);
+                    showToast('✗ Failed to save pricing.');
+                  }
+                  setPricingSaving(false);
+                }}>
+                <Icon path={icons.check} size={14} /> {pricingSaving ? 'Saving...' : 'Save Pricing'}
               </button>
             </div>
           </>
