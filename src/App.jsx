@@ -1,909 +1,3253 @@
-// src/FindACentre.jsx
-// Public-facing "Find a Centre" page with interactive Google Map.
-// Pulls locations from Firestore, geolocates the user, and shows nearest centres.
+import { useState, useEffect, useRef } from "react";
+import { createLocation, updateLocation, deleteLocation, saveAvailability, getLocations, resendConfirmationEmail } from "./services/firestore";
 
-import { useState, useEffect, useRef, useCallback } from "react";
-import { collection, getDocs, query, orderBy } from "firebase/firestore";
-import { db } from "./firebase";
-
-// ─── Geocode an address string into { lat, lng } using Google Maps Geocoder ──
-function geocodeAddress(address) {
-  return new Promise((resolve, reject) => {
-    if (!window.google?.maps) return reject("Google Maps not loaded");
-    const geocoder = new window.google.maps.Geocoder();
-    geocoder.geocode({ address }, (results, status) => {
-      if (status === "OK" && results[0]) {
-        const loc = results[0].geometry.location;
-        resolve({ lat: loc.lat(), lng: loc.lng() });
-      } else {
-        reject("Could not geocode address");
-      }
-    });
-  });
-}
-
-// ─── Haversine distance (km) ─────────────────────────────────────────────────
-function distanceKm(lat1, lng1, lat2, lng2) {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-// ─── Icon helper ─────────────────────────────────────────────────────────────
-const Icon = ({ d, size = 18 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d={d} />
-  </svg>
-);
-
-const ic = {
-  mapPin: "M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z M12 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
-  navigation: "M3 11l19-9-9 19-2-8-8-2z",
-  phone: "M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.15 13a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.06 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z",
-  mail: "M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z M22 6l-10 7L2 6",
-  search: "M11 3a8 8 0 1 0 0 16 8 8 0 0 0 0-16z M21 21l-4.35-4.35",
-  crosshair: "M12 2v4 M12 18v4 M4.93 4.93l2.83 2.83 M16.24 16.24l2.83 2.83 M2 12h4 M18 12h4 M4.93 19.07l2.83-2.83 M16.24 7.76l2.83-2.83",
-  x: "M18 6L6 18 M6 6l12 12",
-  directions: "M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z",
-  clock: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z M12 6v6l4 2",
-  back: "M15 18l-6-6 6-6",
+// --- Simulated Data -------------------------------------------------------------
+const SIMULATED_USERS = {
+  hq: [
+    { id: 1, email: "master@hq.com", password: "master123", role: "master_admin", name: "Sarah Chen" },
+    { id: 2, email: "admin@hq.com", password: "admin123", role: "admin", name: "James Wright" },
+  ],
+  franchise: [
+    { id: 10, email: "partner@franchise.com", password: "partner123", name: "Alex Morgan", locationId: 1 },
+  ],
 };
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
-const css = `
+const INITIAL_LOCATIONS = [];
+
+const TIMEZONES = [
+  "Pacific/Auckland", "Australia/Sydney", "Australia/Melbourne", "Australia/Brisbane",
+  "Australia/Perth", "Asia/Singapore", "Asia/Tokyo", "Asia/Dubai",
+  "Europe/London", "Europe/Paris", "America/New_York", "America/Los_Angeles",
+  "America/Chicago", "America/Denver",
+];
+
+const COUNTRY_CODES = [
+  { code: "+1", country: "US/CA" }, { code: "+44", country: "UK" },
+  { code: "+61", country: "AU" }, { code: "+64", country: "NZ" },
+  { code: "+65", country: "SG" }, { code: "+81", country: "JP" },
+  { code: "+49", country: "DE" }, { code: "+33", country: "FR" },
+  { code: "+971", country: "AE" }, { code: "+91", country: "IN" },
+];
+
+const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+const INITIAL_AVAILABILITY = DAYS.map((day, i) => ({
+  day,
+  enabled: i < 5,
+  start: "09:00",
+  end: "17:00",
+  unavailable: [], // Array of { date: 'YYYY-MM-DD', reason: '' }
+}));
+
+const SERVICE_NAMES = [
+  'Free Assessment', 'One-on-One Tutoring', 'Small Group Tutoring', 'Homework Club',
+  'Exam Preparation', 'HSC Preparation', 'VCE Preparation', 'QCE Preparation',
+  'ATAR Preparation', 'Selective School Prep', 'Scholarship Prep', 'NAPLAN Preparation',
+  'Holiday Intensive', 'Reading Program', 'Writing Workshop', 'Maths Masterclass',
+  'Science Lab', 'English Workshop', 'Study Skills Workshop', 'Parent Information Session', 'Other',
+];
+
+const COUNTRIES_STATES = {
+  'Australia': ['New South Wales', 'Victoria', 'Queensland', 'Western Australia', 'South Australia', 'Tasmania', 'Northern Territory', 'ACT'],
+  'New Zealand': ['Auckland', 'Wellington', 'Canterbury', 'Waikato', 'Bay of Plenty', 'Otago'],
+  'United Kingdom': ['England', 'Scotland', 'Wales', 'Northern Ireland'],
+  'United States': ['California', 'New York', 'Texas', 'Florida', 'Illinois', 'Pennsylvania'],
+};
+
+// --- Icons ----------------------------------------------------------------------
+const Icon = ({ path, size = 20 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d={path} />
+  </svg>
+);
+const icons = {
+  building: "M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z M9 22V12h6v10",
+  users: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M23 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75",
+  calendar: "M3 4h18v18H3z M16 2v4 M8 2v4 M3 10h18",
+  clock: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z M12 6v6l4 2",
+  plus: "M12 5v14 M5 12h14",
+  edit: "M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7 M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z",
+  trash: "M3 6h18 M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2",
+  logout: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4 M16 17l5-5-5-5 M21 12H9",
+  check: "M20 6L9 17l-5-5",
+  x: "M18 6L6 18 M6 6l12 12",
+  google: "M21.8 10.2H12v3.7h5.6c-.5 2.6-2.8 4.5-5.6 4.5a6.2 6.2 0 1 1 0-12.4c1.6 0 3 .6 4.1 1.6L18.7 5A10 10 0 1 0 22 12c0-.6-.1-1.2-.2-1.8z",
+  shield: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z",
+  map: "M1 6v16l7-4 8 4 7-4V2l-7 4-8-4-7 4 M8 2v16 M16 6v16",
+  phone: "M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.15 13a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.06 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z",
+  mail: "M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z M22 6l-10 7L2 6",
+  globe: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z M2 12h20 M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z",
+  star: "M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z",
+  menu: "M3 12h18 M3 6h18 M3 18h18",
+  alert: "M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z M12 9v4 M12 17h.01",
+};
+
+// --- Styles ---------------------------------------------------------------------
+const styles = `
   @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body, #root { width: 100%; height: 100%; margin: 0; padding: 0; }
 
-  .fac {
-    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
-    display: flex;
-    height: 100vh;
-    height: 100dvh;
+  html, body, #root { width: 100%; min-height: 100vh; margin: 0; padding: 0; }
+
+  :root {
+    --orange: #E25D25;
+    --orange-light: #f07040;
+    --orange-pale: #fdf0ea;
+    --orange-border: #f5c9b0;
+    --teal: #6DCBCA;
+    --teal-dark: #4aadac;
+    --teal-pale: #edfafa;
+    --teal-border: #b8e8e8;
+    --yellow: #F9A72B;
+    --yellow-pale: #fff8ec;
+    --yellow-border: #fde8b0;
+    --bg: #f7f8fa;
+    --surface: #ffffff;
+    --border: #e8eaed;
+    --border-dark: #d0d4db;
+    --text: #1a1d23;
+    --text-muted: #6b7280;
+    --text-light: #9ca3af;
+    --danger: #dc2626;
+    --danger-pale: #fef2f2;
+    --success: #059669;
+    --success-pale: #ecfdf5;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-md: 0 4px 16px rgba(0,0,0,0.08), 0 2px 6px rgba(0,0,0,0.04);
+    --shadow-lg: 0 12px 40px rgba(0,0,0,0.1), 0 4px 12px rgba(0,0,0,0.06);
+    --radius: 12px;
+    --radius-sm: 8px;
+    --radius-lg: 16px;
+    --radius-xl: 24px;
+  }
+
+  body { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; background: var(--bg); color: var(--text); }
+
+  .app { min-height: 100vh; }
+
+  /* -- Portal Selector -------------------------------------------- */
+  .portal-selector {
+    min-height: 100vh;
+    min-height: 100dvh;
     width: 100vw;
-    overflow: hidden;
-    background: #f7f8fa;
-  }
-
-  /* ── Sidebar Panel ────────────────────────────────────────── */
-  .fac-panel {
-    width: 420px;
-    min-width: 420px;
-    height: 100%;
+    background: linear-gradient(145deg, #fff9f5 0%, #f0fafa 50%, #fffbf0 100%);
     display: flex;
     flex-direction: column;
-    background: #ffffff;
-    border-right: 1px solid #e8eaed;
-    z-index: 10;
-    box-shadow: 2px 0 16px rgba(0,0,0,0.06);
-  }
-
-  .fac-header {
-    padding: 20px 24px;
-    border-bottom: 1px solid #e8eaed;
-    background: linear-gradient(135deg, #fff9f5 0%, #f0fafa 100%);
-  }
-  .fac-header-top {
-    display: flex;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 4px;
+    justify-content: center;
+    gap: 48px;
+    padding: 24px;
+    position: relative;
+    overflow: hidden;
   }
-  .fac-logo {
-    width: 40px;
-    height: 40px;
-    object-fit: contain;
+  .portal-selector::before {
+    content: '';
+    position: absolute;
+    top: -120px; right: -120px;
+    width: 400px; height: 400px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(109,203,202,0.15) 0%, transparent 70%);
   }
-  .fac-brand {
-    font-size: 18px;
-    font-weight: 800;
-    color: #1a1d23;
+  .portal-selector::after {
+    content: '';
+    position: absolute;
+    bottom: -80px; left: -80px;
+    width: 300px; height: 300px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(226,93,37,0.1) 0%, transparent 70%);
   }
-  .fac-brand span { color: #E25D25; }
-  .fac-tagline {
-    font-size: 13px;
-    color: #6b7280;
-    margin-top: 2px;
-  }
-
-  /* ── Search Area ────────────────────────────────────────────── */
-  .fac-search {
-    padding: 16px 24px;
-    border-bottom: 1px solid #e8eaed;
+  .portal-logo-wrap {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-  }
-  .fac-search-row {
-    display: flex;
-    gap: 8px;
-  }
-  .fac-search-input-wrap {
-    flex: 1;
+    align-items: center;
+    gap: 0;
     position: relative;
+    z-index: 1;
   }
-  .fac-search-input-wrap svg {
-    position: absolute;
-    left: 12px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: #9ca3af;
-    pointer-events: none;
+  .portal-logo-img {
+    width: 90px;
+    height: 90px;
+    object-fit: contain;
+    filter: drop-shadow(0 4px 12px rgba(226,93,37,0.25));
   }
-  .fac-search-input {
-    width: 100%;
-    padding: 11px 12px 11px 38px;
-    border-radius: 10px;
-    border: 1.5px solid #e8eaed;
-    font-family: inherit;
-    font-size: 14px;
-    color: #1a1d23;
-    background: #f7f8fa;
-    outline: none;
-    transition: border-color 0.2s, box-shadow 0.2s;
+  .portal-brand-name {
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--text);
+    letter-spacing: -0.5px;
+    margin-top: 4px;
   }
-  .fac-search-input:focus {
-    border-color: #E25D25;
-    box-shadow: 0 0 0 3px rgba(226,93,37,0.1);
-    background: #fff;
+  .portal-brand-name span { color: var(--orange); }
+  .portal-title {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    color: var(--text-light);
+    text-transform: uppercase;
+    position: relative;
+    z-index: 1;
   }
-  .fac-search-input::placeholder { color: #9ca3af; }
-  .fac-locate-btn {
-    padding: 0 14px;
-    border-radius: 10px;
-    border: 1.5px solid #e8eaed;
-    background: #fff;
+  .portal-cards {
+    display: flex;
+    gap: 24px;
+    position: relative;
+    z-index: 1;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .portal-card {
+    width: 280px;
+    background: var(--surface);
+    border: 2px solid var(--border);
+    border-radius: var(--radius-xl);
+    padding: 36px 28px;
     cursor: pointer;
-    color: #E25D25;
+    transition: all 0.25s cubic-bezier(0.4,0,0.2,1);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    text-align: center;
+    box-shadow: var(--shadow-sm);
+  }
+  .portal-card:hover {
+    transform: translateY(-6px);
+    box-shadow: var(--shadow-lg);
+    border-color: var(--orange);
+  }
+  .portal-card.fp:hover { border-color: var(--teal-dark); }
+  .portal-icon-wrap {
+    width: 68px; height: 68px;
+    border-radius: 18px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--orange-pale);
+    color: var(--orange);
+  }
+  .portal-card.fp .portal-icon-wrap {
+    background: var(--teal-pale);
+    color: var(--teal-dark);
+  }
+  .portal-card-title {
+    font-size: 19px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .portal-card-desc {
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 1.6;
+  }
+  .portal-badge {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    padding: 5px 14px;
+    border-radius: 20px;
+    text-transform: uppercase;
+    background: var(--orange-pale);
+    color: var(--orange);
+    border: 1px solid var(--orange-border);
+  }
+  .portal-card.fp .portal-badge {
+    background: var(--teal-pale);
+    color: var(--teal-dark);
+    border-color: var(--teal-border);
+  }
+  .portal-hint {
+    font-size: 13px;
+    color: var(--text-light);
+    position: relative;
+    z-index: 1;
+  }
+
+  /* -- Auth ------------------------------------------------------- */
+  .auth-page {
+    min-height: 100vh;
+    min-height: 100dvh;
+    width: 100vw;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.15s;
-    flex-shrink: 0;
+    padding: 24px;
   }
-  .fac-locate-btn:hover {
-    background: #fdf0ea;
-    border-color: #E25D25;
+  .auth-page.hq {
+    background: linear-gradient(145deg, #fff9f5 0%, #fdf5f0 100%);
   }
-  .fac-locate-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+  .auth-page.fp {
+    background: linear-gradient(145deg, #f0fafa 0%, #eafafa 100%);
   }
-  .fac-status {
-    font-size: 12px;
-    color: #6b7280;
+  .auth-card {
+    width: 100%;
+    max-width: 400px;
+    padding: 44px 40px;
+    border-radius: var(--radius-xl);
+    background: var(--surface);
+    box-shadow: var(--shadow-lg);
+    border: 1px solid var(--border);
+  }
+  .auth-logo {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 10px;
+    margin-bottom: 28px;
   }
-  .fac-status-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    flex-shrink: 0;
+  .auth-logo-icon {
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+    font-weight: 800;
   }
-  .fac-status-dot.green { background: #059669; }
-  .fac-status-dot.orange { background: #E25D25; }
-  .fac-status-dot.gray { background: #9ca3af; }
+  .auth-logo.hq .auth-logo-icon { background: var(--orange-pale); color: var(--orange); }
+  .auth-logo.fp .auth-logo-icon { background: var(--teal-pale); color: var(--teal-dark); }
+  .auth-logo-text {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .auth-subtitle { font-size: 14px; color: var(--text-muted); margin-bottom: 32px; }
+  .google-btn {
+    width: 100%;
+    padding: 13px;
+    border-radius: var(--radius);
+    border: 2px solid transparent;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    transition: all 0.2s;
+  }
+  .google-btn.hq {
+    background: var(--orange);
+    color: white;
+  }
+  .google-btn.hq:hover { background: var(--orange-light); }
+  .google-btn.fp {
+    background: var(--teal-dark);
+    color: white;
+  }
+  .google-btn.fp:hover { background: var(--teal); }
+  .google-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+  .back-link {
+    background: none; border: none; cursor: pointer;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 13px;
+    margin-top: 20px;
+    display: block;
+    text-align: center;
+    color: var(--text-light);
+    transition: color 0.15s;
+  }
+  .back-link:hover { color: var(--text-muted); }
+  .auth-error {
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--danger-pale);
+    color: var(--danger);
+    border: 1px solid #fecaca;
+  }
 
-  /* ── Location List ──────────────────────────────────────────── */
-  .fac-list {
-    flex: 1;
-    overflow-y: auto;
-    padding: 8px 0;
+  /* -- Layout ----------------------------------------------------- */
+  .layout {
+    min-height: 100vh;
+    min-height: 100dvh;
+    width: 100vw;
+    display: flex;
+    background: var(--bg);
   }
-  .fac-list-header {
-    padding: 12px 24px 8px;
+
+  /* -- Sidebar ---------------------------------------------------- */
+  .sidebar {
+    width: 256px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 0; left: 0;
+    z-index: 100;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+    transition: transform 0.3s ease;
+  }
+  .sidebar-header {
+    padding: 20px 20px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .sidebar-logo-img {
+    width: 36px; height: 36px;
+    object-fit: contain;
+  }
+  .sidebar-brand {
+    display: flex;
+    flex-direction: column;
+  }
+  .sidebar-logo {
+    font-size: 15px;
+    font-weight: 800;
+    color: var(--text);
+    line-height: 1.2;
+  }
+  .sidebar-logo span { color: var(--orange); }
+  .sidebar-subtitle {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+  .sidebar.hq .sidebar-subtitle { color: var(--text-light); }
+  .sidebar.fp .sidebar-subtitle { color: var(--teal-dark); }
+  .sidebar-nav {
+    flex: 1;
+    padding: 16px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .nav-section-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-light);
+    padding: 8px 10px 4px;
+    margin-top: 8px;
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+    transition: all 0.15s;
+    color: var(--text-muted);
+  }
+  .nav-item:hover { background: var(--bg); color: var(--text); }
+  .sidebar.hq .nav-item.active {
+    background: var(--orange-pale);
+    color: var(--orange);
+    font-weight: 600;
+  }
+  .sidebar.fp .nav-item.active {
+    background: var(--teal-pale);
+    color: var(--teal-dark);
+    font-weight: 600;
+  }
+  .sidebar-footer {
+    padding: 12px;
+    border-top: 1px solid var(--border);
+  }
+  .user-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    margin-bottom: 4px;
+    background: var(--bg);
+  }
+  .avatar {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700;
+    font-size: 13px;
+    flex-shrink: 0;
+    color: white;
+  }
+  .sidebar.hq .avatar { background: var(--orange); }
+  .sidebar.fp .avatar { background: var(--teal-dark); }
+  .user-name { font-size: 13px; font-weight: 600; color: var(--text); }
+  .user-role { font-size: 11px; color: var(--text-light); }
+
+  /* -- Main Content ----------------------------------------------- */
+  .main {
+    margin-left: 256px;
+    flex: 1;
+    padding: 32px 36px;
+    min-height: 100vh;
+    min-height: 100dvh;
+    background: var(--bg);
+    overflow-x: hidden;
+    max-width: calc(100vw - 256px);
+  }
+
+  /* -- Mobile header ---------------------------------------------- */
+  .mobile-header {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    box-shadow: var(--shadow-sm);
+  }
+  .mobile-header-logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 15px;
+    font-weight: 800;
+    color: var(--text);
+  }
+  .mobile-header-logo span { color: var(--orange); }
+  .mobile-header-logo img { width: 28px; height: 28px; object-fit: contain; }
+  .hamburger {
+    width: 36px; height: 36px;
+    border: none;
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+  }
+  .sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 90;
+  }
+
+  /* -- Page Header ------------------------------------------------ */
+  .page-header {
+    margin-bottom: 28px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .page-header-left {}
+  .page-title {
+    font-size: 24px;
+    font-weight: 800;
+    color: var(--text);
+    letter-spacing: -0.5px;
+  }
+  .page-desc { font-size: 14px; color: var(--text-muted); margin-top: 4px; }
+
+  /* -- Stats ------------------------------------------------------ */
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 20px 22px;
+    box-shadow: var(--shadow-sm);
+  }
+  .stat-card.hq { border-top: 3px solid var(--orange); }
+  .stat-card.fp { border-top: 3px solid var(--teal); }
+  .stat-num {
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--text);
+    letter-spacing: -1px;
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+  .stat-label { font-size: 12px; font-weight: 600; color: var(--text-light); text-transform: uppercase; letter-spacing: 0.05em; }
+
+  /* -- Cards ------------------------------------------------------ */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    box-shadow: var(--shadow-sm);
+    margin-bottom: 24px;
+  }
+
+  /* -- Buttons ---------------------------------------------------- */
+  .btn {
+    padding: 9px 18px;
+    border-radius: var(--radius-sm);
+    border: none;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .btn-primary.hq { background: var(--orange); color: white; }
+  .btn-primary.hq:hover { background: var(--orange-light); }
+  .btn-primary.fp { background: var(--teal-dark); color: white; }
+  .btn-primary.fp:hover { background: var(--teal); }
+  .btn-ghost.hq, .btn-ghost.fp {
+    background: var(--surface);
+    border: 1px solid var(--border-dark);
+    color: var(--text-muted);
+  }
+  .btn-ghost.hq:hover, .btn-ghost.fp:hover { border-color: var(--orange); color: var(--orange); }
+  .btn-danger { background: var(--danger-pale); color: var(--danger); border: 1px solid #fecaca; }
+  .btn-danger:hover { background: #fee2e2; }
+
+  /* -- Table ------------------------------------------------------ */
+  .table-wrap { overflow-x: auto; border-radius: var(--radius); }
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    text-align: left;
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: #9ca3af;
+    padding: 12px 16px;
+    background: var(--bg);
+    color: var(--text-light);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
   }
-  .fac-loc {
-    padding: 16px 24px;
-    cursor: pointer;
-    border-bottom: 1px solid #f3f4f6;
-    transition: background 0.15s;
+  td {
+    padding: 14px 16px;
+    font-size: 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+    color: var(--text);
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #fafafa; }
+  .td-muted { font-size: 12px; color: var(--text-muted); }
+
+  /* -- Actions column --------------------------------------------- */
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  /* -- Modal ------------------------------------------------------ */
+  .modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.35);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 200;
+    padding: 20px;
+    backdrop-filter: blur(2px);
+  }
+  .modal {
+    background: var(--surface);
+    border-radius: var(--radius-xl);
+    padding: 32px;
+    width: 100%;
+    max-width: 480px;
+    box-shadow: var(--shadow-lg);
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+  .modal-title {
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--text);
+    margin-bottom: 20px;
+    letter-spacing: -0.3px;
+  }
+  .modal-actions {
     display: flex;
-    gap: 14px;
-  }
-  .fac-loc:hover { background: #fdf0ea; }
-  .fac-loc.active { background: #fdf0ea; border-left: 3px solid #E25D25; }
-  .fac-loc-icon {
-    width: 40px;
-    height: 40px;
-    border-radius: 10px;
-    background: #fdf0ea;
-    color: #E25D25;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    margin-top: 2px;
-  }
-  .fac-loc-info { flex: 1; min-width: 0; }
-  .fac-loc-name {
-    font-size: 15px;
-    font-weight: 700;
-    color: #1a1d23;
-    margin-bottom: 4px;
-  }
-  .fac-loc-address {
-    font-size: 13px;
-    color: #6b7280;
-    line-height: 1.4;
-    margin-bottom: 6px;
-  }
-  .fac-loc-meta {
-    display: flex;
-    gap: 14px;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 24px;
     flex-wrap: wrap;
   }
-  .fac-loc-meta-item {
+
+  /* -- Forms ------------------------------------------------------ */
+  .form-group { margin-bottom: 18px; }
+  .form-label {
+    display: block;
     font-size: 12px;
-    color: #9ca3af;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-  .fac-loc-distance {
-    font-size: 13px;
     font-weight: 700;
-    color: #E25D25;
-    white-space: nowrap;
-    flex-shrink: 0;
-    align-self: flex-start;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 7px;
+  }
+  .form-input {
+    width: 100%;
+    padding: 11px 14px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-dark);
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 14px;
+    color: var(--text);
+    background: var(--surface);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .form-input:focus {
+    border-color: var(--orange);
+    box-shadow: 0 0 0 3px rgba(226,93,37,0.1);
+  }
+  .form-input.fp:focus {
+    border-color: var(--teal-dark);
+    box-shadow: 0 0 0 3px rgba(109,203,202,0.15);
+  }
+  .phone-row { display: flex; gap: 10px; }
+  .phone-code { width: 130px; flex-shrink: 0; }
+  .form-hint {
+    font-size: 12px;
+    color: var(--text-light);
     margin-top: 4px;
   }
-  .fac-loc-actions {
-    display: flex;
-    gap: 6px;
-    margin-top: 8px;
-  }
-  .fac-loc-action-btn {
-    padding: 6px 12px;
-    border-radius: 6px;
-    border: 1px solid #e8eaed;
-    background: #fff;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 12px;
-    font-weight: 600;
-    color: #E25D25;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    transition: all 0.15s;
-  }
-  .fac-loc-action-btn:hover {
-    background: #fdf0ea;
-    border-color: #E25D25;
-  }
 
-  .fac-empty {
-    padding: 48px 24px;
+  /* -- Confirm modal ---------------------------------------------- */
+  .confirm-body { font-size: 14px; color: var(--text-muted); line-height: 1.6; margin-bottom: 4px; }
+  .confirm-name { font-weight: 700; color: var(--text); }
+
+  /* -- Empty state ------------------------------------------------ */
+  .empty-state {
+    padding: 60px 20px;
     text-align: center;
-    color: #9ca3af;
   }
-  .fac-empty-icon { font-size: 36px; margin-bottom: 12px; }
-  .fac-empty-text { font-size: 14px; }
-  .fac-loading {
-    padding: 48px 24px;
-    text-align: center;
-    color: #9ca3af;
-    font-size: 14px;
-  }
+  .empty-icon { font-size: 40px; margin-bottom: 12px; }
+  .empty-text { font-size: 14px; color: var(--text-light); }
 
-  /* ── Map ────────────────────────────────────────────────────── */
-  .fac-map {
-    flex: 1;
-    height: 100%;
-    position: relative;
-  }
-  .fac-map-el {
-    width: 100%;
-    height: 100%;
-  }
-
-  /* ── Back link ──────────────────────────────────────────────── */
-  .fac-back {
-    padding: 12px 24px;
-    border-top: 1px solid #e8eaed;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    color: #9ca3af;
-    cursor: pointer;
-    background: none;
-    border-left: none;
-    border-right: none;
-    border-bottom: none;
-    font-family: inherit;
-    transition: color 0.15s;
-    width: 100%;
-    text-align: left;
-  }
-  .fac-back:hover { color: #E25D25; }
-
-  /* ── Mobile ────────────────────────────────────────────────── */
-  .fac-mobile-toggle {
-    display: none;
+  /* -- Toast ------------------------------------------------------ */
+  .toast {
     position: fixed;
-    bottom: 24px;
+    bottom: 28px;
     left: 50%;
     transform: translateX(-50%);
-    z-index: 20;
-    padding: 12px 24px;
+    padding: 12px 22px;
     border-radius: 40px;
-    border: none;
-    background: #E25D25;
-    color: #fff;
-    font-family: inherit;
     font-size: 14px;
-    font-weight: 700;
-    cursor: pointer;
-    box-shadow: 0 4px 20px rgba(226,93,37,0.4);
-    gap: 8px;
+    font-weight: 600;
+    display: flex;
     align-items: center;
+    gap: 8px;
+    z-index: 999;
+    white-space: nowrap;
+    box-shadow: var(--shadow-lg);
+    animation: slideUp 0.3s ease;
+  }
+  .toast-success {
+    background: var(--success-pale);
+    color: var(--success);
+    border: 1px solid #a7f3d0;
+  }
+  @keyframes slideUp {
+    from { transform: translateX(-50%) translateY(20px); opacity: 0; }
+    to   { transform: translateX(-50%) translateY(0);   opacity: 1; }
   }
 
+  /* -- Timetable (Partner Portal) --------------------------------- */
+  .timetable-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .timetable-row:last-child { border-bottom: none; }
+  .day-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 120px;
+    flex-shrink: 0;
+  }
+  .toggle {
+    position: relative;
+    width: 40px; height: 22px;
+    border-radius: 11px;
+    cursor: pointer;
+    border: none;
+    transition: background 0.2s;
+    flex-shrink: 0;
+  }
+  .toggle.on { background: var(--teal-dark); }
+  .toggle.off { background: var(--border-dark); }
+  .toggle::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: white;
+    transition: left 0.2s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  }
+  .toggle.on::after { left: 21px; }
+  .toggle.off::after { left: 3px; }
+  .day-name { font-size: 14px; font-weight: 600; color: var(--text); }
+  .day-off { font-size: 12px; color: var(--text-light); }
+  .time-inputs { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .time-input {
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-dark);
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 13px;
+    color: var(--text);
+    background: var(--surface);
+    outline: none;
+    width: 120px;
+    transition: border-color 0.2s;
+  }
+  .time-input:focus { border-color: var(--teal-dark); }
+  .time-separator { color: var(--text-light); font-size: 13px; }
+
+  /* -- Buffer chips ----------------------------------------------- */
+  .buffer-chips { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+  .buffer-chip {
+    padding: 8px 18px;
+    border-radius: 40px;
+    border: 2px solid var(--border-dark);
+    background: var(--surface);
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: all 0.15s;
+  }
+  .buffer-chip.active {
+    background: var(--teal-pale);
+    border-color: var(--teal-dark);
+    color: var(--teal-dark);
+  }
+  .buffer-chip:hover:not(.active) { border-color: var(--teal); color: var(--teal-dark); }
+
+  /* -- Info notice ------------------------------------------------ */
+  .info-notice {
+    padding: 12px 16px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    margin-bottom: 20px;
+    line-height: 1.5;
+  }
+  .info-notice.hq {
+    background: var(--orange-pale);
+    border: 1px solid var(--orange-border);
+    color: var(--orange);
+  }
+  .info-notice.fp {
+    background: var(--teal-pale);
+    border: 1px solid var(--teal-border);
+    color: var(--teal-dark);
+  }
+
+  /* -- Section header inside card --------------------------------- */
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .card-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  /* -- Role badge ------------------------------------------------- */
+  .role-badge {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 20px;
+    letter-spacing: 0.04em;
+    display: inline-block;
+  }
+  .role-badge.master { background: var(--orange-pale); color: var(--orange); border: 1px solid var(--orange-border); }
+  .role-badge.admin { background: var(--bg); color: var(--text-muted); border: 1px solid var(--border-dark); }
+
+  /* -- Responsive ------------------------------------------------- */
   @media (max-width: 768px) {
-    .fac { flex-direction: column; }
-    .fac-panel {
-      width: 100%;
-      min-width: 100%;
-      height: 100%;
-      position: fixed;
-      top: 0; left: 0;
-      z-index: 20;
-      transition: transform 0.3s ease;
+    .sidebar {
+      transform: translateX(-100%);
     }
-    .fac-panel.hidden {
-      transform: translateY(100%);
+    .sidebar.open {
+      transform: translateX(0);
     }
-    .fac-map { height: 100vh; height: 100dvh; }
-    .fac-mobile-toggle {
+    .sidebar-overlay.open {
+      display: block;
+    }
+    .mobile-header {
       display: flex;
     }
+    .main {
+      margin-left: 0;
+      padding: 20px 16px;
+      max-width: 100vw;
+    }
+    .portal-selector {
+      gap: 32px;
+      padding: 24px 16px;
+    }
+    .portal-cards {
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+      padding: 0 8px;
+    }
+    .portal-card {
+      width: 100%;
+      max-width: 340px;
+      padding: 28px 22px;
+    }
+    .portal-logo-img {
+      width: 72px;
+      height: 72px;
+    }
+    .portal-brand-name {
+      font-size: 20px;
+    }
+    .portal-title {
+      font-size: 11px;
+    }
+    .auth-page {
+      padding: 16px;
+    }
+    .auth-card {
+      padding: 32px 24px;
+    }
+    .stats-row {
+      grid-template-columns: 1fr 1fr;
+    }
+    .page-header {
+      flex-direction: column;
+      gap: 12px;
+    }
+    .page-title {
+      font-size: 20px;
+    }
+    .modal-overlay {
+      padding: 12px;
+      align-items: flex-start;
+      padding-top: 40px;
+    }
+    .modal {
+      padding: 24px 20px;
+      max-height: 90vh;
+      overflow-y: auto;
+      width: 100%;
+    }
+    .phone-row {
+      flex-direction: column;
+    }
+    .phone-code {
+      width: 100% !important;
+    }
+    .timetable-row, .day-row {
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .day-toggle { width: auto; }
+    .day-name { width: 80px; font-size: 13px; }
+    .time-inputs { width: 100%; }
+    .time-input { width: 100%; }
+    .actions { flex-direction: column; }
+    .actions .btn { width: 100%; justify-content: center; }
+    .settings-grid {
+      grid-template-columns: 1fr;
+    }
+    .buffer-options {
+      flex-wrap: wrap;
+    }
+    .save-bar {
+      justify-content: stretch;
+    }
+    .save-bar .btn {
+      width: 100%;
+      justify-content: center;
+    }
+    .card {
+      border-radius: var(--radius);
+    }
+    .table-wrap {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .btn-primary {
+      width: 100%;
+      justify-content: center;
+    }
+    .select-styled {
+      width: 100% !important;
+    }
   }
-
-  /* ── Google autocomplete dropdown styling ────────────────── */
-  .pac-container {
-    border-radius: 10px !important;
-    border: 1px solid #e8eaed !important;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.12) !important;
-    margin-top: 4px !important;
-    font-family: 'Plus Jakarta Sans', system-ui, sans-serif !important;
+  @media (max-width: 480px) {
+    .portal-selector {
+      gap: 24px;
+      padding: 20px 12px;
+    }
+    .portal-card {
+      padding: 24px 18px;
+      gap: 12px;
+    }
+    .portal-icon-wrap {
+      width: 56px;
+      height: 56px;
+    }
+    .portal-card-title {
+      font-size: 17px;
+    }
+    .portal-card-desc {
+      font-size: 12px;
+    }
+    .stats-row { grid-template-columns: 1fr; }
+    .buffer-chips { gap: 8px; }
+    .buffer-chip { padding: 7px 14px; font-size: 12px; }
+    .table-wrap { margin: 0 -8px; }
+    .portal-logo-img { width: 64px; height: 64px; }
+    .portal-brand-name { font-size: 18px; }
+    .auth-card { padding: 28px 18px; }
+    .page-header { padding: 0; }
+    .stat-card { padding: 14px 16px; }
+    .day-row { padding: 12px 0; }
   }
-  .pac-item {
-    padding: 10px 14px !important;
-    font-size: 13px !important;
-    cursor: pointer !important;
-  }
-  .pac-item:hover {
-    background: #fdf0ea !important;
-  }
-  .pac-item-query {
-    font-size: 13px !important;
-    font-weight: 600 !important;
-  }
-
-  /* ── InfoWindow styling ──────────────────────────────────── */
-  .gm-style-iw button.gm-ui-hover-effect {
-    top: 4px !important;
-    right: 4px !important;
-    width: 28px !important;
-    height: 28px !important;
-    border-radius: 50% !important;
-    background: #f3f4f6 !important;
-    opacity: 1 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-  }
-  .gm-style-iw button.gm-ui-hover-effect > span {
-    margin: 0 !important;
-    background-color: #6b7280 !important;
-    width: 16px !important;
-    height: 16px !important;
-  }
-  .gm-style-iw button.gm-ui-hover-effect:hover {
-    background: #e5e7eb !important;
-  }
-  .gm-style .gm-style-iw-c {
-    border-radius: 14px !important;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.12) !important;
-    padding: 4px !important;
-  }
-  .gm-style .gm-style-iw-d {
-    overflow: auto !important;
-  }
-  .gm-style .gm-style-iw-tc::after {
-    background: #fff !important;
+  @media (max-width: 360px) {
+    .portal-card {
+      max-width: 100%;
+      padding: 20px 16px;
+    }
+    .auth-card {
+      padding: 24px 16px;
+    }
+    .modal {
+      padding: 20px 16px;
+    }
   }
 `;
 
-// ─── Main Component ──────────────────────────────────────────────────────────
-export default function FindACentre() {
-  const [locations, setLocations] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [userPos, setUserPos] = useState(null);
-  const [selectedLoc, setSelectedLoc] = useState(null);
-  const [locStatus, setLocStatus] = useState("idle"); // idle | locating | located | denied | error
-  const [showPanel, setShowPanel] = useState(true);
+// --- App ------------------------------------------------------------------------
+export default function App() {
+  const [portal, setPortal] = useState(null); // 'hq' | 'fp'
+  const [session, setSession] = useState(null);
 
-  const mapRef = useRef(null);
-  const mapInstance = useRef(null);
-  const markersRef = useRef([]);
-  const clustererRef = useRef(null);
-  const userMarkerRef = useRef(null);
-  const searchInputRef = useRef(null);
-  const autocompleteRef = useRef(null);
-  const infoWindowRef = useRef(null);
-
-  // ── Load locations from Firestore ──────────────────────────────────────
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const q = query(collection(db, "locations"), orderBy("createdAt", "desc"));
-        const snap = await getDocs(q);
-        const locs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setLocations(locs);
-      } catch (e) {
-        console.error("Failed to load locations:", e);
-      }
-      setLoading(false);
-    };
-    load();
-  }, []);
-
-  // ── Geocode locations that don't have lat/lng yet ──────────────────────
-  useEffect(() => {
-    if (locations.length === 0 || !window.google?.maps) return;
-    const geocodeAll = async () => {
-      const updated = await Promise.all(
-        locations.map(async (loc) => {
-          if (loc.lat && loc.lng) return loc;
-          try {
-            const coords = await geocodeAddress(loc.address);
-            return { ...loc, ...coords };
-          } catch {
-            return loc;
-          }
-        })
-      );
-      setLocations(updated);
-    };
-    geocodeAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locations.length]);
-
-  // ── Compute distances when user position changes ───────────────────────
-  const sortedLocations = userPos
-    ? [...locations]
-        .filter((l) => l.lat && l.lng)
-        .map((l) => ({
-          ...l,
-          distance: distanceKm(userPos.lat, userPos.lng, l.lat, l.lng),
-        }))
-        .sort((a, b) => a.distance - b.distance)
-    : locations.filter((l) => l.lat && l.lng);
-
-  // ── Init Google Map ────────────────────────────────────────────────────
-  const initMap = useCallback(() => {
-    if (!mapRef.current || !window.google?.maps || mapInstance.current) return;
-
-    mapInstance.current = new window.google.maps.Map(mapRef.current, {
-      center: { lat: -33.8688, lng: 151.2093 }, // Default: Sydney
-      zoom: 10,
-      minZoom: 3,
-      maxZoom: 18,
-      styles: [
-        { featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] },
-        { featureType: "transit", stylers: [{ visibility: "off" }] },
-      ],
-      mapTypeControl: false,
-      streetViewControl: false,
-      fullscreenControl: false,
-      zoomControlOptions: { position: window.google.maps.ControlPosition.RIGHT_CENTER },
-      restriction: {
-        latLngBounds: { north: 85, south: -85, west: -180, east: 180 },
-        strictBounds: true,
-      },
-    });
-
-    infoWindowRef.current = new window.google.maps.InfoWindow();
-  }, []);
-
-  useEffect(() => {
-    const checkGoogle = setInterval(() => {
-      if (window.google?.maps) {
-        clearInterval(checkGoogle);
-        initMap();
-      }
-    }, 200);
-    return () => clearInterval(checkGoogle);
-  }, [initMap]);
-
-  // ── Place markers on map when locations update ─────────────────────────
-  useEffect(() => {
-    if (!mapInstance.current || !window.google?.maps) return;
-
-    // Clear old markers
-    markersRef.current.forEach((m) => m.setMap(null));
-    markersRef.current = [];
-    // Clear old clusterer
-    if (clustererRef.current) {
-      clustererRef.current.clearMarkers();
-      clustererRef.current = null;
-    }
-
-    const locsWithCoords = locations.filter((l) => l.lat && l.lng);
-    if (locsWithCoords.length === 0) return;
-
-    const bounds = new window.google.maps.LatLngBounds();
-
-    locsWithCoords.forEach((loc) => {
-      const marker = new window.google.maps.Marker({
-        position: { lat: loc.lat, lng: loc.lng },
-        map: mapInstance.current,
-        title: loc.name,
-        icon: {
-          url: "/logo-sticker.png",
-          scaledSize: new window.google.maps.Size(32, 32),
-          anchor: new window.google.maps.Point(16, 16),
-        },
-      });
-
-      marker.addListener("click", () => {
-        setSelectedLoc(loc.id);
-        const dist = loc.distance ? `${loc.distance.toFixed(1)} km away` : "";
-        infoWindowRef.current.setContent(`
-          <div style="font-family:'Plus Jakarta Sans',sans-serif;padding:8px 6px;max-width:270px;">
-            <div style="font-weight:800;font-size:15px;color:#1a1d23;margin-bottom:6px;padding-right:8px;">${loc.name}</div>
-            <div style="font-size:12px;color:#6b7280;line-height:1.5;margin-bottom:6px;">${loc.address}</div>
-            ${loc.phone ? `<div style="font-size:12px;color:#6b7280;margin-bottom:4px;">${loc.phone}</div>` : ""}
-            ${dist ? `<div style="font-size:12px;font-weight:700;color:#E25D25;margin-top:6px;">${dist}</div>` : ""}
-            <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(loc.address)}" target="_blank"
-              style="display:inline-block;margin-top:10px;padding:8px 16px;border-radius:8px;background:#E25D25;color:#fff;font-size:12px;font-weight:700;text-decoration:none;">
-              Get Directions
-            </a>
-          </div>
-        `);
-        infoWindowRef.current.open(mapInstance.current, marker);
-      });
-
-      bounds.extend({ lat: loc.lat, lng: loc.lng });
-      markersRef.current.push(marker);
-    });
-
-    // Initialize MarkerClusterer
-    if (window.markerClusterer && markersRef.current.length > 0) {
-      clustererRef.current = new window.markerClusterer.MarkerClusterer({
-        map: mapInstance.current,
-        markers: markersRef.current,
-        algorithmOptions: {
-          maxZoom: 14,
-          radius: 120,
-        },
-        renderer: {
-          render: ({ count, position }) => {
-            const zoom = mapInstance.current.getZoom() || 5;
-            const size = Math.min(18 + Math.log2(count) * 5, 36);
-            return new window.google.maps.Marker({
-              position,
-              label: {
-                text: String(count),
-                color: "#fff",
-                fontWeight: "800",
-                fontSize: count > 99 ? "11px" : "12px",
-                fontFamily: "Plus Jakarta Sans, sans-serif",
-              },
-              icon: {
-                path: window.google.maps.SymbolPath.CIRCLE,
-                fillColor: "#E25D25",
-                fillOpacity: 0.9,
-                strokeColor: "#fff",
-                strokeWeight: 2.5,
-                scale: size,
-                labelOrigin: new window.google.maps.Point(0, 0),
-              },
-              zIndex: Number(window.google.maps.Marker.MAX_ZINDEX) + count,
-            });
-          },
-        },
-        onClusterClick: (event, cluster, map) => {
-          map.fitBounds(cluster.bounds, { padding: 60 });
-        },
-      });
-    }
-
-    if (userPos) {
-      bounds.extend(userPos);
-    }
-
-    mapInstance.current.fitBounds(bounds, { padding: 60 });
-
-    // Clamp zoom to min/max
-    const idleListener = mapInstance.current.addListener("idle", () => {
-      const z = mapInstance.current.getZoom();
-      if (z < 3) mapInstance.current.setZoom(3);
-      window.google.maps.event.removeListener(idleListener);
-    });
-
-    if (locsWithCoords.length === 1 && !userPos) {
-      mapInstance.current.setZoom(14);
-    }
-  }, [locations, userPos]);
-
-  // ── Place/update user marker ───────────────────────────────────────────
-  useEffect(() => {
-    if (!mapInstance.current || !userPos || !window.google?.maps) return;
-
-    if (userMarkerRef.current) {
-      userMarkerRef.current.setPosition(userPos);
-    } else {
-      userMarkerRef.current = new window.google.maps.Marker({
-        position: userPos,
-        map: mapInstance.current,
-        title: "Your location",
-        icon: {
-          path: window.google.maps.SymbolPath.CIRCLE,
-          scale: 8,
-          fillColor: "#3b82f6",
-          fillOpacity: 1,
-          strokeColor: "#fff",
-          strokeWeight: 3,
-        },
-        zIndex: 999,
-      });
-    }
-  }, [userPos]);
-
-  // ── Init search autocomplete ───────────────────────────────────────────
-  useEffect(() => {
-    if (!searchInputRef.current || !window.google?.maps?.places) return;
-    const checkReady = setInterval(() => {
-      if (window.google?.maps?.places) {
-        clearInterval(checkReady);
-        autocompleteRef.current = new window.google.maps.places.Autocomplete(searchInputRef.current, {
-          types: ["geocode"],
-          fields: ["geometry", "formatted_address"],
-        });
-        autocompleteRef.current.addListener("place_changed", () => {
-          const place = autocompleteRef.current.getPlace();
-          if (place.geometry) {
-            const pos = {
-              lat: place.geometry.location.lat(),
-              lng: place.geometry.location.lng(),
-            };
-            setUserPos(pos);
-            setLocStatus("located");
-
-            // Zoom to area showing searched location + nearby centres
-            if (mapInstance.current) {
-              const bounds = new window.google.maps.LatLngBounds();
-              bounds.extend(pos);
-
-              // Include the 3 nearest locations in the bounds
-              const nearby = locations
-                .filter((l) => l.lat && l.lng)
-                .map((l) => ({ ...l, dist: distanceKm(pos.lat, pos.lng, l.lat, l.lng) }))
-                .sort((a, b) => a.dist - b.dist)
-                .slice(0, 3);
-
-              nearby.forEach((l) => bounds.extend({ lat: l.lat, lng: l.lng }));
-
-              mapInstance.current.fitBounds(bounds, { padding: 80 });
-
-              // Limit max zoom so it doesn't zoom in too much
-              const listener = mapInstance.current.addListener("idle", () => {
-                if (mapInstance.current.getZoom() > 13) {
-                  mapInstance.current.setZoom(13);
-                }
-                window.google.maps.event.removeListener(listener);
-              });
-            }
-          }
-        });
-      }
-    }, 300);
-    return () => clearInterval(checkReady);
-  }, [locations]);
-
-  // ── Geolocate user ────────────────────────────────────────────────────
-  const handleGeolocate = () => {
-    if (!navigator.geolocation) {
-      setLocStatus("error");
-      return;
-    }
-    setLocStatus("locating");
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setUserPos({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        setLocStatus("located");
-      },
-      (err) => {
-        if (err.code === 1) setLocStatus("denied");
-        else setLocStatus("error");
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
-  };
-
-  // ── Auto-geolocate on mount ───────────────────────────────────────────
-  useEffect(() => {
-    handleGeolocate();
-  }, []);
-
-  // ── Click a location in the list ──────────────────────────────────────
-  const handleSelectLocation = (loc) => {
-    setSelectedLoc(loc.id);
-    if (mapInstance.current && loc.lat && loc.lng) {
-      mapInstance.current.panTo({ lat: loc.lat, lng: loc.lng });
-      mapInstance.current.setZoom(15);
-      // Trigger marker click
-      const marker = markersRef.current.find(
-        (m) => Math.abs(m.getPosition().lat() - loc.lat) < 0.0001
-      );
-      if (marker) {
-        window.google.maps.event.trigger(marker, "click");
-      }
-    }
-    // On mobile, show map
-    if (window.innerWidth <= 768) {
-      setShowPanel(false);
-    }
-  };
-
-  const statusText = {
-    idle: { dot: "gray", text: "Enter your address or allow location access to find your nearest centre" },
-    locating: { dot: "orange", text: "Finding your location..." },
-    located: { dot: "green", text: "Showing centres nearest to you" },
-    denied: { dot: "orange", text: "Location access denied — search an address above" },
-    error: { dot: "orange", text: "Couldn't detect location — search an address above" },
-  };
-
-  const status = statusText[locStatus];
+  const handleLogin = (user) => setSession(user);
+  const handleLogout = () => { setSession(null); setPortal(null); };
 
   return (
     <>
-      <style>{css}</style>
-      <div className="fac">
-        {/* ── Side Panel ─────────────────────────────────── */}
-        <div className={`fac-panel ${showPanel ? "" : "hidden"}`}>
-          {/* Header */}
-          <div className="fac-header">
-            <div className="fac-header-top">
-              <img src="/logo-sticker.png" alt="Success Tutoring" className="fac-logo" />
-              <div className="fac-brand">
-                <span>Success</span> Tutoring
-              </div>
-            </div>
-            <div className="fac-tagline">Find your nearest tutoring centre</div>
-          </div>
+      <style>{styles}</style>
+      {!portal && <PortalSelector onSelect={setPortal} />}
+      {portal && !session && (
+        <AuthPage portal={portal} onLogin={handleLogin} onBack={() => setPortal(null)} />
+      )}
+      {portal && session && (
+        portal === 'hq'
+          ? <HQPortal user={session} onLogout={handleLogout} />
+          : <FranchisePortal user={session} onLogout={handleLogout} />
+      )}
+    </>
+  );
+}
 
-          {/* Search */}
-          <div className="fac-search">
-            <div className="fac-search-row">
-              <div className="fac-search-input-wrap">
-                <Icon d={ic.search} size={16} />
-                <input
-                  ref={searchInputRef}
-                  className="fac-search-input"
-                  placeholder="Search by suburb or address..."
-                  type="text"
-                />
-              </div>
-              <button
-                className="fac-locate-btn"
-                onClick={handleGeolocate}
-                disabled={locStatus === "locating"}
-                title="Use my location"
-              >
-                <Icon d={ic.crosshair} size={18} />
-              </button>
-            </div>
-            <div className="fac-status">
-              <div className={`fac-status-dot ${status.dot}`} />
-              {status.text}
+// --- Portal Selector ------------------------------------------------------------
+function PortalSelector({ onSelect }) {
+  return (
+    <div className="portal-selector">
+      <div className="portal-logo-wrap">
+        <img src="/logo-sticker.png" alt="Success Tutoring" className="portal-logo-img" />
+        <div className="portal-brand-name"><span>Success</span> Tutoring</div>
+      </div>
+      <div className="portal-title">Franchise Management System</div>
+      <div className="portal-cards">
+        <div className="portal-card" onClick={() => onSelect('hq')}>
+          <div className="portal-icon-wrap">
+            <Icon path={icons.building} size={28} />
+          </div>
+          <div className="portal-card-title">HQ Portal</div>
+          <div className="portal-card-desc">Manage franchise locations, admins and operations from headquarters.</div>
+          <div className="portal-badge">HQ Staff</div>
+        </div>
+        <div className="portal-card fp" onClick={() => onSelect('fp')}>
+          <div className="portal-icon-wrap">
+            <Icon path={icons.calendar} size={28} />
+          </div>
+          <div className="portal-card-title">Franchise Partner</div>
+          <div className="portal-card-desc">Manage your availability, timetable and booking settings.</div>
+          <div className="portal-badge">Partner Access</div>
+        </div>
+      </div>
+      <div className="portal-hint">Click a portal to sign in</div>
+    </div>
+  );
+}
+
+// --- Auth Page ------------------------------------------------------------------
+function AuthPage({ portal, onLogin, onBack }) {
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const t = portal;
+
+  const handleGoogleSignIn = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const { signInWithPopup, GoogleAuthProvider, getAuth } = await import('firebase/auth');
+      const { doc, getDoc, setDoc, collection, getDocs, query, where, serverTimestamp } = await import('firebase/firestore');
+      const firebaseModule = await import('./firebase.js');
+      const auth = firebaseModule.auth;
+      const db = firebaseModule.db;
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      const firebaseUser = result.user;
+      const profileSnap = await getDoc(doc(db, 'users', firebaseUser.uid));
+
+      if (!profileSnap.exists()) {
+        // Check if this user's email matches any location (franchise partner auto-registration)
+        if (portal === 'fp') {
+          const locQuery = query(collection(db, 'locations'), where('email', '==', firebaseUser.email));
+          const locSnap = await getDocs(locQuery);
+
+          if (!locSnap.empty) {
+            const matchedLoc = locSnap.docs[0];
+            // Auto-create franchise partner profile
+            const partnerProfile = {
+              name: firebaseUser.displayName || matchedLoc.data().name,
+              email: firebaseUser.email,
+              role: 'franchise_partner',
+              locationId: matchedLoc.id,
+              updatedAt: serverTimestamp(),
+            };
+            await setDoc(doc(db, 'users', firebaseUser.uid), partnerProfile);
+            onLogin({ ...partnerProfile, uid: firebaseUser.uid });
+            setLoading(false);
+            return;
+          }
+        }
+
+        setError('Your account has not been set up yet. Please contact HQ.');
+        await auth.signOut();
+        setLoading(false);
+        return;
+      }
+      const profile = profileSnap.data();
+      if (portal === 'hq' && profile.role !== 'master_admin' && profile.role !== 'admin') {
+        setError('You do not have HQ access. Please use the Franchise Partner portal.');
+        await auth.signOut();
+        setLoading(false);
+        return;
+      }
+      if (portal === 'fp' && profile.role !== 'franchise_partner') {
+        setError('You do not have Franchise Partner access. Please use the HQ portal.');
+        await auth.signOut();
+        setLoading(false);
+        return;
+      }
+      onLogin({ ...profile, uid: firebaseUser.uid, name: profile.name || firebaseUser.displayName });
+    } catch (err) {
+      if (err.code === 'auth/popup-closed-by-user') {
+        setError('Sign-in was cancelled. Please try again.');
+      } else {
+        setError(err.message || 'Sign-in failed. Please try again.');
+      }
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className={`auth-page ${t}`}>
+      <div className={`auth-card ${t}`}>
+        <div className={`auth-logo ${t}`}>
+          <div className="auth-logo-icon"><img src="/logo-sticker.png" alt="Success Tutoring" style={{ width: 32, height: 32, objectFit: 'contain' }} /></div>
+          <div className="auth-logo-text">{portal === 'hq' ? 'HQ Portal' : 'Partner Portal'}</div>
+        </div>
+        <div className="auth-subtitle">Sign in to your account</div>
+
+        {error && (
+          <div className={`auth-error ${t}`}>
+            <Icon path={icons.alert} size={15} /> {error}
+          </div>
+        )}
+
+        <button className={`google-btn ${t}`} onClick={handleGoogleSignIn} disabled={loading}>
+          <Icon path={icons.google} size={16} />
+          {loading ? 'Signing in...' : 'Continue with Google'}
+        </button>
+
+        <button className={`back-link ${t}`} onClick={onBack}>
+          ← Choose portal
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// --- HQ Portal ------------------------------------------------------------------
+function HQPortal({ user, onLogout }) {
+  const [page, setPage] = useState('locations');
+  const [locations, setLocations] = useState([]);
+  const [locationsLoading, setLocationsLoading] = useState(true);
+  const [modal, setModal] = useState(null); // null | 'add' | { type:'edit', loc } | { type:'delete', loc }
+  const [toast, setToast] = useState(null);
+  const [filterCountry, setFilterCountry] = useState('all');
+  const [filterState, setFilterState] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('all');
+
+  const isMaster = user.role === 'master_admin';
+  const [hqUsers, setHqUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [userModal, setUserModal] = useState(null); // null | 'invite' | { type:'remove', u }
+
+  // HQ Settings
+  const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [settingsLoading, setSettingsLoading] = useState(false);
+
+  // Services
+  const [services, setServices] = useState([]);
+  const [servicesLoading, setServicesLoading] = useState(false);
+  const [serviceModal, setServiceModal] = useState(null);
+  const [svcFilterCountry, setSvcFilterCountry] = useState('all');
+  const [svcFilterState, setSvcFilterState] = useState('all');
+
+  // Load HQ settings
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const { doc, getDoc } = await import('firebase/firestore');
+        const { db } = await import('./firebase.js');
+        const snap = await getDoc(doc(db, 'settings', 'hq'));
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data.youtubeUrl) setYoutubeUrl(data.youtubeUrl);
+        }
+      } catch (e) { console.error("Failed to load settings:", e); }
+    };
+    loadSettings();
+  }, []);
+
+  const handleSaveSettings = async () => {
+    setSettingsLoading(true);
+    try {
+      const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
+      const { db } = await import('./firebase.js');
+      await setDoc(doc(db, 'settings', 'hq'), {
+        youtubeUrl,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      showToast('✓ Settings saved.');
+    } catch (err) {
+      console.error("Failed to save settings:", err);
+      showToast('✗ Failed to save settings.');
+    }
+    setSettingsLoading(false);
+  };
+
+  // Load services
+  useEffect(() => {
+    const loadServices = async () => {
+      setServicesLoading(true);
+      try {
+        const { collection, getDocs } = await import('firebase/firestore');
+        const { db } = await import('./firebase.js');
+        const snap = await getDocs(collection(db, 'services'));
+        setServices(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (e) { console.error("Failed to load services:", e); }
+      setServicesLoading(false);
+    };
+    loadServices();
+  }, []);
+
+  const handleSaveService = async (data, editingId) => {
+    try {
+      const { doc, setDoc, addDoc, collection, serverTimestamp } = await import('firebase/firestore');
+      const { db } = await import('./firebase.js');
+      if (editingId) {
+        await setDoc(doc(db, 'services', editingId), { ...data, updatedAt: serverTimestamp() }, { merge: true });
+        setServices(prev => prev.map(s => s.id === editingId ? { ...s, ...data } : s));
+        showToast('✓ Service updated.');
+      } else {
+        const ref = await addDoc(collection(db, 'services'), { ...data, createdAt: serverTimestamp() });
+        setServices(prev => [...prev, { id: ref.id, ...data }]);
+        showToast('✓ Service created.');
+      }
+    } catch (err) {
+      console.error("Failed to save service:", err);
+      showToast('✗ Failed to save service.');
+    }
+    setServiceModal(null);
+  };
+
+  const handleDeleteService = async (id) => {
+    try {
+      const { doc, deleteDoc } = await import('firebase/firestore');
+      const { db } = await import('./firebase.js');
+      await deleteDoc(doc(db, 'services', id));
+      setServices(prev => prev.filter(s => s.id !== id));
+      showToast('✓ Service deleted.');
+    } catch (err) {
+      console.error("Failed to delete service:", err);
+      showToast('✗ Failed to delete service.');
+    }
+    setServiceModal(null);
+  };
+
+  useEffect(() => {
+    const loadLocations = async () => {
+      setLocationsLoading(true);
+      try {
+        const locs = await getLocations();
+        setLocations(locs.map(l => ({
+          ...l,
+          createdAt: l.createdAt?.toDate ? l.createdAt.toDate().toISOString().split('T')[0] : l.createdAt || '',
+        })));
+      } catch (e) { console.error("Failed to load locations:", e); }
+      setLocationsLoading(false);
+    };
+    loadLocations();
+  }, []);
+
+  const showToast = (msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  const handleSave = async (data, editingId, resendEmail) => {
+    if (editingId) {
+      try {
+        await updateLocation(editingId, data);
+        setLocations(prev => prev.map(l => l.id === editingId ? { ...l, ...data } : l));
+        if (resendEmail) {
+          showToast(`✓ Location "${data.name}" updated & confirmation email re-sent to ${data.email}.`);
+        } else {
+          showToast(`✓ Location "${data.name}" updated.`);
+        }
+      } catch (err) {
+        console.error("Failed to update location:", err);
+        showToast(`✗ Failed to update location. Please try again.`);
+      }
+    } else {
+      try {
+        const newId = await createLocation(data);
+        const newLoc = { ...data, id: newId, createdAt: new Date().toISOString().split('T')[0] };
+        setLocations(prev => [...prev, newLoc]);
+        showToast(`✓ Location created. Confirmation email sent to ${data.email} via SendGrid.`);
+      } catch (err) {
+        console.error("Failed to create location:", err);
+        showToast(`✗ Failed to create location. Please try again.`);
+      }
+    }
+    setModal(null);
+  };
+
+  const handleDelete = async (id) => {
+    const loc = locations.find(l => l.id === id);
+    try {
+      await deleteLocation(id);
+      setLocations(prev => prev.filter(l => l.id !== id));
+      showToast(`Location "${loc.name}" deleted.`);
+    } catch (err) {
+      console.error("Failed to delete location:", err);
+      showToast(`✗ Failed to delete location. Please try again.`);
+    }
+    setModal(null);
+  };
+
+  return (
+    <div className="layout hq">
+      <div className="mobile-header">
+        <div className="mobile-header-logo">
+          <img src="/logo-sticker.png" alt="" />
+          <span><span style={{color:'var(--orange)'}}>Success</span> Tutoring</span>
+        </div>
+        <button className="hamburger" onClick={() => document.querySelector('.sidebar.hq').classList.toggle('open')}>
+          <Icon path={icons.menu} size={20} />
+        </button>
+      </div>
+      <div className="sidebar-overlay" onClick={() => document.querySelector('.sidebar.hq').classList.remove('open')} />
+      <aside className="sidebar hq">
+        <div className="sidebar-header">
+          <img src="/logo-sticker.png" alt="" className="sidebar-logo-img" />
+          <div className="sidebar-brand">
+            <div className="sidebar-logo"><span>Success</span> Tutoring</div>
+            <div className="sidebar-subtitle">HQ Portal</div>
+          </div>
+        </div>
+        <nav className="sidebar-nav">
+          <button className={`nav-item ${page === 'locations' ? 'active' : ''}`} onClick={() => setPage('locations')}>
+            <Icon path={icons.map} size={16} /> Locations
+          </button>
+          {isMaster && (
+            <button className={`nav-item ${page === 'users' ? 'active' : ''}`} onClick={() => setPage('users')}>
+              <Icon path={icons.users} size={16} /> Users
+            </button>
+          )}
+          <div className="nav-section-label">Configuration</div>
+          <button className={`nav-item ${page === 'services' ? 'active' : ''}`} onClick={() => setPage('services')}>
+            <Icon path={icons.star} size={16} /> Services
+          </button>
+          <button className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => setPage('settings')}>
+            <Icon path={icons.clock} size={16} /> Settings
+          </button>
+        </nav>
+        <div className="sidebar-footer">
+          <div className="user-info">
+            <div className="avatar">{user.name[0]}</div>
+            <div>
+              <div className="user-name">{user.name}</div>
+              <div className="user-role">{isMaster ? 'Master Admin' : 'Admin'}</div>
             </div>
           </div>
+          <button className="nav-item" onClick={onLogout}>
+            <Icon path={icons.logout} size={16} /> Sign out
+          </button>
+        </div>
+      </aside>
 
-          {/* Location List */}
-          <div className="fac-list">
-            {loading ? (
-              <div className="fac-loading">Loading centres...</div>
-            ) : sortedLocations.length === 0 ? (
-              <div className="fac-empty">
-                <div className="fac-empty-icon">📍</div>
-                <div className="fac-empty-text">No centres found</div>
+      <main className="main hq">
+        {(page === 'locations' || page === 'users') && (
+        <div className="page-header">
+          <div className="page-header-left">
+            <div className="page-title">{page === 'users' ? 'HQ Users' : 'Franchise Locations'}</div>
+            <div className="page-desc">
+              {page === 'users'
+                ? 'Manage HQ staff who can add and edit locations.'
+                : isMaster
+                  ? 'You have full access — add, edit, and delete locations.'
+                  : 'You can add and edit locations. Only master admins can delete.'}
+            </div>
+          </div>
+          {page === 'locations' && (
+            <button className="btn btn-primary hq" onClick={() => setModal('add')}>
+              <Icon path={icons.plus} size={14} /> Add Location
+            </button>
+          )}
+        </div>
+        )}
+
+        {page === 'locations' && (<>
+        <div className="stats-row">
+          <div className="stat-card hq">
+            <div className="stat-num" style={{color:"var(--orange)"}}>{locations.length}</div>
+            <div className="stat-label">Total Locations</div>
+          </div>
+          <div className="stat-card hq">
+            <div className="stat-num" style={{ color: 'var(--success)' }}>
+              {locations.filter(l => (l.status || 'open') === 'open').length}
+            </div>
+            <div className="stat-label">Open</div>
+          </div>
+          <div className="stat-card hq">
+            <div className="stat-num" style={{ color: '#d97706' }}>
+              {locations.filter(l => l.status === 'coming_soon').length}
+            </div>
+            <div className="stat-label">Coming Soon</div>
+          </div>
+          <div className="stat-card hq">
+            <div className="stat-num">
+              <span style={{ fontSize: 14, display: 'flex', alignItems: 'center', gap: 6, paddingTop: 4, color: 'var(--orange)' }}>
+                <Icon path={icons.shield} size={20} /> 2FA Enabled
+              </span>
+            </div>
+            <div className="stat-label">Google Authenticator</div>
+          </div>
+        </div>
+
+        {/* Filter Bar */}
+        {(() => {
+          // Extract unique countries and states from addresses
+          const countries = [...new Set(locations.map(l => {
+            const parts = l.address?.split(',').map(s => s.trim()) || [];
+            return parts[parts.length - 1] || 'Unknown';
+          }))].sort();
+          const states = [...new Set(locations.map(l => {
+            const parts = l.address?.split(',').map(s => s.trim()) || [];
+            if (parts.length >= 2) {
+              const statePart = parts[parts.length - 2];
+              const match = statePart.match(/([A-Z]{2,3})\s*\d{4}/);
+              return match ? match[1] : statePart;
+            }
+            return 'Unknown';
+          }))].sort();
+
+          return (
+            <div className="card hq" style={{ padding: '14px 18px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>Filters:</span>
+              <select value={filterCountry} onChange={e => setFilterCountry(e.target.value)} style={{
+                padding: '7px 28px 7px 10px', borderRadius: 8, border: '1.5px solid var(--border)',
+                fontSize: 13, fontFamily: 'inherit', color: 'var(--text)', background: '#fff', cursor: 'pointer',
+                appearance: 'none',
+                backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+                backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center', backgroundSize: '14px',
+              }}>
+                <option value="all">All Countries</option>
+                {countries.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <select value={filterState} onChange={e => setFilterState(e.target.value)} style={{
+                padding: '7px 28px 7px 10px', borderRadius: 8, border: '1.5px solid var(--border)',
+                fontSize: 13, fontFamily: 'inherit', color: 'var(--text)', background: '#fff', cursor: 'pointer',
+                appearance: 'none',
+                backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+                backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center', backgroundSize: '14px',
+              }}>
+                <option value="all">All States</option>
+                {states.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{
+                padding: '7px 28px 7px 10px', borderRadius: 8, border: '1.5px solid var(--border)',
+                fontSize: 13, fontFamily: 'inherit', color: 'var(--text)', background: '#fff', cursor: 'pointer',
+                appearance: 'none',
+                backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+                backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center', backgroundSize: '14px',
+              }}>
+                <option value="all">All Statuses</option>
+                <option value="open">Open</option>
+                <option value="coming_soon">Coming Soon</option>
+                <option value="temporary_closed">Temporary Closed</option>
+              </select>
+              {(filterCountry !== 'all' || filterState !== 'all' || filterStatus !== 'all') && (
+                <button onClick={() => { setFilterCountry('all'); setFilterState('all'); setFilterStatus('all'); }} style={{
+                  padding: '7px 12px', borderRadius: 8, border: 'none', background: 'var(--orange-pale)',
+                  color: 'var(--orange)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+                }}>
+                  Clear Filters
+                </button>
+              )}
+            </div>
+          );
+        })()}
+
+        {(() => {
+          // Apply filters
+          let filtered = locations;
+          if (filterStatus !== 'all') {
+            filtered = filtered.filter(l => (l.status || 'open') === filterStatus);
+          }
+          if (filterCountry !== 'all') {
+            filtered = filtered.filter(l => {
+              const parts = l.address?.split(',').map(s => s.trim()) || [];
+              return parts[parts.length - 1] === filterCountry;
+            });
+          }
+          if (filterState !== 'all') {
+            filtered = filtered.filter(l => {
+              const parts = l.address?.split(',').map(s => s.trim()) || [];
+              if (parts.length >= 2) {
+                const statePart = parts[parts.length - 2];
+                const match = statePart.match(/([A-Z]{2,3})\s*\d{4}/);
+                const state = match ? match[1] : statePart;
+                return state === filterState;
+              }
+              return false;
+            });
+          }
+
+          const statusBadge = (s) => {
+            const cfg = {
+              open: { label: 'Open', bg: 'rgba(16,185,129,0.1)', color: '#059669', border: 'rgba(16,185,129,0.2)' },
+              coming_soon: { label: 'Coming Soon', bg: 'rgba(217,119,6,0.1)', color: '#d97706', border: 'rgba(217,119,6,0.2)' },
+              temporary_closed: { label: 'Temp. Closed', bg: 'rgba(239,68,68,0.1)', color: '#dc2626', border: 'rgba(239,68,68,0.2)' },
+            };
+            const c = cfg[s] || cfg.open;
+            return (
+              <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700, background: c.bg, color: c.color, border: `1px solid ${c.border}` }}>
+                {c.label}
+              </span>
+            );
+          };
+
+          return (
+            <div className="card hq">
+              <div className="card-header">
+                <span className="card-title">
+                  {filterCountry !== 'all' || filterState !== 'all' || filterStatus !== 'all'
+                    ? `Filtered Locations (${filtered.length} of ${locations.length})`
+                    : `All Locations (${locations.length})`
+                  }
+                </span>
               </div>
-            ) : (
-              <>
-                <div className="fac-list-header">
-                  {userPos ? `${sortedLocations.length} centres near you` : `${sortedLocations.length} centres`}
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th className="hq">Location</th>
+                      <th className="hq">Address</th>
+                      <th className="hq">Contact</th>
+                      <th className="hq">Email</th>
+                      <th className="hq">Status</th>
+                      <th className="hq">Created</th>
+                      <th className="hq">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map(loc => (
+                      <tr key={loc.id}>
+                        <td className="hq" style={{ fontWeight: 600 }}>{loc.name}</td>
+                        <td className="hq"><span className="td-muted hq">{loc.address}</span></td>
+                        <td className="hq"><span className="td-muted hq">{loc.phone}</span></td>
+                        <td className="hq"><span className="td-muted hq">{loc.email}</span></td>
+                        <td className="hq">{statusBadge(loc.status || 'open')}</td>
+                        <td className="hq"><span className="td-muted hq">{loc.createdAt}</span></td>
+                        <td className="hq">
+                          <div className="actions">
+                            <button className="btn btn-ghost hq" style={{ padding: '7px 12px' }} onClick={() => setModal({ type: 'edit', loc })}>
+                              <Icon path={icons.edit} size={13} /> Edit
+                            </button>
+                            {isMaster && (
+                              <button className="btn btn-danger" style={{ padding: '7px 12px' }} onClick={() => setModal({ type: 'delete', loc })}>
+                                <Icon path={icons.trash} size={13} /> Delete
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {filtered.length === 0 && (
+                <div className="empty-state hq">
+                  <div className="empty-icon">{locationsLoading ? '⏳' : '🗺️'}</div>
+                  <div className="empty-text hq">{locationsLoading ? 'Loading locations from database...' : (filterCountry !== 'all' || filterState !== 'all' || filterStatus !== 'all') ? 'No locations match your filters.' : 'No locations yet. Add your first franchise location.'}</div>
                 </div>
-                {sortedLocations.map((loc) => (
-                  <div
-                    key={loc.id}
-                    className={`fac-loc ${selectedLoc === loc.id ? "active" : ""}`}
-                    onClick={() => handleSelectLocation(loc)}
-                  >
-                    <div className="fac-loc-icon">
-                      <Icon d={ic.mapPin} size={18} />
-                    </div>
-                    <div className="fac-loc-info">
-                      <div className="fac-loc-name">{loc.name}</div>
-                      <div className="fac-loc-address">{loc.address}</div>
-                      <div className="fac-loc-meta">
-                        {loc.phone && (
-                          <div className="fac-loc-meta-item">
-                            <Icon d={ic.phone} size={11} /> {loc.phone}
-                          </div>
-                        )}
-                        {loc.email && (
-                          <div className="fac-loc-meta-item">
-                            <Icon d={ic.mail} size={11} /> {loc.email}
-                          </div>
-                        )}
-                      </div>
-                      <div className="fac-loc-actions">
-                        <a
-                          href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(loc.address)}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="fac-loc-action-btn"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <Icon d={ic.directions} size={12} /> Directions
-                        </a>
-                        {loc.phone && (
-                          <a
-                            href={`tel:${loc.phone.replace(/\s/g, "")}`}
-                            className="fac-loc-action-btn"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <Icon d={ic.phone} size={12} /> Call
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                    {loc.distance !== undefined && (
-                      <div className="fac-loc-distance">{loc.distance.toFixed(1)} km</div>
-                    )}
-                  </div>
-                ))}
-              </>
+              )}
+            </div>
+          );
+        })()}
+        </>)}
+
+      {/* Users Page */}
+      {page === 'users' && isMaster && (
+        <UsersPage
+          currentUser={user}
+          hqUsers={hqUsers}
+          setHqUsers={setHqUsers}
+          loading={usersLoading}
+          setLoading={setUsersLoading}
+          onInvite={() => setUserModal('invite')}
+          onRemove={(u) => setUserModal({ type: 'remove', u })}
+        />
+      )}
+
+      {/* Services Page */}
+      {page === 'services' && (
+        <>
+          <div className="page-header">
+            <div className="page-header-left">
+              <div className="page-title">Services</div>
+              <div className="page-desc">Create and manage the services offered across your franchise network.</div>
+            </div>
+            {isMaster && (
+              <button className="btn btn-primary hq" onClick={() => setServiceModal('add')}>
+                <Icon path={icons.plus} size={14} /> Add Service
+              </button>
             )}
           </div>
 
-          {/* Back to portal */}
-          <button className="fac-back" onClick={() => (window.location.href = "/")}>
-            <Icon d={ic.back} size={14} /> Back to portal
+          {/* Filters */}
+          {services.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>Filters:</span>
+              <select value={svcFilterCountry} onChange={e => { setSvcFilterCountry(e.target.value); setSvcFilterState('all'); }} style={{
+                padding: '7px 28px 7px 10px', borderRadius: 8, border: '1.5px solid var(--border)',
+                fontSize: 13, fontFamily: 'inherit', color: 'var(--text)', background: '#fff', cursor: 'pointer',
+                appearance: 'none',
+                backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+                backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center', backgroundSize: '14px',
+              }}>
+                <option value="all">All Countries</option>
+                {Object.keys(COUNTRIES_STATES).map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              {svcFilterCountry !== 'all' && (
+                <select value={svcFilterState} onChange={e => setSvcFilterState(e.target.value)} style={{
+                  padding: '7px 28px 7px 10px', borderRadius: 8, border: '1.5px solid var(--border)',
+                  fontSize: 13, fontFamily: 'inherit', color: 'var(--text)', background: '#fff', cursor: 'pointer',
+                  appearance: 'none',
+                  backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+                  backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center', backgroundSize: '14px',
+                }}>
+                  <option value="all">All States</option>
+                  {(COUNTRIES_STATES[svcFilterCountry] || []).map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              )}
+              {(svcFilterCountry !== 'all' || svcFilterState !== 'all') && (
+                <button onClick={() => { setSvcFilterCountry('all'); setSvcFilterState('all'); }} style={{
+                  padding: '7px 12px', borderRadius: 8, border: 'none', background: 'var(--orange-pale)',
+                  color: 'var(--orange)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+                }}>Clear Filters</button>
+              )}
+            </div>
+          )}
+
+          {servicesLoading ? (
+            <div style={{ textAlign: 'center', padding: 48, color: 'var(--text-muted)' }}>Loading services...</div>
+          ) : services.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 60 }}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>&#x1F4CB;</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>No services yet</div>
+              <div style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 20 }}>Create your first service to get started.</div>
+              {isMaster && (
+                <button className="btn btn-primary hq" onClick={() => setServiceModal('add')}>
+                  <Icon path={icons.plus} size={14} /> Add Service
+                </button>
+              )}
+            </div>
+          ) : (() => {
+            let filtered = services;
+            if (svcFilterCountry !== 'all') {
+              filtered = filtered.filter(s => s.countries?.includes(svcFilterCountry));
+            }
+            if (svcFilterState !== 'all') {
+              filtered = filtered.filter(s => s.availability?.includes(svcFilterState));
+            }
+            return filtered.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 48, color: 'var(--text-muted)' }}>
+                No services match the selected filters.
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
+                {filtered.map(svc => (
+                <div key={svc.id} className="card hq" style={{ padding: 0, overflow: 'hidden' }}>
+                  {svc.imageUrl ? (
+                    <div style={{ height: 160, background: `url(${svc.imageUrl}) center/cover no-repeat`, borderBottom: '1px solid var(--border)' }} />
+                  ) : (
+                    <div style={{ height: 160, background: 'linear-gradient(135deg, var(--orange-pale), #fff5ee)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid var(--border)' }}>
+                      <Icon path={icons.star} size={40} style={{ color: 'var(--orange)', opacity: 0.3 }} />
+                    </div>
+                  )}
+                  <div style={{ padding: '18px 20px' }}>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>{svc.name}</div>
+                    <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 12, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{svc.description}</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+                      <span style={{ padding: '4px 10px', borderRadius: 6, background: 'var(--orange-pale)', color: 'var(--orange)', fontSize: 12, fontWeight: 700 }}>{svc.duration} min</span>
+                      <span style={{ padding: '4px 10px', borderRadius: 6, background: '#eef6ff', color: '#3b82f6', fontSize: 12, fontWeight: 700 }}>Max {svc.maxStudents} students</span>
+                      {svc.price && <span style={{ padding: '4px 10px', borderRadius: 6, background: '#ecfdf5', color: '#059669', fontSize: 12, fontWeight: 700 }}>${svc.price} RRP</span>}
+                    </div>
+                    {svc.availability && svc.availability.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 12 }}>
+                        {svc.availability.map((a, i) => (
+                          <span key={i} style={{ padding: '2px 8px', borderRadius: 4, background: 'var(--bg)', fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>{a}</span>
+                        ))}
+                      </div>
+                    )}
+                    {isMaster && (
+                      <div style={{ display: 'flex', gap: 8, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+                        <button className="btn btn-ghost hq" style={{ fontSize: 12, padding: '6px 12px' }} onClick={() => setServiceModal({ type: 'edit', svc })}>
+                          <Icon path={icons.edit} size={13} /> Edit
+                        </button>
+                        <button className="btn btn-ghost hq" style={{ fontSize: 12, padding: '6px 12px', color: 'var(--hq-danger)' }} onClick={() => setServiceModal({ type: 'delete', svc })}>
+                          <Icon path={icons.trash} size={13} /> Delete
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            );
+          })()}
+        </>
+      )}
+
+      {/* Settings Page */}
+      {page === 'settings' && (
+        <>
+          <div className="page-header">
+            <div className="page-header-left">
+              <div className="page-title">Settings</div>
+              <div className="page-desc">Configure booking page and portal-wide settings.</div>
+            </div>
+          </div>
+          <div className="settings-grid">
+            <div className="setting-card hq" style={{ gridColumn: '1 / -1' }}>
+              <div className="setting-label-row">
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)', marginBottom: 4 }}>Confirmation Page Video</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>YouTube video shown to customers after they book an assessment. Paste the full YouTube URL.</div>
+                </div>
+              </div>
+              <div style={{ marginTop: 14 }}>
+                <input
+                  className="form-input hq"
+                  style={{ width: '100%' }}
+                  value={youtubeUrl}
+                  onChange={e => setYoutubeUrl(e.target.value)}
+                  placeholder="https://www.youtube.com/watch?v=..."
+                />
+              </div>
+              {youtubeUrl && (
+                <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
+                  Preview: <a href={youtubeUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--orange)' }}>{youtubeUrl}</a>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="save-bar" style={{ marginTop: 16 }}>
+            <button className="btn btn-primary hq" onClick={handleSaveSettings} disabled={settingsLoading}>
+              <Icon path={icons.check} size={14} /> {settingsLoading ? 'Saving...' : 'Save Settings'}
+            </button>
+          </div>
+        </>
+      )}
+
+      </main>
+
+      {/* Modals */}
+      {(modal === 'add' || modal?.type === 'edit') && (
+        <LocationModal
+          portal="hq"
+          editing={modal?.type === 'edit' ? modal.loc : null}
+          locations={locations}
+          onSave={handleSave}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal?.type === 'delete' && (
+        <ConfirmModal
+          portal="hq"
+          title="Delete Location"
+          body={<>Are you sure you want to permanently delete <span className="confirm-name hq">{modal.loc.name}</span>? This action cannot be undone.</>}
+          confirmLabel="Delete"
+          danger
+          onConfirm={() => handleDelete(modal.loc.id)}
+          onClose={() => setModal(null)}
+        />
+      )}
+
+      {userModal === 'invite' && (
+        <InviteUserModal
+          onClose={() => setUserModal(null)}
+          onInvited={(newUser) => { setHqUsers(prev => [...prev, newUser]); setUserModal(null); showToast(`✓ Invite sent to ${newUser.email}`); }}
+        />
+      )}
+      {userModal?.type === 'remove' && (
+        <ConfirmModal
+          portal="hq"
+          title="Remove User"
+          body={<>Are you sure you want to remove <span className="confirm-name hq">{userModal.u.name}</span>? They will lose all access immediately.</>}
+          confirmLabel="Remove"
+          danger
+          onConfirm={async () => {
+            const { doc, deleteDoc } = await import('firebase/firestore');
+            const { db } = await import('./firebase.js');
+            await deleteDoc(doc(db, 'users', userModal.u.id));
+            setHqUsers(prev => prev.filter(u => u.id !== userModal.u.id));
+            showToast(`User ${userModal.u.name} removed.`);
+            setUserModal(null);
+          }}
+          onClose={() => setUserModal(null)}
+        />
+      )}
+
+      {/* Service Modals */}
+      {(serviceModal === 'add' || serviceModal?.type === 'edit') && (
+        <ServiceModal
+          editing={serviceModal?.type === 'edit' ? serviceModal.svc : null}
+          onSave={handleSaveService}
+          onClose={() => setServiceModal(null)}
+        />
+      )}
+      {serviceModal?.type === 'delete' && (
+        <ConfirmModal
+          portal="hq"
+          title="Delete Service"
+          body={<>Are you sure you want to permanently delete <span className="confirm-name hq">{serviceModal.svc.name}</span>? This action cannot be undone.</>}
+          confirmLabel="Delete"
+          danger
+          onConfirm={() => handleDeleteService(serviceModal.svc.id)}
+          onClose={() => setServiceModal(null)}
+        />
+      )}
+
+      {toast && (
+        <div className="toast hq toast-success">
+          <span className="toast-icon"><Icon path={icons.check} size={16} /></span>
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- Service Modal --------------------------------------------------------------
+function ServiceModal({ editing, onSave, onClose }) {
+  const [name, setName] = useState(editing?.name || '');
+  const [customName, setCustomName] = useState(editing?.customName || '');
+  const [description, setDescription] = useState(editing?.description || '');
+  const [duration, setDuration] = useState(editing?.duration || 40);
+  const [maxStudents, setMaxStudents] = useState(editing?.maxStudents || 1);
+  const [price, setPrice] = useState(editing?.price || '');
+  const [imageUrl, setImageUrl] = useState(editing?.imageUrl || '');
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState(editing?.imageUrl || '');
+  const [selectedCountries, setSelectedCountries] = useState(editing?.countries || []);
+  const [selectedStates, setSelectedStates] = useState(editing?.availability || []);
+  const [saving, setSaving] = useState(false);
+
+  const fileInputRef = useRef(null);
+
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setImageFile(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => setImagePreview(ev.target.result);
+    reader.readAsDataURL(file);
+  };
+
+  const toggleCountry = (country) => {
+    setSelectedCountries(prev => {
+      if (prev.includes(country)) {
+        const newCountries = prev.filter(c => c !== country);
+        // Remove states for this country
+        const countryStates = COUNTRIES_STATES[country] || [];
+        setSelectedStates(s => s.filter(st => !countryStates.includes(st)));
+        return newCountries;
+      }
+      return [...prev, country];
+    });
+  };
+
+  const toggleState = (state) => {
+    setSelectedStates(prev => prev.includes(state) ? prev.filter(s => s !== state) : [...prev, state]);
+  };
+
+  const handleSave = async () => {
+    const finalName = name === 'Other' ? customName : name;
+    if (!finalName || !description) return;
+    setSaving(true);
+
+    let finalImageUrl = imageUrl;
+    // If a file was selected, convert to base64 data URL (for simplicity without Storage)
+    if (imageFile) {
+      finalImageUrl = imagePreview; // base64
+    }
+
+    await onSave({
+      name: finalName,
+      description,
+      duration: Number(duration),
+      maxStudents: Number(maxStudents),
+      price: price ? Number(price) : null,
+      imageUrl: finalImageUrl,
+      countries: selectedCountries,
+      availability: selectedStates,
+    }, editing?.id);
+    setSaving(false);
+  };
+
+  const durationOptions = [20, 30, 40, 45, 60, 90, 120];
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal hq" style={{ maxWidth: 560, maxHeight: '90vh', overflowY: 'auto' }}>
+        <div className="modal-title" style={{ color: 'var(--text)' }}>
+          {editing ? 'Edit Service' : 'Add New Service'}
+        </div>
+
+        {/* Service Name */}
+        <div className="form-group">
+          <div className="form-label hq">Service Name</div>
+          <select
+            className="form-input hq"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            style={{
+              appearance: 'none',
+              backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+              backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '16px',
+              paddingRight: 36, cursor: 'pointer',
+            }}
+          >
+            <option value="">Select a service...</option>
+            {SERVICE_NAMES.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          {name === 'Other' && (
+            <input
+              className="form-input hq"
+              value={customName}
+              onChange={e => setCustomName(e.target.value)}
+              placeholder="Enter custom service name..."
+              style={{ marginTop: 8 }}
+            />
+          )}
+        </div>
+
+        {/* Description */}
+        <div className="form-group">
+          <div className="form-label hq">Description</div>
+          <textarea
+            className="form-input hq"
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            placeholder="Describe this service..."
+            rows={3}
+            style={{ resize: 'vertical', fontFamily: 'inherit' }}
+          />
+        </div>
+
+        {/* Duration & Max Students */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <div className="form-group">
+            <div className="form-label hq">Duration</div>
+            <select
+              className="form-input hq"
+              value={duration}
+              onChange={e => setDuration(e.target.value)}
+              style={{
+                appearance: 'none',
+                backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+                backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '16px',
+                paddingRight: 36, cursor: 'pointer',
+              }}
+            >
+              {durationOptions.map(d => <option key={d} value={d}>{d} minutes</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <div className="form-label hq">Max Students</div>
+            <input
+              className="form-input hq"
+              type="number"
+              min={1}
+              max={100}
+              value={maxStudents}
+              onChange={e => setMaxStudents(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {/* Price */}
+        <div className="form-group">
+          <div className="form-label hq">Recommended Retail Price (optional)</div>
+          <div style={{ position: 'relative' }}>
+            <span style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontWeight: 700, fontSize: 14 }}>$</span>
+            <input
+              className="form-input hq"
+              type="number"
+              min={0}
+              step={0.01}
+              value={price}
+              onChange={e => setPrice(e.target.value)}
+              placeholder="0.00"
+              style={{ paddingLeft: 30 }}
+            />
+          </div>
+        </div>
+
+        {/* Image Upload */}
+        <div className="form-group">
+          <div className="form-label hq">Service Image (optional)</div>
+          {imagePreview ? (
+            <div style={{ position: 'relative', marginBottom: 8 }}>
+              <img src={imagePreview} alt="Preview" style={{ width: '100%', height: 160, objectFit: 'cover', borderRadius: 10, border: '1px solid var(--border)' }} />
+              <button onClick={() => { setImagePreview(''); setImageUrl(''); setImageFile(null); }} style={{
+                position: 'absolute', top: 8, right: 8, width: 28, height: 28, borderRadius: '50%',
+                background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 14,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>✕</button>
+            </div>
+          ) : (
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                padding: 28, borderRadius: 10, border: '2px dashed var(--border)', textAlign: 'center',
+                cursor: 'pointer', background: 'var(--bg)', transition: 'border-color 0.15s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--orange)'}
+              onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+            >
+              <div style={{ fontSize: 28, marginBottom: 6 }}>📷</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Click to upload an image</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>JPG, PNG up to 5MB</div>
+            </div>
+          )}
+          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageChange} style={{ display: 'none' }} />
+        </div>
+
+        {/* Countries & States */}
+        <div className="form-group">
+          <div className="form-label hq">Available In</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>Select which countries and states this service is available in.</div>
+          {Object.keys(COUNTRIES_STATES).map(country => (
+            <div key={country} style={{ marginBottom: 12 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={selectedCountries.includes(country)}
+                  onChange={() => toggleCountry(country)}
+                  style={{ width: 16, height: 16, accentColor: 'var(--orange)', cursor: 'pointer' }}
+                />
+                <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{country}</span>
+              </label>
+              {selectedCountries.includes(country) && (
+                <div style={{ marginLeft: 24, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {COUNTRIES_STATES[country].map(state => (
+                    <button
+                      key={state}
+                      onClick={() => toggleState(state)}
+                      style={{
+                        padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                        border: '1.5px solid',
+                        borderColor: selectedStates.includes(state) ? 'var(--orange)' : 'var(--border)',
+                        background: selectedStates.includes(state) ? 'var(--orange-pale)' : '#fff',
+                        color: selectedStates.includes(state) ? 'var(--orange)' : 'var(--text-muted)',
+                        transition: 'all 0.15s', fontFamily: 'inherit',
+                      }}
+                    >
+                      {state}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div className="modal-actions">
+          <button className="btn btn-ghost hq" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary hq" onClick={handleSave} disabled={saving || (!name || (name === 'Other' && !customName) || !description)}>
+            <Icon path={icons.check} size={14} />
+            {saving ? 'Saving...' : editing ? 'Save Changes' : 'Create Service'}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
 
-        {/* ── Map ──────────────────────────────────────────── */}
-        <div className="fac-map">
-          <div ref={mapRef} className="fac-map-el" />
+// --- Location Modal -------------------------------------------------------------
+function LocationModal({ portal, editing, locations = [], onSave, onClose }) {
+  const [name, setName] = useState(editing?.name || '');
+  const [address, setAddress] = useState(editing?.address || '');
+  const [countryCode, setCountryCode] = useState(editing ? editing.phone.split(' ')[0] : '+61');
+  const [phoneNum, setPhoneNum] = useState(editing ? editing.phone.split(' ').slice(1).join(' ') : '');
+  const [email, setEmail] = useState(editing?.email || '');
+  const [status, setStatus] = useState(editing?.status || 'coming_soon');
+  const [resendEmail, setResendEmail] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [duplicateWarning, setDuplicateWarning] = useState(null);
+  const [confirmedDuplicate, setConfirmedDuplicate] = useState(false);
+  const t = portal;
+  const addressInputRef = useRef(null);
+  const autocompleteRef = useRef(null);
+
+  // Check for duplicates whenever name, address, or phone changes
+  useEffect(() => {
+    if (editing) return; // Don't check when editing
+    const otherLocations = locations.filter(l => l.id !== editing?.id);
+    const warnings = [];
+    const fullPhone = `${countryCode} ${phoneNum}`.trim();
+
+    if (name.trim()) {
+      const match = otherLocations.find(l => l.name?.toLowerCase().trim() === name.toLowerCase().trim());
+      if (match) warnings.push(`Location name "${name}" already exists`);
+    }
+    if (address.trim()) {
+      const match = otherLocations.find(l => l.address?.toLowerCase().trim() === address.toLowerCase().trim());
+      if (match) warnings.push(`Address "${address}" is already used by "${match.name}"`);
+    }
+    if (phoneNum.trim() && phoneNum.trim().length > 3) {
+      const match = otherLocations.find(l => l.phone?.replace(/\s/g, '') === fullPhone.replace(/\s/g, ''));
+      if (match) warnings.push(`Phone number is already used by "${match.name}"`);
+    }
+
+    if (warnings.length > 0) {
+      setDuplicateWarning(warnings);
+      setConfirmedDuplicate(false);
+    } else {
+      setDuplicateWarning(null);
+      setConfirmedDuplicate(false);
+    }
+  }, [name, address, countryCode, phoneNum, editing, locations]);
+
+  useEffect(() => {
+    if (!addressInputRef.current || !window.google?.maps?.places) return;
+    autocompleteRef.current = new window.google.maps.places.Autocomplete(addressInputRef.current, {
+      types: ['establishment'],
+      fields: ['formatted_address', 'name', 'formatted_phone_number', 'international_phone_number', 'website'],
+    });
+    autocompleteRef.current.addListener('place_changed', () => {
+      const place = autocompleteRef.current.getPlace();
+      if (place.formatted_address) {
+        setAddress(place.formatted_address);
+      }
+      if (place.name) {
+        setName(place.name);
+      }
+      // Auto-populate phone number
+      if (place.international_phone_number) {
+        // international_phone_number is like "+61 2 9999 8888"
+        const intlPhone = place.international_phone_number;
+        // Try to extract country code and number
+        const match = intlPhone.match(/^(\+\d{1,3})\s(.+)$/);
+        if (match) {
+          setCountryCode(match[1]);
+          setPhoneNum(match[2]);
+        } else {
+          setPhoneNum(intlPhone.replace(/^\+\d{1,3}\s?/, ''));
+        }
+      } else if (place.formatted_phone_number) {
+        setPhoneNum(place.formatted_phone_number);
+      }
+      // Try to guess email from website domain (best effort)
+      if (place.website && !email) {
+        try {
+          const domain = new URL(place.website).hostname.replace('www.', '');
+          setEmail(`info@${domain}`);
+        } catch (e) {}
+      }
+    });
+    return () => {
+      if (autocompleteRef.current) {
+        window.google.maps.event.clearInstanceListeners(autocompleteRef.current);
+      }
+    };
+  }, []);
+
+  const handleSave = async () => {
+    if (!name || !address || !email) return;
+    if (duplicateWarning && !confirmedDuplicate) return; // Must confirm duplicate first
+    setResending(true);
+    if (editing && resendEmail) {
+      try {
+        await resendConfirmationEmail(editing.id);
+      } catch (err) {
+        console.error("Failed to resend confirmation email:", err);
+      }
+    }
+    onSave({ name, address, phone: `${countryCode} ${phoneNum}`, email, status }, editing?.id, resendEmail);
+    setResending(false);
+  };
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className={`modal ${t}`}>
+        <div className={`modal-title`} style={{ color: 'var(--text)' }}>
+          {editing ? 'Edit Location' : 'Add New Location'}
         </div>
 
-        {/* ── Mobile Toggle ──────────────────────────────── */}
-        <button className="fac-mobile-toggle" onClick={() => setShowPanel(!showPanel)}>
-          <Icon d={showPanel ? ic.mapPin : ic.search} size={16} />
-          {showPanel ? "Show Map" : "Show List"}
-        </button>
+        {!editing && (
+          <div className="info-notice hq">
+            <Icon path={icons.mail} size={14} />
+            A confirmation email will be sent via SendGrid when this location is created.
+          </div>
+        )}
+
+        <div className="form-group">
+          <label className={`form-label ${t}`}>Location Name</label>
+          <input className={`form-input ${t}`} value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Melbourne CBD" />
+        </div>
+        <div className="form-group">
+          <label className={`form-label ${t}`}>Full Address</label>
+          <input ref={addressInputRef} className={`form-input ${t}`} value={address} onChange={e => setAddress(e.target.value)} placeholder="Search for a business name..." />
+        </div>
+        <div className="form-group">
+          <label className={`form-label ${t}`}>Contact Number</label>
+          <div className="phone-row">
+            <select className={`form-input ${t} phone-code`} value={countryCode} onChange={e => setCountryCode(e.target.value)}>
+              {COUNTRY_CODES.map(c => (
+                <option key={c.code} value={c.code}>{c.code} {c.country}</option>
+              ))}
+            </select>
+            <input className={`form-input ${t}`} value={phoneNum} onChange={e => setPhoneNum(e.target.value)} placeholder="400 000 000" />
+          </div>
+        </div>
+        <div className="form-group">
+          <label className={`form-label ${t}`}>Email Address</label>
+          <input className={`form-input ${t}`} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="location@franchise.com" />
+        </div>
+        <div className="form-group">
+          <label className={`form-label ${t}`}>Status</label>
+          <select
+            className={`form-input ${t}`}
+            value={status}
+            onChange={e => setStatus(e.target.value)}
+            style={{ cursor: 'pointer' }}
+          >
+            <option value="coming_soon">Coming Soon</option>
+            <option value="open">Open</option>
+            <option value="temporary_closed">Temporary Closed</option>
+          </select>
+        </div>
+
+        {editing && (
+          <div className="form-group" style={{ marginTop: 4 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', padding: '12px 14px', borderRadius: 'var(--radius-sm)', background: resendEmail ? 'var(--orange-pale)' : 'var(--bg)', border: resendEmail ? '1.5px solid var(--orange-border)' : '1.5px solid var(--border)', transition: 'all 0.15s' }}>
+              <input
+                type="checkbox"
+                checked={resendEmail}
+                onChange={e => setResendEmail(e.target.checked)}
+                style={{ width: 18, height: 18, accentColor: 'var(--orange)', cursor: 'pointer' }}
+              />
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>Re-send confirmation email</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Send a portal access email to {email || 'the franchise partner'}</div>
+              </div>
+            </label>
+          </div>
+        )}
+
+        {/* Duplicate Warning */}
+        {duplicateWarning && (
+          <div style={{ margin: '12px 0', padding: '14px 16px', borderRadius: 10, background: '#fef3cd', border: '1.5px solid #f0d080' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 8 }}>
+              <span style={{ fontSize: 16, flexShrink: 0 }}>⚠️</span>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#856404', marginBottom: 4 }}>Possible duplicate detected</div>
+                {duplicateWarning.map((w, i) => (
+                  <div key={i} style={{ fontSize: 13, color: '#856404', lineHeight: 1.5 }}>• {w}</div>
+                ))}
+              </div>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(133,100,4,0.15)' }}>
+              <input
+                type="checkbox"
+                checked={confirmedDuplicate}
+                onChange={e => setConfirmedDuplicate(e.target.checked)}
+                style={{ width: 16, height: 16, accentColor: '#856404', cursor: 'pointer' }}
+              />
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#856404' }}>I understand — create this location anyway</span>
+            </label>
+          </div>
+        )}
+
+        <div className="modal-actions">
+          <button className={`btn btn-ghost ${t}`} onClick={onClose}>Cancel</button>
+          <button className={`btn btn-primary ${t}`} onClick={handleSave} disabled={resending}>
+            <Icon path={icons.check} size={14} />
+            {resending ? 'Saving...' : editing ? 'Save Changes' : 'Create Location'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Confirm Modal --------------------------------------------------------------
+function ConfirmModal({ portal, title, body, confirmLabel, danger, onConfirm, onClose }) {
+  const t = portal;
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className={`modal ${t}`} style={{ maxWidth: 400 }}>
+        <div className="modal-title" style={{ color: danger ? 'var(--hq-danger)' : 'inherit' }}>{title}</div>
+        <div className={`confirm-body ${t}`}>{body}</div>
+        <div className="modal-actions">
+          <button className={`btn btn-ghost ${t}`} onClick={onClose}>Cancel</button>
+          <button className={`btn ${danger ? 'btn-danger' : `btn-primary ${t}`}`} onClick={onConfirm}>
+            {danger && <Icon path={icons.trash} size={13} />}
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Users Page ----------------------------------------------------------------
+function UsersPage({ currentUser, hqUsers, setHqUsers, loading, setLoading, onInvite, onRemove }) {
+  useEffect(() => {
+    const loadUsers = async () => {
+      setLoading(true);
+      try {
+        const { collection, getDocs, query, where } = await import('firebase/firestore');
+        const { db } = await import('./firebase.js');
+        const q = query(collection(db, 'users'), where('role', 'in', ['admin', 'master_admin']));
+        const snap = await getDocs(q);
+        const users = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setHqUsers(users);
+      } catch (e) { console.error(e); }
+      setLoading(false);
+    };
+    loadUsers();
+  }, []);
+
+  return (
+    <>
+      <div className="card hq" style={{ marginBottom: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+          <span style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, color: 'var(--text)', fontSize: 16 }}>HQ Staff</span>
+          <button className="btn btn-primary hq" onClick={onInvite}>
+            <Icon path={icons.plus} size={14} /> Invite User
+          </button>
+        </div>
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>Loading users...</div>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th className="hq">Name</th>
+                  <th className="hq">Email</th>
+                  <th className="hq">Job Title</th>
+                  <th className="hq">Role</th>
+                  <th className="hq">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {hqUsers.map(u => (
+                  <tr key={u.id}>
+                    <td className="hq" style={{ fontWeight: 600 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--orange-pale)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--orange)', fontWeight: 700, fontSize: 13 }}>
+                          {u.name?.[0] || '?'}
+                        </div>
+                        {u.name}
+                        {u.id === currentUser.uid && <span style={{ fontSize: 10, background: 'var(--orange-pale)', color: 'var(--orange)', padding: '2px 8px', borderRadius: 20 }}>You</span>}
+                      </div>
+                    </td>
+                    <td className="hq"><span className="td-muted hq">{u.email}</span></td>
+                    <td className="hq"><span className="td-muted hq">{u.jobTitle || '—'}</span></td>
+                    <td className="hq">
+                      <span style={{ fontSize: 12, padding: '3px 10px', borderRadius: 20, background: u.role === 'master_admin' ? 'rgba(200,169,110,0.15)' : 'rgba(100,100,120,0.2)', color: u.role === 'master_admin' ? 'var(--hq-accent)' : 'var(--hq-muted)' }}>
+                        {u.role === 'master_admin' ? 'Master Admin' : 'Admin'}
+                      </span>
+                    </td>
+                    <td className="hq">
+                      {u.id !== currentUser.uid && (
+                        <button className="btn btn-danger" style={{ padding: '7px 12px' }} onClick={() => onRemove(u)}>
+                          <Icon path={icons.trash} size={13} /> Remove
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {hqUsers.length === 0 && (
+              <div className="empty-state hq">
+                <div className="empty-icon">👥</div>
+                <div className="empty-text hq">No HQ users yet. Invite your first team member.</div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </>
+  );
+}
+
+// --- Invite User Modal ----------------------------------------------------------
+function InviteUserModal({ onClose, onInvited }) {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [jobTitle, setJobTitle] = useState('');
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleInvite = async () => {
+    if (!name || !email) { setError('Name and email are required.'); return; }
+    setSending(true);
+    setError('');
+    try {
+      const { collection, addDoc } = await import('firebase/firestore');
+      const { db } = await import('./firebase.js');
+      const docRef = await addDoc(collection(db, 'invites'), {
+        name,
+        email,
+        jobTitle,
+        role: 'admin',
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+      });
+      onInvited({ id: docRef.id, name, email, jobTitle, role: 'admin', status: 'pending' });
+    } catch (e) {
+      setError('Failed to send invite. Please try again.');
+    }
+    setSending(false);
+  };
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal hq">
+        <div className="modal-title" style={{ color: 'var(--text)' }}>Invite HQ User</div>
+        <div className="info-notice hq">
+          <Icon path={icons.mail} size={14} />
+          They will receive an email with a link to sign in. They will have Admin access (can add and edit locations, but not delete).
+        </div>
+        {error && <div className="auth-error" style={{ marginBottom: 16 }}><Icon path={icons.alert} size={14} /> {error}</div>}
+        <div className="form-group">
+          <label className="form-label hq">Full Name</label>
+          <input className="form-input hq" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Jane Smith" />
+        </div>
+        <div className="form-group">
+          <label className="form-label hq">Email Address</label>
+          <input className="form-input hq" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="jane@successtutoring.com" />
+        </div>
+        <div className="form-group">
+          <label className="form-label hq">Job Title</label>
+          <input className="form-input hq" value={jobTitle} onChange={e => setJobTitle(e.target.value)} placeholder="e.g. Operations Manager" />
+        </div>
+        <div className="modal-actions">
+          <button className="btn btn-ghost hq" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary hq" onClick={handleInvite} disabled={sending}>
+            <Icon path={icons.mail} size={14} />
+            {sending ? 'Sending...' : 'Send Invite'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Franchise Partner Portal ---------------------------------------------------
+function FranchisePortal({ user, onLogout }) {
+  const [page, setPage] = useState('timetable');
+  const [availability, setAvailability] = useState(INITIAL_AVAILABILITY);
+  const [timezone, setTimezone] = useState('Australia/Sydney');
+  const [buffer, setBuffer] = useState(15);
+  const [saved, setSaved] = useState(false);
+  const [toast, setToast] = useState(null);
+  const [bookings, setBookings] = useState([]);
+  const [bookingsLoading, setBookingsLoading] = useState(false);
+  const [calendarWeekOffset, setCalendarWeekOffset] = useState(0);
+  const [selectedBooking, setSelectedBooking] = useState(null);
+
+  // Unavailable dates state
+  const [unavailableDates, setUnavailableDates] = useState([]); // [{ date, reason }]
+  const [showUnavailModal, setShowUnavailModal] = useState(false);
+  const [unavailDate, setUnavailDate] = useState('');
+  const [unavailReason, setUnavailReason] = useState('');
+
+  const locationId = user.locationId?.toString() || user.uid?.toString();
+
+  // Load bookings for this location
+  useEffect(() => {
+    const loadBookings = async () => {
+      setBookingsLoading(true);
+      try {
+        const { collection, getDocs, query, where } = await import('firebase/firestore');
+        const { db } = await import('./firebase.js');
+        const q = query(
+          collection(db, 'bookings'),
+          where('locationId', '==', locationId)
+        );
+        const snap = await getDocs(q);
+        const allBookings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        allBookings.sort((a, b) => a.date === b.date ? a.time.localeCompare(b.time) : a.date.localeCompare(b.date));
+        setBookings(allBookings);
+      } catch (e) { console.error("Failed to load bookings:", e); }
+      setBookingsLoading(false);
+    };
+    if (locationId) loadBookings();
+  }, [locationId]);
+
+  // Load availability (including unavailable dates)
+  useEffect(() => {
+    const loadAvail = async () => {
+      try {
+        const { doc, getDoc } = await import('firebase/firestore');
+        const { db } = await import('./firebase.js');
+        const snap = await getDoc(doc(db, 'availability', locationId));
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data.schedule) setAvailability(data.schedule);
+          if (data.timezone) setTimezone(data.timezone);
+          if (data.bufferMinutes !== undefined) setBuffer(data.bufferMinutes);
+          if (data.unavailableDates) setUnavailableDates(data.unavailableDates);
+        }
+      } catch (e) { console.error("Failed to load availability:", e); }
+    };
+    if (locationId) loadAvail();
+  }, [locationId]);
+
+  const showToast = (msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const toggleDay = (i) => {
+    setAvailability(prev => prev.map((d, j) => j === i ? { ...d, enabled: !d.enabled } : d));
+  };
+
+  const updateTime = (i, field, val) => {
+    setAvailability(prev => prev.map((d, j) => j === i ? { ...d, [field]: val } : d));
+  };
+
+  const handleSave = async () => {
+    try {
+      await saveAvailability(locationId, {
+        schedule: availability,
+        timezone,
+        bufferMinutes: buffer,
+        unavailableDates,
+      });
+      showToast('✓ Availability saved successfully.');
+    } catch (err) {
+      console.error("Failed to save availability:", err);
+      showToast('✗ Failed to save availability. Please try again.');
+    }
+  };
+
+  const addUnavailableDate = () => {
+    if (!unavailDate) return;
+    if (unavailableDates.some(u => u.date === unavailDate)) {
+      showToast('This date is already marked unavailable.');
+      return;
+    }
+    setUnavailableDates(prev => [...prev, { date: unavailDate, reason: unavailReason }].sort((a, b) => a.date.localeCompare(b.date)));
+    setUnavailDate('');
+    setUnavailReason('');
+    setShowUnavailModal(false);
+  };
+
+  const removeUnavailableDate = (date) => {
+    setUnavailableDates(prev => prev.filter(u => u.date !== date));
+  };
+
+  const bufferOptions = [0, 15, 30, 45, 60];
+
+  // Helper to format time
+  const fmtTime = (t) => {
+    const [h, m] = t.split(':').map(Number);
+    return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
+  };
+
+  // Current time in the franchise location's timezone
+  const nowInTz = new Date(new Date().toLocaleString('en-US', { timeZone: timezone }));
+  const currentHour = nowInTz.getHours();
+  const currentMin = nowInTz.getMinutes();
+  const todayInTz = nowInTz; // "today" based on the location timezone
+
+  return (
+    <div className="layout fp" style={{ background: 'var(--fp-bg)' }}>
+      <aside className="sidebar fp">
+        <div className="sidebar-header">
+          <img src="/logo-sticker.png" alt="" className="sidebar-logo-img" />
+          <div className="sidebar-brand">
+            <div className="sidebar-logo"><span>Success</span> Tutoring</div>
+            <div className="sidebar-subtitle">Franchise Portal</div>
+          </div>
+        </div>
+        <nav className="sidebar-nav">
+          <button className={`nav-item ${page === 'timetable' ? 'active' : ''}`} onClick={() => setPage('timetable')}>
+            <Icon path={icons.calendar} size={16} /> Timetable
+          </button>
+          <button className={`nav-item ${page === 'bookings' ? 'active' : ''}`} onClick={() => setPage('bookings')}>
+            <Icon path={icons.users} size={16} /> Bookings
+          </button>
+          <button className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => setPage('settings')}>
+            <Icon path={icons.clock} size={16} /> Settings
+          </button>
+        </nav>
+        <div className="sidebar-footer">
+          <div className="user-info">
+            <div className="avatar">{user.name[0]}</div>
+            <div>
+              <div className="user-name">{user.name}</div>
+              <div className="user-role">Franchise Partner</div>
+            </div>
+          </div>
+          <button className="nav-item" onClick={onLogout}>
+            <Icon path={icons.logout} size={16} /> Sign out
+          </button>
+        </div>
+      </aside>
+
+      <main className="main fp">
+        {/* === TIMETABLE PAGE === */}
+        {page === 'timetable' && (
+          <>
+            <div className="page-header">
+              <div className="page-title" style={{ color: 'var(--fp-text)' }}>Availability Timetable</div>
+              <div className="page-desc" style={{ color: 'var(--fp-muted)' }}>Set the days and hours you're available for bookings.</div>
+            </div>
+
+            <div className="card fp" style={{ padding: '28px' }}>
+              <div style={{ fontWeight: 700, color: 'var(--fp-text)', fontSize: 15, marginBottom: 20 }}>Weekly Schedule</div>
+              <div className="timetable">
+                {availability.map((day, i) => {
+                  // Generate half-hour time options
+                  const timeOptions = [];
+                  for (let h = 6; h <= 22; h++) {
+                    for (let m = 0; m < 60; m += 30) {
+                      const val = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+                      const ampm = h >= 12 ? 'PM' : 'AM';
+                      const label = `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`;
+                      timeOptions.push({ val, label });
+                    }
+                  }
+                  return (
+                    <div key={day.day} style={{
+                      display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0',
+                      borderBottom: i < availability.length - 1 ? '1px solid var(--fp-border)' : 'none',
+                    }}>
+                      <div style={{ width: 100, flexShrink: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: day.enabled ? 'var(--fp-text)' : 'var(--fp-muted)' }}>{day.day}</div>
+                      </div>
+                      <div
+                        onClick={() => toggleDay(i)}
+                        style={{
+                          padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                          background: day.enabled ? 'rgba(109,203,202,0.12)' : 'rgba(226,93,37,0.08)',
+                          color: day.enabled ? '#3d9695' : '#c0552a',
+                          border: `1px solid ${day.enabled ? 'rgba(109,203,202,0.3)' : 'rgba(226,93,37,0.2)'}`,
+                          userSelect: 'none', transition: 'all 0.15s', flexShrink: 0,
+                        }}
+                      >
+                        {day.enabled ? 'Available' : 'Unavailable'}
+                      </div>
+                      {day.enabled ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+                          <select
+                            value={day.start}
+                            onChange={e => updateTime(i, 'start', e.target.value)}
+                            style={{
+                              padding: '10px 32px 10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)',
+                              background: '#fff', fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
+                              color: 'var(--fp-text)', outline: 'none', cursor: 'pointer',
+                              appearance: 'none',
+                              backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+                              backgroundRepeat: 'no-repeat', backgroundPosition: 'right 8px center', backgroundSize: '16px',
+                            }}
+                          >
+                            {timeOptions.map(t => <option key={t.val} value={t.val}>{t.label}</option>)}
+                          </select>
+                          <span style={{ color: 'var(--fp-muted)', fontSize: 14 }}>→</span>
+                          <select
+                            value={day.end}
+                            onChange={e => updateTime(i, 'end', e.target.value)}
+                            style={{
+                              padding: '10px 32px 10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)',
+                              background: '#fff', fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
+                              color: 'var(--fp-text)', outline: 'none', cursor: 'pointer',
+                              appearance: 'none',
+                              backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+                              backgroundRepeat: 'no-repeat', backgroundPosition: 'right 8px center', backgroundSize: '16px',
+                            }}
+                          >
+                            {timeOptions.map(t => <option key={t.val} value={t.val}>{t.label}</option>)}
+                          </select>
+                        </div>
+                      ) : (
+                        <div style={{ flex: 1, fontSize: 13, color: 'var(--fp-muted)', fontStyle: 'italic' }}>No bookings on this day</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Unavailable Dates Section */}
+            <div className="card fp" style={{ padding: '28px', marginTop: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                <div>
+                  <div style={{ fontWeight: 700, color: 'var(--fp-text)', fontSize: 15 }}>Unavailable Dates</div>
+                  <div style={{ fontSize: 13, color: 'var(--fp-muted)', marginTop: 2 }}>Block specific dates when you can't take bookings (e.g. holidays, training days).</div>
+                </div>
+                <button className="btn btn-primary fp" style={{ padding: '8px 16px', fontSize: 13 }} onClick={() => setShowUnavailModal(true)}>
+                  <Icon path={icons.plus} size={13} /> Add Date
+                </button>
+              </div>
+
+              {unavailableDates.length === 0 ? (
+                <div style={{ padding: 20, textAlign: 'center', color: 'var(--fp-muted)', fontSize: 13, background: 'var(--fp-bg)', borderRadius: 10, border: '1px dashed var(--fp-border)' }}>
+                  No unavailable dates set. All enabled days are open for bookings.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {unavailableDates.map(u => {
+                    const d = new Date(u.date + 'T00:00:00');
+                    const label = d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
+                    const isPast = u.date < new Date().toISOString().split('T')[0];
+                    return (
+                      <div key={u.date} style={{
+                        display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+                        background: isPast ? 'var(--fp-bg)' : '#fff', borderRadius: 8,
+                        border: '1px solid var(--fp-border)', opacity: isPast ? 0.5 : 1,
+                      }}>
+                        <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(226,93,37,0.08)', color: '#E25D25', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 12, fontWeight: 800 }}>
+                          <div style={{ lineHeight: 1 }}>{d.getDate()}</div>
+                          <div style={{ fontSize: 8, textTransform: 'uppercase' }}>{d.toLocaleDateString('en-AU', { month: 'short' })}</div>
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fp-text)' }}>{label}</div>
+                          {u.reason && <div style={{ fontSize: 11, color: 'var(--fp-muted)' }}>{u.reason}</div>}
+                        </div>
+                        <button onClick={() => removeUnavailableDate(u.date)} style={{
+                          background: 'none', border: 'none', color: 'var(--fp-muted)', cursor: 'pointer', padding: '4px 8px', fontSize: 12, fontWeight: 600,
+                        }}>✕</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="save-bar" style={{ marginTop: 16 }}>
+              <button className="btn btn-primary fp" onClick={handleSave}>
+                <Icon path={icons.check} size={14} /> Save Availability
+              </button>
+            </div>
+
+            {/* Add Unavailable Date Modal */}
+            {showUnavailModal && (
+              <div className="modal-overlay" onClick={() => setShowUnavailModal(false)}>
+                <div className="modal fp" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
+                  <div className="modal-header fp">
+                    <div className="modal-title fp">Add Unavailable Date</div>
+                    <button className="modal-close" onClick={() => setShowUnavailModal(false)}>✕</button>
+                  </div>
+                  <div className="modal-body" style={{ padding: '24px' }}>
+                    <div style={{ marginBottom: 16 }}>
+                      <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>Date</label>
+                      <input
+                        type="date"
+                        className="form-input fp"
+                        value={unavailDate}
+                        onChange={e => setUnavailDate(e.target.value)}
+                        min={new Date().toISOString().split('T')[0]}
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    <div style={{ marginBottom: 20 }}>
+                      <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>Reason (optional)</label>
+                      <input
+                        type="text"
+                        className="form-input fp"
+                        value={unavailReason}
+                        onChange={e => setUnavailReason(e.target.value)}
+                        placeholder="e.g. Public holiday, Staff training"
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                      <button className="btn btn-ghost fp" onClick={() => setShowUnavailModal(false)}>Cancel</button>
+                      <button className="btn btn-primary fp" onClick={addUnavailableDate} disabled={!unavailDate}>
+                        <Icon path={icons.check} size={14} /> Add Date
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* === BOOKINGS PAGE === */}
+        {page === 'bookings' && (
+          <>
+            <div className="page-header">
+              <div className="page-header-left">
+                <div className="page-title" style={{ color: 'var(--fp-text)' }}>Upcoming Bookings</div>
+                <div className="page-desc" style={{ color: 'var(--fp-muted)' }}>View all assessment bookings for your centre.</div>
+              </div>
+            </div>
+
+            {bookingsLoading ? (
+              <div style={{ textAlign: 'center', padding: 48, color: 'var(--fp-muted)' }}>Loading bookings...</div>
+            ) : (() => {
+              const today = todayInTz;
+              const startOfWeek = new Date(today);
+              startOfWeek.setDate(today.getDate() - today.getDay() + 1 + calendarWeekOffset * 7);
+              const weekDays = [];
+              for (let i = 0; i < 7; i++) {
+                const d = new Date(startOfWeek);
+                d.setDate(startOfWeek.getDate() + i);
+                weekDays.push(d);
+              }
+              const weekLabel = `${weekDays[0].toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })} — ${weekDays[6].toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+
+              const weekStart = weekDays[0].toISOString().split('T')[0];
+              const weekEnd = weekDays[6].toISOString().split('T')[0];
+              const weekBookings = bookings.filter(b => b.date >= weekStart && b.date <= weekEnd);
+
+              const hours = [];
+              for (let h = 8; h <= 21; h++) hours.push(h);
+
+              // Is the current week being shown?
+              const isCurrentWeek = weekDays.some(d => d.toDateString() === today.toDateString());
+
+              return (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+                    <button className="btn btn-ghost fp" style={{ padding: '8px 14px' }} onClick={() => setCalendarWeekOffset(w => w - 1)}>
+                      ← Previous
+                    </button>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)' }}>
+                      {weekLabel}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button className="btn btn-ghost fp" style={{ padding: '8px 14px', ...(calendarWeekOffset === 0 ? { background: 'rgba(109,203,202,0.1)', color: 'var(--fp-accent)', border: '1px solid var(--fp-accent)' } : {}) }} onClick={() => setCalendarWeekOffset(0)}>
+                        Today
+                      </button>
+                      <button className="btn btn-ghost fp" style={{ padding: '8px 14px' }} onClick={() => setCalendarWeekOffset(w => w + 1)}>
+                        Next →
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="card fp" style={{ padding: 0, overflow: 'hidden' }}>
+                    <div style={{ overflowX: 'auto' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '60px repeat(7, 1fr)', minWidth: 700, position: 'relative' }}>
+                        {/* Header row */}
+                        <div style={{ padding: '12px 8px', borderBottom: '2px solid var(--fp-border)', borderRight: '1px solid var(--fp-border)', background: 'var(--fp-bg)' }} />
+                        {weekDays.map((d, i) => {
+                          const isToday = d.toDateString() === today.toDateString();
+                          return (
+                            <div key={i} style={{
+                              padding: '10px 8px', textAlign: 'center',
+                              borderBottom: '2px solid var(--fp-border)',
+                              borderRight: i < 6 ? '1px solid var(--fp-border)' : 'none',
+                              background: isToday ? 'rgba(109,203,202,0.18)' : 'var(--fp-bg)',
+                            }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: isToday ? '#3d9695' : 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                {d.toLocaleDateString('en-AU', { weekday: 'short' })}
+                              </div>
+                              <div style={{
+                                fontSize: 18, fontWeight: 800, marginTop: 2,
+                                width: 34, height: 34, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                background: isToday ? 'var(--fp-accent)' : 'transparent',
+                                color: isToday ? '#fff' : 'var(--fp-text)',
+                                boxShadow: isToday ? '0 2px 8px rgba(109,203,202,0.4)' : 'none',
+                              }}>
+                                {d.getDate()}
+                              </div>
+                              {isToday && <div style={{ fontSize: 9, fontWeight: 700, color: '#3d9695', marginTop: 2, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Today</div>}
+                            </div>
+                          );
+                        })}
+
+                        {/* Time grid */}
+                        {hours.map((h, hi) => (
+                          <div key={h} style={{ display: 'contents' }}>
+                            <div style={{
+                              padding: '4px 8px', fontSize: 11, fontWeight: 600, color: 'var(--fp-muted)',
+                              borderRight: '1px solid var(--fp-border)',
+                              borderBottom: '1px solid #eef0f2',
+                              display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end',
+                              minHeight: 56, background: '#fafbfc', position: 'relative',
+                            }}>
+                              {h > 12 ? h - 12 : h}{h >= 12 ? 'PM' : 'AM'}
+                              {isCurrentWeek && currentHour === h && (
+                                <div style={{
+                                  position: 'absolute', left: 0, right: 0, top: (currentMin / 60) * 56,
+                                  height: 2, background: '#E25D25', zIndex: 5,
+                                }} />
+                              )}
+                            </div>
+                            {weekDays.map((d, di) => {
+                              const dateStr = d.toISOString().split('T')[0];
+                              const cellBookings = weekBookings.filter(b => {
+                                if (b.date !== dateStr) return false;
+                                const [bh] = b.time.split(':').map(Number);
+                                return bh === h;
+                              });
+                              const isToday = d.toDateString() === today.toDateString();
+
+                              // Current time indicator
+                              const showTimeIndicator = isCurrentWeek && currentHour === h;
+                              const timeIndicatorTop = showTimeIndicator ? (currentMin / 60) * 56 : 0;
+
+                              return (
+                                <div key={di} style={{
+                                  borderRight: di < 6 ? '1px solid #eef0f2' : 'none',
+                                  borderBottom: '1px solid #eef0f2',
+                                  padding: 3, minHeight: 56, position: 'relative',
+                                  background: isToday ? 'rgba(109,203,202,0.08)' : 'transparent',
+                                  borderLeft: isToday ? '2px solid var(--fp-accent)' : 'none',
+                                  borderLeftColor: isToday ? 'rgba(109,203,202,0.3)' : undefined,
+                                }}>
+                                  {/* Current time line */}
+                                  {showTimeIndicator && (
+                                    <div style={{
+                                      position: 'absolute', left: -2, right: 0, top: timeIndicatorTop,
+                                      height: 2, background: '#E25D25', zIndex: 5,
+                                      opacity: isToday ? 1 : 0.35,
+                                    }}>
+                                      {isToday && <div style={{ position: 'absolute', left: -4, top: -4, width: 10, height: 10, borderRadius: '50%', background: '#E25D25', boxShadow: '0 0 4px rgba(226,93,37,0.5)' }} />}
+                                    </div>
+                                  )}
+                                  {/* Time indicator in the hour label column too */}
+
+                                  {cellBookings.map((b, bi) => {
+                                    const [bh, bm] = b.time.split(':').map(Number);
+                                    const timeLabel = fmtTime(b.time);
+                                    return (
+                                      <div key={bi} onClick={() => setSelectedBooking(b)} style={{
+                                        background: 'linear-gradient(135deg, #E25D25, #f0845a)',
+                                        color: '#fff', borderRadius: 6, padding: '6px 8px', fontSize: 11,
+                                        marginBottom: 2, cursor: 'pointer',
+                                        lineHeight: 1.3, position: 'relative', zIndex: 2,
+                                        transition: 'transform 0.1s, box-shadow 0.1s',
+                                      }}
+                                      onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(226,93,37,0.3)'; }}
+                                      onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = 'none'; }}
+                                      >
+                                        <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.customerName}</div>
+                                        <div style={{ opacity: 0.85, fontSize: 10 }}>{timeLabel}</div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Summary stats */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginTop: 20 }}>
+                    <div className="card fp" style={{ padding: '20px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--fp-accent)' }}>
+                        {weekBookings.length}
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 4 }}>This Week</div>
+                    </div>
+                    <div className="card fp" style={{ padding: '20px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--fp-accent)' }}>
+                        {bookings.filter(b => b.date >= today.toISOString().split('T')[0]).length}
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 4 }}>Total Upcoming</div>
+                    </div>
+                    <div className="card fp" style={{ padding: '20px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--fp-accent)' }}>
+                        {bookings.length}
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 4 }}>All Time</div>
+                    </div>
+                  </div>
+
+                  {/* Upcoming list */}
+                  {weekBookings.length > 0 && (
+                    <div style={{ marginTop: 20 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>This Week's Bookings</div>
+                      {weekBookings.sort((a, b) => a.date === b.date ? a.time.localeCompare(b.time) : a.date.localeCompare(b.date)).map(b => {
+                        const timeLabel = fmtTime(b.time);
+                        const dateObj = new Date(b.date + 'T00:00:00');
+                        const dateLabel = dateObj.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+                        return (
+                          <div key={b.id} className="card fp" onClick={() => setSelectedBooking(b)} style={{ padding: '14px 18px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer', transition: 'border-color 0.15s', border: '1px solid var(--fp-border)' }}
+                            onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--fp-accent)'}
+                            onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--fp-border)'}
+                          >
+                            <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(226,93,37,0.1)', color: '#E25D25', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                              <div style={{ fontSize: 14, fontWeight: 800, lineHeight: 1 }}>{dateObj.getDate()}</div>
+                              <div style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase' }}>{dateObj.toLocaleDateString('en-AU', { month: 'short' })}</div>
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--fp-text)' }}>{b.customerName}</div>
+                              <div style={{ fontSize: 12, color: 'var(--fp-muted)' }}>{dateLabel} at {timeLabel} · 40 min</div>
+                            </div>
+                            <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                              <a href={`mailto:${b.customerEmail}`} onClick={e => e.stopPropagation()} style={{ fontSize: 12, color: 'var(--fp-accent)', textDecoration: 'none', fontWeight: 600 }}>Email</a>
+                              <a href={`tel:${b.customerPhone?.replace(/\s/g, '')}`} onClick={e => e.stopPropagation()} style={{ fontSize: 12, color: 'var(--fp-accent)', textDecoration: 'none', fontWeight: 600 }}>Call</a>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {weekBookings.length === 0 && (
+                    <div style={{ textAlign: 'center', padding: 32, color: 'var(--fp-muted)', marginTop: 12, fontSize: 14 }}>
+                      No bookings this week. Bookings made via the assessment page will appear here.
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </>
+        )}
+
+        {/* === SETTINGS PAGE === */}
+        {page === 'settings' && (
+          <>
+            <div className="page-header">
+              <div className="page-title" style={{ color: 'var(--fp-text)' }}>Booking Settings</div>
+              <div className="page-desc" style={{ color: 'var(--fp-muted)' }}>Configure your timezone and booking buffer preferences.</div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 560 }}>
+              {/* Timezone */}
+              <div className="card fp" style={{ padding: '24px' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 16 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(109,203,202,0.1)', color: 'var(--fp-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Icon path={icons.globe} size={18} />
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)' }}>Timezone</div>
+                    <div style={{ fontSize: 13, color: 'var(--fp-muted)', marginTop: 2 }}>All bookings and availability times will be displayed in this timezone.</div>
+                  </div>
+                </div>
+                <select
+                  value={timezone}
+                  onChange={e => setTimezone(e.target.value)}
+                  style={{
+                    width: '100%', padding: '12px 14px', borderRadius: 10,
+                    border: '2px solid var(--fp-border)', background: '#fff',
+                    fontFamily: 'inherit', fontSize: 14, color: 'var(--fp-text)',
+                    outline: 'none', cursor: 'pointer',
+                    appearance: 'none',
+                    backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+                    backgroundRepeat: 'no-repeat',
+                    backgroundPosition: 'right 12px center',
+                    backgroundSize: '18px',
+                    paddingRight: 40,
+                  }}
+                >
+                  {TIMEZONES.map(tz => <option key={tz} value={tz}>{tz.replace(/_/g, ' ')}</option>)}
+                </select>
+              </div>
+
+              {/* Buffer */}
+              <div className="card fp" style={{ padding: '24px' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 16 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(109,203,202,0.1)', color: 'var(--fp-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Icon path={icons.clock} size={18} />
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)' }}>Booking Buffer</div>
+                    <div style={{ fontSize: 13, color: 'var(--fp-muted)', marginTop: 2 }}>Minimum gap between consecutive bookings to allow preparation time.</div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {bufferOptions.map(b => (
+                    <button
+                      key={b}
+                      onClick={() => setBuffer(b)}
+                      style={{
+                        flex: 1, padding: '12px 8px', borderRadius: 10, border: '2px solid',
+                        borderColor: buffer === b ? 'var(--fp-accent)' : 'var(--fp-border)',
+                        background: buffer === b ? 'rgba(109,203,202,0.1)' : '#fff',
+                        color: buffer === b ? 'var(--fp-accent)' : 'var(--fp-text)',
+                        fontFamily: 'inherit', fontSize: 14, fontWeight: 700, cursor: 'pointer',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      {b === 0 ? 'None' : `${b} min`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 20 }}>
+              <button className="btn btn-primary fp" onClick={async () => {
+                try {
+                  await saveAvailability(locationId, {
+                    schedule: availability,
+                    timezone,
+                    bufferMinutes: buffer,
+                    unavailableDates,
+                  });
+                  showToast('✓ Settings saved.');
+                } catch (err) {
+                  console.error("Failed to save settings:", err);
+                  showToast('✗ Failed to save settings. Please try again.');
+                }
+              }}>
+                <Icon path={icons.check} size={14} /> Save Settings
+              </button>
+            </div>
+          </>
+        )}
+      </main>
+
+      {/* Booking Detail Modal */}
+      {selectedBooking && (
+        <div className="modal-overlay" onClick={() => setSelectedBooking(null)}>
+          <div className="modal fp" onClick={e => e.stopPropagation()} style={{ maxWidth: 440 }}>
+            <div className="modal-header fp" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div className="modal-title fp">Booking Details</div>
+              <button className="modal-close" onClick={() => setSelectedBooking(null)} style={{ marginLeft: 'auto' }}>✕</button>
+            </div>
+            <div className="modal-body" style={{ padding: '24px' }}>
+              {(() => {
+                const b = selectedBooking;
+                const dateObj = new Date(b.date + 'T00:00:00');
+                const dateLabel = dateObj.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+                const timeLabel = fmtTime(b.time);
+                const [bh, bm] = b.time.split(':').map(Number);
+                const endMin = bh * 60 + bm + 40;
+                const endLabel = fmtTime(`${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`);
+                const refCode = b.id.slice(0, 8).toUpperCase();
+
+                return (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 }}>
+                      <div style={{ width: 52, height: 52, borderRadius: 12, background: 'linear-gradient(135deg, #E25D25, #f0845a)', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <div style={{ fontSize: 18, fontWeight: 800, lineHeight: 1 }}>{dateObj.getDate()}</div>
+                        <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase' }}>{dateObj.toLocaleDateString('en-AU', { month: 'short' })}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--fp-text)' }}>{b.customerName}</div>
+                        <div style={{ fontSize: 13, color: 'var(--fp-muted)' }}>{dateLabel}</div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 20 }}>
+                      {[
+                        { icon: icons.clock, label: 'Time', value: `${timeLabel} — ${endLabel} (40 min)` },
+                        { icon: icons.mail, label: 'Email', value: b.customerEmail, href: `mailto:${b.customerEmail}` },
+                        { icon: icons.phone, label: 'Phone', value: b.customerPhone, href: `tel:${b.customerPhone?.replace(/\s/g, '')}` },
+                      ].map((row, ri) => (
+                        <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'var(--fp-bg)', borderRadius: 8 }}>
+                          <Icon path={row.icon} size={15} style={{ color: 'var(--fp-accent)', flexShrink: 0 }} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 11, color: 'var(--fp-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{row.label}</div>
+                            {row.href ? (
+                              <a href={row.href} style={{ fontSize: 14, color: 'var(--fp-text)', textDecoration: 'none', fontWeight: 600 }}>{row.value}</a>
+                            ) : (
+                              <div style={{ fontSize: 14, color: 'var(--fp-text)', fontWeight: 600 }}>{row.value}</div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                      {b.notes && (
+                        <div style={{ padding: '10px 14px', background: 'var(--fp-bg)', borderRadius: 8 }}>
+                          <div style={{ fontSize: 11, color: 'var(--fp-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Notes</div>
+                          <div style={{ fontSize: 14, color: 'var(--fp-text)' }}>{b.notes}</div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ fontSize: 11, color: 'var(--fp-muted)', textAlign: 'center' }}>Ref: {refCode}</div>
+
+                    <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+                      <a href={`mailto:${b.customerEmail}`} className="btn btn-primary fp" style={{ flex: 1, textDecoration: 'none', textAlign: 'center', justifyContent: 'center' }}>
+                        <Icon path={icons.mail} size={14} /> Email Customer
+                      </a>
+                      <a href={`tel:${b.customerPhone?.replace(/\s/g, '')}`} className="btn btn-ghost fp" style={{ flex: 1, textDecoration: 'none', textAlign: 'center', justifyContent: 'center', border: '1px solid var(--fp-border)' }}>
+                        <Icon path={icons.phone} size={14} /> Call
+                      </a>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="toast hq toast-success" style={{ background: '#fff', border: '1px solid var(--fp-border)', color: 'var(--fp-text)' }}>
+          <span className="toast-icon"><Icon path={icons.check} size={16} /></span>
+          {toast}
+        </div>
+      )}
+    </div>
   );
 }
