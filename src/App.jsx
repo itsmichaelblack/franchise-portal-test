@@ -2176,12 +2176,17 @@ function HQPortal({ user, onLogout }) {
           confirmLabel="Delete Invite"
           danger
           onConfirm={async () => {
-            const { doc, deleteDoc } = await import('firebase/firestore');
-            const { db } = await import('./firebase.js');
-            await deleteDoc(doc(db, 'invites', userModal.u.inviteId));
-            setHqUsers(prev => prev.filter(u => u.id !== userModal.u.id));
-            showToast(`Invite for ${userModal.u.name} deleted.`);
-            setUserModal(null);
+            try {
+              const { doc, deleteDoc } = await import('firebase/firestore');
+              const { db } = await import('./firebase.js');
+              await deleteDoc(doc(db, 'invites', userModal.u.inviteId));
+              setHqUsers(prev => prev.filter(u => u.id !== userModal.u.id));
+              showToast(`Invite for ${userModal.u.name} deleted.`);
+              setUserModal(null);
+            } catch (err) {
+              console.error('Failed to delete invite:', err);
+              showToast(`Failed to delete invite. Please try again.`);
+            }
           }}
           onClose={() => setUserModal(null)}
         />
