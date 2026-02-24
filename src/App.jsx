@@ -80,6 +80,8 @@ const icons = {
   star: "M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z",
   menu: "M3 12h18 M3 6h18 M3 18h18",
   alert: "M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z M12 9v4 M12 17h.01",
+  eye: "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
+  send: "M22 2L11 13 M22 2l-7 20-4-9-9-4 20-7z",
 };
 
 // --- Styles ---------------------------------------------------------------------
@@ -1915,6 +1917,17 @@ function HQPortal({ user, onLogout }) {
           onInvite={() => setUserModal('invite')}
           onRemove={(u) => setUserModal({ type: 'remove', u })}
           onSelectUser={(u) => { setSelectedUser(u); setUserDetailTab('details'); }}
+          onEdit={(u) => setUserModal({ type: 'edit', u })}
+          onResendInvite={async (u) => {
+            try {
+              await resendInviteEmail(u.inviteId);
+              showToast(`✓ Invite email re-sent to ${u.name}.`);
+            } catch (err) {
+              console.error('Failed to resend invite:', err);
+              showToast(`✗ Failed to resend invite email.`);
+            }
+          }}
+          onDeleteInvite={(u) => setUserModal({ type: 'delete_invite', u })}
         />
       )}
 
@@ -2153,6 +2166,24 @@ function HQPortal({ user, onLogout }) {
             setUserModal(null);
             showToast(`✓ User "${updatedUser.name}" updated.`);
           }}
+        />
+      )}
+      {userModal?.type === 'delete_invite' && (
+        <ConfirmModal
+          portal="hq"
+          title="Delete Invite"
+          body={<>Are you sure you want to delete the pending invite for <span className="confirm-name hq">{userModal.u.name}</span>? They will no longer be able to accept this invitation.</>}
+          confirmLabel="Delete Invite"
+          danger
+          onConfirm={async () => {
+            const { doc, deleteDoc } = await import('firebase/firestore');
+            const { db } = await import('./firebase.js');
+            await deleteDoc(doc(db, 'invites', userModal.u.inviteId));
+            setHqUsers(prev => prev.filter(u => u.id !== userModal.u.id));
+            showToast(`Invite for ${userModal.u.name} deleted.`);
+            setUserModal(null);
+          }}
+          onClose={() => setUserModal(null)}
         />
       )}
 
@@ -3023,7 +3054,7 @@ function ConfirmModal({ portal, title, body, confirmLabel, danger, onConfirm, on
 }
 
 // --- Users Page ----------------------------------------------------------------
-function UsersPage({ currentUser, hqUsers, setHqUsers, loading, setLoading, onInvite, onRemove, onSelectUser }) {
+function UsersPage({ currentUser, hqUsers, setHqUsers, loading, setLoading, onInvite, onRemove, onSelectUser, onEdit, onResendInvite, onDeleteInvite }) {
   useEffect(() => {
     const loadUsers = async () => {
       setLoading(true);
@@ -3113,11 +3144,33 @@ function UsersPage({ currentUser, hqUsers, setHqUsers, loading, setLoading, onIn
                       )}
                     </td>
                     <td className="hq">
-                      {u.id !== currentUser.uid && !u._isPendingInvite && (
-                        <button className="btn btn-danger" style={{ padding: '7px 12px' }} onClick={(e) => { e.stopPropagation(); onRemove(u); }}>
-                          <Icon path={icons.trash} size={13} /> Remove
-                        </button>
-                      )}
+                      <div className="actions">
+                        {!u._isPendingInvite && (
+                          <>
+                            <button className="btn btn-ghost hq" style={{ padding: '7px 12px' }} onClick={(e) => { e.stopPropagation(); onSelectUser(u); }}>
+                              <Icon path={icons.eye} size={13} /> View
+                            </button>
+                            <button className="btn btn-ghost hq" style={{ padding: '7px 12px' }} onClick={(e) => { e.stopPropagation(); onEdit(u); }}>
+                              <Icon path={icons.edit} size={13} /> Edit
+                            </button>
+                            {u.id !== currentUser.uid && (
+                              <button className="btn btn-danger" style={{ padding: '7px 12px' }} onClick={(e) => { e.stopPropagation(); onRemove(u); }}>
+                                <Icon path={icons.trash} size={13} /> Delete
+                              </button>
+                            )}
+                          </>
+                        )}
+                        {u._isPendingInvite && (
+                          <>
+                            <button className="btn btn-ghost hq" style={{ padding: '7px 12px' }} onClick={(e) => { e.stopPropagation(); onResendInvite(u); }}>
+                              <Icon path={icons.send} size={13} /> Re-send Invite
+                            </button>
+                            <button className="btn btn-danger" style={{ padding: '7px 12px' }} onClick={(e) => { e.stopPropagation(); onDeleteInvite(u); }}>
+                              <Icon path={icons.trash} size={13} /> Delete Invite
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
