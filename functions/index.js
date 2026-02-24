@@ -205,6 +205,91 @@ exports.onInviteCreated = functions.firestore
     }
   });
 
+// ── Callable: resend invite email ─────────────────────────────────────────────
+exports.resendInviteEmail = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "You must be signed in.");
+  }
+
+  const callerDoc = await getFirestore().doc(`users/${context.auth.uid}`).get();
+  const role = callerDoc.data()?.role;
+  if (role !== "master_admin") {
+    throw new functions.https.HttpsError("permission-denied", "Only master admins can resend invite emails.");
+  }
+
+  const { inviteId } = data;
+  if (!inviteId) {
+    throw new functions.https.HttpsError("invalid-argument", "inviteId is required.");
+  }
+
+  const inviteDoc = await getFirestore().doc(`invites/${inviteId}`).get();
+  if (!inviteDoc.exists) {
+    throw new functions.https.HttpsError("not-found", `Invite ${inviteId} not found.`);
+  }
+
+  const invite = inviteDoc.data();
+  const PORTAL_URL_WITH_INVITE = `${PORTAL_URL}?invite=${inviteId}`;
+
+  const apiKey = functions.config().sendgrid?.api_key;
+  if (!apiKey) {
+    throw new functions.https.HttpsError("internal", "SendGrid API key not configured.");
+  }
+
+  sgMail.setApiKey(apiKey);
+
+  const html = `
+    <!DOCTYPE html><html><head><meta charset="utf-8" />
+    <style>
+      body { margin: 0; padding: 0; background: #f5f3ee; font-family: Arial, sans-serif; }
+      .wrapper { max-width: 560px; margin: 40px auto; background: #ffffff; border-radius: 16px; overflow: hidden; }
+      .header { background: #0a0a0f; padding: 40px; text-align: center; }
+      .header h1 { color: #c8a96e; font-size: 24px; margin: 0; }
+      .header p { color: rgba(255,255,255,0.5); font-size: 14px; margin: 8px 0 0; }
+      .body { padding: 40px; }
+      .body p { color: #444; font-size: 15px; line-height: 1.7; }
+      .cta { text-align: center; margin: 32px 0; }
+      .cta a { display: inline-block; background: #c8a96e; color: #0a0a0f; text-decoration: none; padding: 14px 32px; border-radius: 10px; font-weight: 700; }
+      .footer { background: #f5f3ee; padding: 24px; text-align: center; font-size: 12px; color: #999; }
+    </style></head>
+    <body>
+      <div class="wrapper">
+        <div class="header">
+          <h1>Reminder: You're Invited!</h1>
+          <p>Success Tutoring HQ Portal</p>
+        </div>
+        <div class="body">
+          <p>Hi ${invite.name},</p>
+          <p>This is a reminder that you've been invited to join the <strong>Success Tutoring HQ Portal</strong> as an <strong>${invite.role === 'master_admin' ? 'Master Admin' : 'Admin'}</strong>.</p>
+          <p>Click the button below to sign in with your Google account and get started.</p>
+          <div class="cta"><a href="${PORTAL_URL_WITH_INVITE}">Accept Invite & Sign In →</a></div>
+          <p style="font-size: 13px; color: #888;">If you weren't expecting this invite, you can safely ignore this email.</p>
+        </div>
+        <div class="footer">© ${new Date().getFullYear()} Success Tutoring. All rights reserved.</div>
+      </div>
+    </body></html>
+  `;
+
+  try {
+    await sgMail.send({
+      to: invite.email,
+      from: { email: FROM_EMAIL, name: FROM_NAME },
+      subject: `Reminder: You've been invited to the Success Tutoring HQ Portal`,
+      text: `Hi ${invite.name}, this is a reminder that you've been invited to the Success Tutoring HQ Portal. Sign in here: ${PORTAL_URL_WITH_INVITE}`,
+      html,
+    });
+
+    // Update invite doc with resend timestamp
+    await getFirestore().doc(`invites/${inviteId}`).update({
+      lastResentAt: new Date().toISOString(),
+    });
+
+    return { success: true };
+  } catch (err) {
+    console.error("SendGrid error:", err?.response?.body ?? err);
+    throw new functions.https.HttpsError("internal", "Failed to send email.");
+  }
+});
+
 // ── Trigger: send confirmation emails when a booking is created ─────────────
 exports.onBookingCreated = functions.firestore
   .document("bookings/{bookingId}")
