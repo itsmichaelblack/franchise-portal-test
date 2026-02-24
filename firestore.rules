@@ -109,11 +109,31 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // ── Invites collection ────────────────────────────────────────────────
+    // Stores pending HQ user invites
+    match /invites/{inviteId} {
+      // Master admins can read all invites
+      allow read: if isMasterAdmin();
+
+      // Master admins can create invites
+      allow create: if isMasterAdmin();
+
+      // Master admins can update invites (e.g. status changes)
+      allow update: if isMasterAdmin();
+
+      // Nobody can delete invites through the client
+      allow delete: if false;
+    }
+
     // ── Activity Logs collection ────────────────────────────────────────────
     // Stores user activity logs per location (sign-ins, edits, etc.)
+    // Also stores HQ-scoped logs (scope: 'hq') for admin actions across all locations.
     match /activity_logs/{logId} {
       // HQ admins can read all logs
       allow read: if isAdmin();
+
+      // Master admins can read all logs (including HQ user logs)
+      allow read: if isMasterAdmin();
 
       // Franchise partners can read logs for their location
       allow read: if isAuth() && resource.data.locationId == userDoc().locationId;
