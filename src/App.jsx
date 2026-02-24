@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { createLocation, updateLocation, deleteLocation, saveAvailability, getLocations, resendConfirmationEmail, logUserAction, getActivityLogs } from "./services/firestore";
+import { createLocation, updateLocation, deleteLocation, saveAvailability, getLocations, resendConfirmationEmail, resendInviteEmail, updateHqUser, logUserAction, getActivityLogs, getHqUserLogs } from "./services/firestore";
 
 // --- Simulated Data -------------------------------------------------------------
 const SIMULATED_USERS = {
@@ -1426,7 +1426,11 @@ function HQPortal({ user, onLogout }) {
   const isMaster = user.role === 'master_admin';
   const [hqUsers, setHqUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(false);
-  const [userModal, setUserModal] = useState(null); // null | 'invite' | { type:'remove', u }
+  const [userModal, setUserModal] = useState(null); // null | 'invite' | { type:'remove', u } | { type:'edit', u }
+
+  // HQ User detail view state
+  const [selectedUser, setSelectedUser] = useState(null); // null or user object
+  const [userDetailTab, setUserDetailTab] = useState('details'); // 'details' | 'user_logs'
 
   // HQ Settings
   const [youtubeUrl, setYoutubeUrl] = useState('');
@@ -1643,7 +1647,7 @@ function HQPortal({ user, onLogout }) {
             <Icon path={icons.map} size={16} /> Locations
           </button>
           {isMaster && (
-            <button className={`nav-item ${page === 'users' ? 'active' : ''}`} onClick={() => setPage('users')}>
+            <button className={`nav-item ${page === 'users' ? 'active' : ''}`} onClick={() => { setPage('users'); setSelectedUser(null); }}>
               <Icon path={icons.users} size={16} /> Users
             </button>
           )}
@@ -1670,7 +1674,7 @@ function HQPortal({ user, onLogout }) {
       </aside>
 
       <main className="main hq">
-        {(page === 'locations' || page === 'users') && !selectedLocation && (
+        {(page === 'locations' || page === 'users') && !selectedLocation && !selectedUser && (
         <div className="page-header">
           <div className="page-header-left">
             <div className="page-title">{page === 'users' ? 'HQ Users' : 'Franchise Locations'}</div>
@@ -1901,7 +1905,7 @@ function HQPortal({ user, onLogout }) {
         )}
 
       {/* Users Page */}
-      {page === 'users' && isMaster && (
+      {page === 'users' && isMaster && !selectedUser && (
         <UsersPage
           currentUser={user}
           hqUsers={hqUsers}
@@ -1910,6 +1914,21 @@ function HQPortal({ user, onLogout }) {
           setLoading={setUsersLoading}
           onInvite={() => setUserModal('invite')}
           onRemove={(u) => setUserModal({ type: 'remove', u })}
+          onSelectUser={(u) => { setSelectedUser(u); setUserDetailTab('details'); }}
+        />
+      )}
+
+      {/* User Detail View */}
+      {page === 'users' && isMaster && selectedUser && (
+        <HqUserDetailView
+          hqUser={selectedUser}
+          currentUser={user}
+          onBack={() => setSelectedUser(null)}
+          userDetailTab={userDetailTab}
+          setUserDetailTab={setUserDetailTab}
+          onEdit={(u) => setUserModal({ type: 'edit', u })}
+          onRemove={(u) => setUserModal({ type: 'remove', u })}
+          showToast={showToast}
         />
       )}
 
@@ -2116,10 +2135,24 @@ function HQPortal({ user, onLogout }) {
             const { db } = await import('./firebase.js');
             await deleteDoc(doc(db, 'users', userModal.u.id));
             setHqUsers(prev => prev.filter(u => u.id !== userModal.u.id));
+            if (selectedUser?.id === userModal.u.id) setSelectedUser(null);
             showToast(`User ${userModal.u.name} removed.`);
             setUserModal(null);
           }}
           onClose={() => setUserModal(null)}
+        />
+      )}
+      {userModal?.type === 'edit' && (
+        <EditHqUserModal
+          hqUser={userModal.u}
+          currentUser={user}
+          onClose={() => setUserModal(null)}
+          onSaved={(updatedUser) => {
+            setHqUsers(prev => prev.map(u => u.id === updatedUser.id ? { ...u, ...updatedUser } : u));
+            if (selectedUser?.id === updatedUser.id) setSelectedUser(prev => ({ ...prev, ...updatedUser }));
+            setUserModal(null);
+            showToast(`✓ User "${updatedUser.name}" updated.`);
+          }}
         />
       )}
 
@@ -2990,7 +3023,7 @@ function ConfirmModal({ portal, title, body, confirmLabel, danger, onConfirm, on
 }
 
 // --- Users Page ----------------------------------------------------------------
-function UsersPage({ currentUser, hqUsers, setHqUsers, loading, setLoading, onInvite, onRemove }) {
+function UsersPage({ currentUser, hqUsers, setHqUsers, loading, setLoading, onInvite, onRemove, onSelectUser }) {
   useEffect(() => {
     const loadUsers = async () => {
       setLoading(true);
@@ -3032,7 +3065,7 @@ function UsersPage({ currentUser, hqUsers, setHqUsers, loading, setLoading, onIn
               </thead>
               <tbody>
                 {hqUsers.map(u => (
-                  <tr key={u.id}>
+                  <tr key={u.id} onClick={() => onSelectUser(u)} style={{ cursor: 'pointer' }}>
                     <td className="hq" style={{ fontWeight: 600 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--orange-pale)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--orange)', fontWeight: 700, fontSize: 13 }}>
@@ -3051,7 +3084,7 @@ function UsersPage({ currentUser, hqUsers, setHqUsers, loading, setLoading, onIn
                     </td>
                     <td className="hq">
                       {u.id !== currentUser.uid && (
-                        <button className="btn btn-danger" style={{ padding: '7px 12px' }} onClick={() => onRemove(u)}>
+                        <button className="btn btn-danger" style={{ padding: '7px 12px' }} onClick={(e) => { e.stopPropagation(); onRemove(u); }}>
                           <Icon path={icons.trash} size={13} /> Remove
                         </button>
                       )}
@@ -3070,6 +3103,425 @@ function UsersPage({ currentUser, hqUsers, setHqUsers, loading, setLoading, onIn
         )}
       </div>
     </>
+  );
+}
+
+// --- HQ User Detail View --------------------------------------------------------
+function HqUserDetailView({ hqUser, currentUser, onBack, userDetailTab, setUserDetailTab, onEdit, onRemove, showToast }) {
+  const roleBadge = (role) => {
+    const isMasterAdmin = role === 'master_admin';
+    return (
+      <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700, background: isMasterAdmin ? 'rgba(200,169,110,0.15)' : 'rgba(100,100,120,0.2)', color: isMasterAdmin ? 'var(--hq-accent)' : 'var(--hq-muted)', border: `1px solid ${isMasterAdmin ? 'rgba(200,169,110,0.3)' : 'rgba(100,100,120,0.25)'}` }}>
+        {isMasterAdmin ? 'Master Admin' : 'Admin'}
+      </span>
+    );
+  };
+
+  const isCurrentUser = hqUser.id === currentUser.uid;
+
+  return (
+    <>
+      {/* Header with back button */}
+      <div className="location-detail-header">
+        <button className="back-btn" onClick={onBack}>
+          <span style={{ fontSize: 16 }}>←</span> Back to Users
+        </button>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--orange-pale)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--orange)', fontWeight: 700, fontSize: 15 }}>
+              {hqUser.name?.[0] || '?'}
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--text)' }}>{hqUser.name}</div>
+            {roleBadge(hqUser.role)}
+            {isCurrentUser && <span style={{ fontSize: 10, background: 'var(--orange-pale)', color: 'var(--orange)', padding: '2px 8px', borderRadius: 20 }}>You</span>}
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4, marginLeft: 48 }}>{hqUser.email}</div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {!isCurrentUser && (
+            <button className="btn btn-ghost hq" style={{ padding: '8px 14px' }} onClick={() => onEdit(hqUser)}>
+              <Icon path={icons.edit} size={13} /> Edit
+            </button>
+          )}
+          {!isCurrentUser && (
+            <button className="btn btn-danger" style={{ padding: '8px 14px' }} onClick={() => onRemove(hqUser)}>
+              <Icon path={icons.trash} size={13} /> Remove
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="location-detail-tabs">
+        <button className={`tab-btn ${userDetailTab === 'details' ? 'active' : ''}`} onClick={() => setUserDetailTab('details')}>
+          <Icon path={icons.users} size={15} /> Details
+        </button>
+        <button className={`tab-btn ${userDetailTab === 'user_logs' ? 'active' : ''}`} onClick={() => setUserDetailTab('user_logs')}>
+          <Icon path={icons.clock} size={15} /> User Logs
+        </button>
+      </div>
+
+      {/* Details Tab */}
+      {userDetailTab === 'details' && (
+        <div className="card hq" style={{ padding: 24 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px 40px' }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 6 }}>Full Name</div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>{hqUser.name}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 6 }}>Role</div>
+              <div>{roleBadge(hqUser.role)}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 6 }}>Email Address</div>
+              <div style={{ fontSize: 15, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Icon path={icons.mail} size={14} /> {hqUser.email}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 6 }}>Job Title</div>
+              <div style={{ fontSize: 15, color: 'var(--text)' }}>{hqUser.jobTitle || '—'}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 6 }}>Created</div>
+              <div style={{ fontSize: 15, color: 'var(--text)' }}>{hqUser.createdAt || hqUser.updatedAt || '—'}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 6 }}>User ID</div>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{hqUser.id}</div>
+            </div>
+          </div>
+
+          {/* Resend Invite Email Section */}
+          {!isCurrentUser && hqUser.inviteId && (
+            <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--border)' }}>
+              <ResendInviteButton inviteId={hqUser.inviteId} userName={hqUser.name} showToast={showToast} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* User Logs Tab */}
+      {userDetailTab === 'user_logs' && (
+        <HqUserLogsTab userId={hqUser.id} userName={hqUser.name} />
+      )}
+    </>
+  );
+}
+
+// --- Resend Invite Button -------------------------------------------------------
+function ResendInviteButton({ inviteId, userName, showToast }) {
+  const [resending, setResending] = useState(false);
+
+  const handleResend = async () => {
+    setResending(true);
+    try {
+      await resendInviteEmail(inviteId);
+      showToast(`✓ Invite email re-sent to ${userName}.`);
+    } catch (err) {
+      console.error("Failed to resend invite:", err);
+      showToast(`✗ Failed to resend invite email.`);
+    }
+    setResending(false);
+  };
+
+  return (
+    <button className="btn btn-ghost hq" onClick={handleResend} disabled={resending} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <Icon path={icons.mail} size={14} />
+      {resending ? 'Sending...' : 'Re-send Invite Email'}
+    </button>
+  );
+}
+
+// --- HQ User Logs Tab -----------------------------------------------------------
+function HqUserLogsTab({ userId, userName }) {
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filterAction, setFilterAction] = useState('all');
+
+  useEffect(() => {
+    const loadLogs = async () => {
+      setLoading(true);
+      try {
+        const data = await getHqUserLogs(userId);
+        setLogs(data);
+      } catch (e) {
+        console.error("Failed to load HQ user logs:", e);
+      }
+      setLoading(false);
+    };
+    loadLogs();
+  }, [userId]);
+
+  const formatUTCDate = (date) => {
+    if (!date) return '—';
+    return date.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+  };
+
+  const formatRelativeTime = (date) => {
+    if (!date) return '';
+    const now = new Date();
+    const diff = now - date;
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    if (days < 30) return `${days}d ago`;
+    return `${Math.floor(days / 30)}mo ago`;
+  };
+
+  const getActionBadgeClass = (action) => {
+    const map = { sign_in: 'sign_in', sign_out: 'sign_out', edit: 'edit', create: 'create', delete: 'delete', update: 'update', view: 'view' };
+    return map[action] || 'default';
+  };
+
+  const getActionLabel = (action) => {
+    const map = { sign_in: 'Sign In', sign_out: 'Sign Out', edit: 'Edit', create: 'Create', delete: 'Delete', update: 'Update', view: 'View', resend_email: 'Resend Email' };
+    return map[action] || action;
+  };
+
+  // Action counts
+  const actionCounts = {};
+  logs.forEach(log => {
+    const action = log.action || 'other';
+    actionCounts[action] = (actionCounts[action] || 0) + 1;
+  });
+
+  // Last activity
+  const lastActivity = logs.length > 0 ? (() => {
+    const ts = logs[0].timestamp?.toDate ? logs[0].timestamp.toDate() : logs[0].timestamp ? new Date(logs[0].timestamp) : null;
+    return ts;
+  })() : null;
+
+  // Last sign-in
+  const lastSignIn = (() => {
+    const signInLog = logs.find(l => l.action === 'sign_in');
+    if (!signInLog) return null;
+    return signInLog.timestamp?.toDate ? signInLog.timestamp.toDate() : signInLog.timestamp ? new Date(signInLog.timestamp) : null;
+  })();
+
+  // Filter
+  const allActionTypes = [...new Set(logs.map(l => l.action).filter(Boolean))].sort();
+  const filteredLogs = filterAction === 'all' ? logs : logs.filter(l => l.action === filterAction);
+
+  if (loading) {
+    return (
+      <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
+        <div style={{ fontSize: 24, marginBottom: 8 }}>⏳</div>
+        Loading user logs...
+      </div>
+    );
+  }
+
+  if (logs.length === 0) {
+    return (
+      <div className="log-empty">
+        <div className="log-empty-icon">📋</div>
+        <div className="log-empty-text">No activity logs yet for {userName}</div>
+        <div className="log-empty-desc">
+          Activity logs will appear here as this user interacts with the portal.
+          <br />
+          Logged events include sign-ins, location edits, creates, deletions, and more.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* Summary stats */}
+      <div className="stats-row" style={{ marginBottom: 20 }}>
+        <div className="stat-card hq">
+          <div className="stat-num" style={{ color: 'var(--orange)' }}>{logs.length}</div>
+          <div className="stat-label">Total Actions</div>
+        </div>
+        <div className="stat-card hq">
+          <div className="stat-num" style={{ color: '#059669', fontSize: 14, paddingTop: 6 }}>
+            {lastSignIn ? formatRelativeTime(lastSignIn) : '—'}
+          </div>
+          <div className="stat-label">Last Sign In</div>
+        </div>
+        <div className="stat-card hq">
+          <div className="stat-num" style={{ color: '#059669', fontSize: 14, paddingTop: 6 }}>
+            {lastActivity ? formatRelativeTime(lastActivity) : '—'}
+          </div>
+          <div className="stat-label">Last Activity</div>
+        </div>
+      </div>
+
+      {/* Filter */}
+      {allActionTypes.length > 1 && (
+        <div className="log-filter-bar">
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>Filter by action:</span>
+          <select value={filterAction} onChange={e => setFilterAction(e.target.value)} style={{
+            padding: '7px 28px 7px 10px', borderRadius: 8, border: '1.5px solid var(--border)',
+            fontSize: 13, fontFamily: 'inherit', color: 'var(--text)', background: '#fff', cursor: 'pointer',
+            appearance: 'none',
+            backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+            backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center', backgroundSize: '14px',
+          }}>
+            <option value="all">All Actions</option>
+            {allActionTypes.map(a => <option key={a} value={a}>{getActionLabel(a)}</option>)}
+          </select>
+          {filterAction !== 'all' && (
+            <button onClick={() => setFilterAction('all')} style={{
+              padding: '7px 12px', borderRadius: 8, border: 'none', background: 'var(--orange-pale)',
+              color: 'var(--orange)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+            }}>Clear</button>
+          )}
+        </div>
+      )}
+
+      {/* Logs table */}
+      <div className="card hq" style={{ padding: 0, overflow: 'hidden' }}>
+        {filteredLogs.length === 0 ? (
+          <div style={{ padding: '24px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+            No actions match the selected filter.
+          </div>
+        ) : (
+          <table className="log-detail-table">
+            <thead>
+              <tr>
+                <th>Timestamp (UTC)</th>
+                <th>Action</th>
+                <th>Category</th>
+                <th>Location</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredLogs.map((log) => {
+                const ts = log.timestamp?.toDate ? log.timestamp.toDate() : log.timestamp ? new Date(log.timestamp) : null;
+                return (
+                  <tr key={log.id}>
+                    <td style={{ whiteSpace: 'nowrap', fontFamily: 'monospace', fontSize: 12 }}>
+                      {ts ? formatUTCDate(ts) : '—'}
+                    </td>
+                    <td>
+                      <span className={`log-action-badge ${getActionBadgeClass(log.action)}`}>
+                        {getActionLabel(log.action)}
+                      </span>
+                    </td>
+                    <td style={{ color: 'var(--text-muted)' }}>{log.category || '—'}</td>
+                    <td style={{ color: 'var(--text-muted)', fontSize: 13 }}>{log.locationName || log.locationId || '—'}</td>
+                    <td>{log.details || '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// --- Edit HQ User Modal ---------------------------------------------------------
+function EditHqUserModal({ hqUser, currentUser, onClose, onSaved }) {
+  const [name, setName] = useState(hqUser.name || '');
+  const [jobTitle, setJobTitle] = useState(hqUser.jobTitle || '');
+  const [role, setRole] = useState(hqUser.role || 'admin');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [resendEmail, setResendEmail] = useState(false);
+
+  const handleSave = async () => {
+    if (!name.trim()) { setError('Name is required.'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      const updates = { name: name.trim(), jobTitle: jobTitle.trim(), role };
+      await updateHqUser(hqUser.id, updates);
+
+      // Log the edit action
+      logUserAction({
+        locationId: null,
+        userId: currentUser.uid || currentUser.id?.toString(),
+        userName: currentUser.name,
+        userEmail: currentUser.email,
+        action: 'edit',
+        category: 'hq_user',
+        details: `Updated HQ user "${name}" (role: ${role === 'master_admin' ? 'Master Admin' : 'Admin'})`,
+        scope: 'hq',
+      });
+
+      // Resend invite email if requested
+      if (resendEmail && hqUser.inviteId) {
+        try {
+          await resendInviteEmail(hqUser.inviteId);
+        } catch (err) {
+          console.error("Failed to resend invite email:", err);
+        }
+      }
+
+      onSaved({ ...hqUser, ...updates });
+    } catch (e) {
+      console.error("Failed to update user:", e);
+      setError('Failed to update user. Please try again.');
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal hq">
+        <div className="modal-title" style={{ color: 'var(--text)' }}>Edit HQ User</div>
+
+        {error && <div className="auth-error" style={{ marginBottom: 16 }}><Icon path={icons.alert} size={14} /> {error}</div>}
+
+        <div className="form-group">
+          <label className="form-label hq">Full Name</label>
+          <input className="form-input hq" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Jane Smith" />
+        </div>
+        <div className="form-group">
+          <label className="form-label hq">Email Address</label>
+          <input className="form-input hq" type="email" value={hqUser.email} disabled style={{ opacity: 0.6, cursor: 'not-allowed' }} />
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>Email is tied to Google authentication and cannot be changed.</div>
+        </div>
+        <div className="form-group">
+          <label className="form-label hq">Job Title</label>
+          <input className="form-input hq" value={jobTitle} onChange={e => setJobTitle(e.target.value)} placeholder="e.g. Operations Manager" />
+        </div>
+        <div className="form-group">
+          <label className="form-label hq">Role</label>
+          <select className="form-input hq" value={role} onChange={e => setRole(e.target.value)} style={{ cursor: 'pointer' }}>
+            <option value="admin">Admin</option>
+            <option value="master_admin">Master Admin</option>
+          </select>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+            {role === 'master_admin' ? 'Full access — can manage users, locations, and all settings.' : 'Can add and edit locations, but cannot delete or manage users.'}
+          </div>
+        </div>
+
+        {hqUser.inviteId && (
+          <div className="form-group" style={{ marginTop: 4 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', padding: '12px 14px', borderRadius: 'var(--radius-sm)', background: resendEmail ? 'var(--orange-pale)' : 'var(--bg)', border: resendEmail ? '1.5px solid var(--orange-border)' : '1.5px solid var(--border)', transition: 'all 0.15s' }}>
+              <input
+                type="checkbox"
+                checked={resendEmail}
+                onChange={e => setResendEmail(e.target.checked)}
+                style={{ width: 18, height: 18, accentColor: 'var(--orange)', cursor: 'pointer' }}
+              />
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>Re-send invite email</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Send a portal access email to {hqUser.email}</div>
+              </div>
+            </label>
+          </div>
+        )}
+
+        <div className="modal-actions">
+          <button className="btn btn-ghost hq" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary hq" onClick={handleSave} disabled={saving}>
+            <Icon path={icons.check} size={14} />
+            {saving ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -3096,7 +3548,7 @@ function InviteUserModal({ onClose, onInvited }) {
         status: 'pending',
         createdAt: new Date().toISOString(),
       });
-      onInvited({ id: docRef.id, name, email, jobTitle, role: 'admin', status: 'pending' });
+      onInvited({ id: docRef.id, name, email, jobTitle, role: 'admin', status: 'pending', inviteId: docRef.id });
     } catch (e) {
       setError('Failed to send invite. Please try again.');
     }
