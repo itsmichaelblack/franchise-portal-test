@@ -128,6 +128,29 @@ export async function resendConfirmationEmail(locationId) {
   return fn({ locationId });
 }
 
+/**
+ * Call the `resendInviteEmail` Cloud Function to resend an HQ user invite.
+ * @param {string} inviteId
+ */
+export async function resendInviteEmail(inviteId) {
+  const fn = httpsCallable(functions, "resendInviteEmail");
+  return fn({ inviteId });
+}
+
+// ── HQ Users ─────────────────────────────────────────────────────────────────
+
+/**
+ * Update an HQ user's profile (master_admin only via Firestore rules).
+ * @param {string} userId  Firebase Auth UID
+ * @param {{ name?: string, jobTitle?: string, role?: string }} data
+ */
+export async function updateHqUser(userId, data) {
+  await updateDoc(doc(db, "users", userId), {
+    ...data,
+    updatedAt: serverTimestamp(),
+  });
+}
+
 // ── Activity Logs ─────────────────────────────────────────────────────────────
 
 /**
@@ -155,6 +178,22 @@ export async function getActivityLogs(locationId) {
   const q = query(
     collection(db, "activity_logs"),
     where("locationId", "==", locationId),
+    orderBy("timestamp", "desc")
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+/**
+ * Fetch all activity logs for a specific HQ user (global across all locations).
+ * @param {string} userId
+ * @returns {Promise<Array>}
+ */
+export async function getHqUserLogs(userId) {
+  const { where } = await import("firebase/firestore");
+  const q = query(
+    collection(db, "activity_logs"),
+    where("userId", "==", userId),
     orderBy("timestamp", "desc")
   );
   const snap = await getDocs(q);
