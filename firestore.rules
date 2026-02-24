@@ -121,8 +121,8 @@ service cloud.firestore {
       // Master admins can update invites (e.g. status changes)
       allow update: if isMasterAdmin();
 
-      // Nobody can delete invites through the client
-      allow delete: if false;
+      // Master admins can delete invites (e.g. revoking pending invites)
+      allow delete: if isMasterAdmin();
     }
 
     // ── Activity Logs collection ────────────────────────────────────────────
