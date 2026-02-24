@@ -2120,7 +2120,7 @@ function HQPortal({ user, onLogout }) {
       {userModal === 'invite' && (
         <InviteUserModal
           onClose={() => setUserModal(null)}
-          onInvited={(newUser) => { setHqUsers(prev => [...prev, newUser]); setUserModal(null); showToast(`✓ Invite sent to ${newUser.email}`); }}
+          onInvited={(newUser) => { setHqUsers(prev => [...prev, { ...newUser, _isPendingInvite: true }]); setUserModal(null); showToast(`✓ Invite sent to ${newUser.email}`); }}
         />
       )}
       {userModal?.type === 'remove' && (
@@ -3030,10 +3030,33 @@ function UsersPage({ currentUser, hqUsers, setHqUsers, loading, setLoading, onIn
       try {
         const { collection, getDocs, query, where } = await import('firebase/firestore');
         const { db } = await import('./firebase.js');
+
+        // Load actual HQ users
         const q = query(collection(db, 'users'), where('role', 'in', ['admin', 'master_admin']));
         const snap = await getDocs(q);
         const users = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setHqUsers(users);
+
+        // Load pending invites
+        const invitesSnap = await getDocs(collection(db, 'invites'));
+        const invites = invitesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+        // Filter invites to only show pending ones that don't have a matching user
+        const userEmails = new Set(users.map(u => u.email?.toLowerCase()));
+        const pendingInvites = invites
+          .filter(inv => inv.status === 'pending' && !userEmails.has(inv.email?.toLowerCase()))
+          .map(inv => ({
+            id: inv.id,
+            inviteId: inv.id,
+            name: inv.name,
+            email: inv.email,
+            jobTitle: inv.jobTitle || '',
+            role: inv.role || 'admin',
+            status: 'pending',
+            createdAt: inv.createdAt,
+            _isPendingInvite: true,
+          }));
+
+        setHqUsers([...users, ...pendingInvites]);
       } catch (e) { console.error(e); }
       setLoading(false);
     };
@@ -3065,25 +3088,32 @@ function UsersPage({ currentUser, hqUsers, setHqUsers, loading, setLoading, onIn
               </thead>
               <tbody>
                 {hqUsers.map(u => (
-                  <tr key={u.id} onClick={() => onSelectUser(u)} style={{ cursor: 'pointer' }}>
+                  <tr key={u.id} onClick={() => !u._isPendingInvite && onSelectUser(u)} style={{ cursor: u._isPendingInvite ? 'default' : 'pointer', opacity: u._isPendingInvite ? 0.7 : 1 }}>
                     <td className="hq" style={{ fontWeight: 600 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--orange-pale)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--orange)', fontWeight: 700, fontSize: 13 }}>
+                        <div style={{ width: 32, height: 32, borderRadius: '50%', background: u._isPendingInvite ? 'rgba(100,100,120,0.1)' : 'var(--orange-pale)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: u._isPendingInvite ? 'var(--text-muted)' : 'var(--orange)', fontWeight: 700, fontSize: 13 }}>
                           {u.name?.[0] || '?'}
                         </div>
                         {u.name}
                         {u.id === currentUser.uid && <span style={{ fontSize: 10, background: 'var(--orange-pale)', color: 'var(--orange)', padding: '2px 8px', borderRadius: 20 }}>You</span>}
+                        {u._isPendingInvite && <span style={{ fontSize: 10, background: 'rgba(217,119,6,0.1)', color: '#d97706', padding: '2px 8px', borderRadius: 20, border: '1px solid rgba(217,119,6,0.2)' }}>Pending</span>}
                       </div>
                     </td>
                     <td className="hq"><span className="td-muted hq">{u.email}</span></td>
                     <td className="hq"><span className="td-muted hq">{u.jobTitle || '—'}</span></td>
                     <td className="hq">
-                      <span style={{ fontSize: 12, padding: '3px 10px', borderRadius: 20, background: u.role === 'master_admin' ? 'rgba(200,169,110,0.15)' : 'rgba(100,100,120,0.2)', color: u.role === 'master_admin' ? 'var(--hq-accent)' : 'var(--hq-muted)' }}>
-                        {u.role === 'master_admin' ? 'Master Admin' : 'Admin'}
-                      </span>
+                      {u._isPendingInvite ? (
+                        <span style={{ fontSize: 12, padding: '3px 10px', borderRadius: 20, background: 'rgba(217,119,6,0.1)', color: '#d97706' }}>
+                          Invited
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 12, padding: '3px 10px', borderRadius: 20, background: u.role === 'master_admin' ? 'rgba(200,169,110,0.15)' : 'rgba(100,100,120,0.2)', color: u.role === 'master_admin' ? 'var(--hq-accent)' : 'var(--hq-muted)' }}>
+                          {u.role === 'master_admin' ? 'Master Admin' : 'Admin'}
+                        </span>
+                      )}
                     </td>
                     <td className="hq">
-                      {u.id !== currentUser.uid && (
+                      {u.id !== currentUser.uid && !u._isPendingInvite && (
                         <button className="btn btn-danger" style={{ padding: '7px 12px' }} onClick={(e) => { e.stopPropagation(); onRemove(u); }}>
                           <Icon path={icons.trash} size={13} /> Remove
                         </button>
