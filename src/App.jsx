@@ -1829,6 +1829,12 @@ function HQPortal({ user, onLogout }) {
             <div className="stat-label">Coming Soon</div>
           </div>
           <div className="stat-card hq">
+            <div className="stat-num" style={{ color: '#7c3aed' }}>
+              {locations.filter(l => l.status === 'vip_list').length}
+            </div>
+            <div className="stat-label">VIP List</div>
+          </div>
+          <div className="stat-card hq">
             <div className="stat-num" style={{ color: '#dc2626' }}>
               {locations.filter(l => l.status === 'temporary_closed').length}
             </div>
@@ -1886,6 +1892,7 @@ function HQPortal({ user, onLogout }) {
                 <option value="all">All Statuses</option>
                 <option value="open">Open</option>
                 <option value="coming_soon">Coming Soon</option>
+                <option value="vip_list">VIP List</option>
                 <option value="temporary_closed">Temporary Closed</option>
               </select>
               {(filterCountry !== 'all' || filterState !== 'all' || filterStatus !== 'all') && (
@@ -1929,6 +1936,7 @@ function HQPortal({ user, onLogout }) {
             const cfg = {
               open: { label: 'Open', bg: 'rgba(16,185,129,0.1)', color: '#059669', border: 'rgba(16,185,129,0.2)' },
               coming_soon: { label: 'Coming Soon', bg: 'rgba(217,119,6,0.1)', color: '#d97706', border: 'rgba(217,119,6,0.2)' },
+              vip_list: { label: 'VIP List', bg: 'rgba(124,58,237,0.1)', color: '#7c3aed', border: 'rgba(124,58,237,0.2)' },
               temporary_closed: { label: 'Temp. Closed', bg: 'rgba(239,68,68,0.1)', color: '#dc2626', border: 'rgba(239,68,68,0.2)' },
             };
             const c = cfg[s] || cfg.open;
@@ -2571,6 +2579,7 @@ function LocationDetailView({ location, locations, user, isMaster, onBack, locat
     const cfg = {
       open: { label: 'Open', bg: 'rgba(16,185,129,0.1)', color: '#059669', border: 'rgba(16,185,129,0.2)' },
       coming_soon: { label: 'Coming Soon', bg: 'rgba(217,119,6,0.1)', color: '#d97706', border: 'rgba(217,119,6,0.2)' },
+      vip_list: { label: 'VIP List', bg: 'rgba(124,58,237,0.1)', color: '#7c3aed', border: 'rgba(124,58,237,0.2)' },
       temporary_closed: { label: 'Temp. Closed', bg: 'rgba(239,68,68,0.1)', color: '#dc2626', border: 'rgba(239,68,68,0.2)' },
     };
     const c = cfg[s] || cfg.open;
@@ -3087,6 +3096,7 @@ function LocationModal({ portal, editing, locations = [], onSave, onClose }) {
             onChange={e => setStatus(e.target.value)}
             style={{ cursor: 'pointer' }}
           >
+            <option value="vip_list">VIP List</option>
             <option value="coming_soon">Coming Soon</option>
             <option value="open">Open</option>
             <option value="temporary_closed">Temporary Closed</option>
@@ -3739,6 +3749,7 @@ function InviteUserModal({ onClose, onInvited }) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [jobTitle, setJobTitle] = useState('');
+  const [role, setRole] = useState('admin');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
 
@@ -3753,11 +3764,11 @@ function InviteUserModal({ onClose, onInvited }) {
         name,
         email,
         jobTitle,
-        role: 'admin',
+        role,
         status: 'pending',
         createdAt: new Date().toISOString(),
       });
-      onInvited({ id: docRef.id, name, email, jobTitle, role: 'admin', status: 'pending', inviteId: docRef.id });
+      onInvited({ id: docRef.id, name, email, jobTitle, role, status: 'pending', inviteId: docRef.id });
     } catch (e) {
       setError('Failed to send invite. Please try again.');
     }
@@ -3770,9 +3781,16 @@ function InviteUserModal({ onClose, onInvited }) {
         <div className="modal-title" style={{ color: 'var(--text)' }}>Invite HQ User</div>
         <div className="info-notice hq">
           <Icon path={icons.mail} size={14} />
-          They will receive an email with a link to sign in. They will have Admin access (can add and edit locations, but not delete).
+          They will receive an email with a link to sign in. They will have the selected access level for the HQ portal.
         </div>
         {error && <div className="auth-error" style={{ marginBottom: 16 }}><Icon path={icons.alert} size={14} /> {error}</div>}
+        <div className="form-group">
+          <label className="form-label hq">User Type</label>
+          <select className="form-input hq" value={role} onChange={e => setRole(e.target.value)} style={{ cursor: 'pointer' }}>
+            <option value="admin">Admin</option>
+            <option value="master_admin">Master Admin</option>
+          </select>
+        </div>
         <div className="form-group">
           <label className="form-label hq">Full Name</label>
           <input className="form-input hq" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Jane Smith" />
