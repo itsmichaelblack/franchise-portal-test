@@ -40,6 +40,11 @@ service cloud.firestore {
       // Only master admins can create or update user roles
       allow create, update: if isMasterAdmin();
 
+      // Allow users to create their own profile during auto-registration
+      // (franchise partner first sign-in creates their profile with role 'franchise_partner')
+      allow create: if isAuth() && request.auth.uid == userId
+        && request.resource.data.role == 'franchise_partner';
+
       // Nobody can delete user documents through the client (use Admin SDK only)
       allow delete: if false;
     }
@@ -51,6 +56,10 @@ service cloud.firestore {
 
       // Franchise partners can read their own location
       allow read: if isFranchisePartner(locationId);
+
+      // Allow authenticated users to read locations matching their email
+      // (needed for franchise partner auto-registration on first sign-in)
+      allow read: if isAuth() && resource.data.email == request.auth.token.email;
 
       // Both admin and master_admin can create and update locations
       allow create, update: if isAdmin()
