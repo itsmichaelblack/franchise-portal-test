@@ -3,7 +3,7 @@
 // Pulls locations from Firestore, geolocates the user, and shows nearest centres.
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { collection, getDocs, query, orderBy } from "firebase/firestore";
+import { collection, getDocs, query, orderBy, addDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "./firebase";
 
 // ─── Geocode an address string into { lat, lng } using Google Maps Geocoder ──
@@ -389,6 +389,142 @@ const css = `
   }
 
   /* ── InfoWindow styling ──────────────────────────────────── */
+
+  /* ── Enquiry Form (inline in cards + infowindow) ────────── */
+  .fac-enquiry-cta {
+    margin-top: 10px;
+  }
+  .fac-enquiry-cta-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #1a1d23;
+    margin-bottom: 4px;
+  }
+  .fac-enquiry-cta-desc {
+    font-size: 12px;
+    color: #6b7280;
+    margin-bottom: 10px;
+    line-height: 1.4;
+  }
+  .fac-enquiry-btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: none;
+    background: #E25D25;
+    color: #fff;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .fac-enquiry-btn:hover { background: #d04f1a; }
+  .fac-enquiry-btn.vip { background: #7c3aed; }
+  .fac-enquiry-btn.vip:hover { background: #6d28d9; }
+  .fac-enquiry-btn.coming { background: #d97706; }
+  .fac-enquiry-btn.coming:hover { background: #b45309; }
+  .fac-enquiry-btn.closed { background: #dc2626; }
+  .fac-enquiry-btn.closed:hover { background: #b91c1c; }
+
+  .fac-enquiry-form {
+    margin-top: 10px;
+    padding: 14px;
+    background: #f9fafb;
+    border-radius: 10px;
+    border: 1px solid #e8eaed;
+  }
+  .fac-enquiry-form-title {
+    font-size: 14px;
+    font-weight: 800;
+    color: #1a1d23;
+    margin-bottom: 4px;
+  }
+  .fac-enquiry-form-desc {
+    font-size: 12px;
+    color: #6b7280;
+    margin-bottom: 12px;
+    line-height: 1.4;
+  }
+  .fac-enquiry-field {
+    margin-bottom: 8px;
+  }
+  .fac-enquiry-input {
+    width: 100%;
+    padding: 9px 12px;
+    border-radius: 8px;
+    border: 1.5px solid #e8eaed;
+    font-family: inherit;
+    font-size: 13px;
+    color: #1a1d23;
+    background: #fff;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .fac-enquiry-input:focus {
+    border-color: #E25D25;
+    box-shadow: 0 0 0 3px rgba(226,93,37,0.1);
+  }
+  .fac-enquiry-input.error {
+    border-color: #dc2626;
+    box-shadow: 0 0 0 3px rgba(220,38,38,0.1);
+  }
+  .fac-enquiry-input::placeholder { color: #9ca3af; }
+  .fac-enquiry-error {
+    font-size: 11px;
+    color: #dc2626;
+    margin-top: 3px;
+  }
+  .fac-enquiry-row {
+    display: flex;
+    gap: 8px;
+  }
+  .fac-enquiry-row .fac-enquiry-field { flex: 1; }
+  .fac-enquiry-submit {
+    width: 100%;
+    padding: 10px 16px;
+    border-radius: 8px;
+    border: none;
+    background: #E25D25;
+    color: #fff;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s;
+    margin-top: 4px;
+  }
+  .fac-enquiry-submit:hover { background: #d04f1a; }
+  .fac-enquiry-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+  .fac-enquiry-submit.vip { background: #7c3aed; }
+  .fac-enquiry-submit.vip:hover { background: #6d28d9; }
+  .fac-enquiry-submit.coming { background: #d97706; }
+  .fac-enquiry-submit.coming:hover { background: #b45309; }
+  .fac-enquiry-submit.closed { background: #dc2626; }
+  .fac-enquiry-submit.closed:hover { background: #b91c1c; }
+  .fac-enquiry-success {
+    padding: 14px;
+    background: rgba(16,185,129,0.08);
+    border: 1px solid rgba(16,185,129,0.2);
+    border-radius: 10px;
+    text-align: center;
+    margin-top: 10px;
+  }
+  .fac-enquiry-success-icon { font-size: 24px; margin-bottom: 4px; }
+  .fac-enquiry-success-text {
+    font-size: 13px;
+    font-weight: 700;
+    color: #059669;
+  }
+  .fac-enquiry-success-sub {
+    font-size: 12px;
+    color: #6b7280;
+    margin-top: 2px;
+  }
+
+  /* ── InfoWindow styling ──────────────────────────────────── */
   .gm-style-iw button.gm-ui-hover-effect {
     top: 4px !important;
     right: 4px !important;
@@ -422,6 +558,151 @@ const css = `
     background: #fff !important;
   }
 `;
+
+// ─── Enquiry Form Component ─────────────────────────────────────────────────
+// Renders inline enquiry forms for VIP List, Coming Soon, and Temporary Closed statuses.
+function EnquiryForm({ loc }) {
+  const [showForm, setShowForm] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '' });
+  const [errors, setErrors] = useState({});
+
+  const status = loc.status || 'open';
+  if (status === 'open') return null; // Open status uses Book Assessment link
+
+  const config = {
+    vip_list: {
+      title: 'Join VIP List to access updates and special offers',
+      btnLabel: 'Join VIP List',
+      btnClass: 'vip',
+      submitClass: 'vip',
+    },
+    coming_soon: {
+      title: 'Secure Foundation Membership Rate',
+      btnLabel: 'Secure Your Rate',
+      btnClass: 'coming',
+      submitClass: 'coming',
+    },
+    temporary_closed: {
+      title: `Enquire Now! We will be in touch once ${loc.name} reopens.`,
+      btnLabel: 'Enquire Now',
+      btnClass: 'closed',
+      submitClass: 'closed',
+    },
+  };
+
+  const c = config[status];
+  if (!c) return null;
+
+  const validate = () => {
+    const e = {};
+    if (!form.firstName.trim()) e.firstName = 'Required';
+    if (!form.lastName.trim()) e.lastName = 'Required';
+    if (!form.email.trim()) e.email = 'Required';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) e.email = 'Invalid email';
+    if (!form.phone.trim()) e.phone = 'Required';
+    else if (!/^[\d\s\-+().]{7,20}$/.test(form.phone.trim())) e.phone = 'Invalid phone number';
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  };
+
+  const handleSubmit = async () => {
+    if (!validate()) return;
+    setSubmitting(true);
+    try {
+      await addDoc(collection(db, 'locations', loc.id, 'enquiries'), {
+        firstName: form.firstName.trim(),
+        lastName: form.lastName.trim(),
+        email: form.email.trim(),
+        phone: form.phone.trim(),
+        type: status,
+        locationName: loc.name,
+        createdAt: serverTimestamp(),
+      });
+      setSubmitted(true);
+    } catch (err) {
+      console.error('Failed to submit enquiry:', err);
+      setErrors({ submit: 'Something went wrong. Please try again.' });
+    }
+    setSubmitting(false);
+  };
+
+  if (submitted) {
+    return (
+      <div className="fac-enquiry-success">
+        <div className="fac-enquiry-success-icon">✓</div>
+        <div className="fac-enquiry-success-text">Thank you!</div>
+        <div className="fac-enquiry-success-sub">We'll be in touch soon.</div>
+      </div>
+    );
+  }
+
+  if (!showForm) {
+    return (
+      <div className="fac-enquiry-cta">
+        <button className={`fac-enquiry-btn ${c.btnClass}`} onClick={(e) => { e.stopPropagation(); setShowForm(true); }}>
+          {c.btnLabel}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fac-enquiry-form" onClick={(e) => e.stopPropagation()}>
+      <div className="fac-enquiry-form-title">{c.title}</div>
+      <div className="fac-enquiry-form-desc">Fill in your details below and we'll be in touch.</div>
+      <div className="fac-enquiry-row">
+        <div className="fac-enquiry-field">
+          <input
+            className={`fac-enquiry-input ${errors.firstName ? 'error' : ''}`}
+            placeholder="First name"
+            value={form.firstName}
+            onChange={(e) => setForm({ ...form, firstName: e.target.value })}
+          />
+          {errors.firstName && <div className="fac-enquiry-error">{errors.firstName}</div>}
+        </div>
+        <div className="fac-enquiry-field">
+          <input
+            className={`fac-enquiry-input ${errors.lastName ? 'error' : ''}`}
+            placeholder="Last name"
+            value={form.lastName}
+            onChange={(e) => setForm({ ...form, lastName: e.target.value })}
+          />
+          {errors.lastName && <div className="fac-enquiry-error">{errors.lastName}</div>}
+        </div>
+      </div>
+      <div className="fac-enquiry-field">
+        <input
+          className={`fac-enquiry-input ${errors.email ? 'error' : ''}`}
+          placeholder="Email address"
+          type="email"
+          value={form.email}
+          onChange={(e) => setForm({ ...form, email: e.target.value })}
+        />
+        {errors.email && <div className="fac-enquiry-error">{errors.email}</div>}
+      </div>
+      <div className="fac-enquiry-field">
+        <input
+          className={`fac-enquiry-input ${errors.phone ? 'error' : ''}`}
+          placeholder="Mobile number"
+          type="tel"
+          value={form.phone}
+          onChange={(e) => setForm({ ...form, phone: e.target.value })}
+        />
+        {errors.phone && <div className="fac-enquiry-error">{errors.phone}</div>}
+      </div>
+      {errors.submit && <div className="fac-enquiry-error" style={{ marginBottom: 8 }}>{errors.submit}</div>}
+      <button
+        className={`fac-enquiry-submit ${c.submitClass}`}
+        onClick={handleSubmit}
+        disabled={submitting}
+      >
+        {submitting ? 'Submitting...' : c.btnLabel}
+      </button>
+    </div>
+  );
+}
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 export default function FindACentre() {
@@ -574,8 +855,55 @@ export default function FindACentre() {
       marker.addListener("click", () => {
         setSelectedLoc(loc.id);
         const dist = loc.distance ? `${loc.distance.toFixed(1)} km away` : "";
+        const locStatus = loc.status || 'open';
+
+        // Build CTA based on status
+        let ctaHtml = '';
+        if (locStatus === 'open') {
+          ctaHtml = `
+            <a href="/book-assessment?location=${encodeURIComponent(loc.id)}"
+              style="display:inline-block;margin-top:10px;padding:8px 16px;border-radius:8px;background:#E25D25;color:#fff;font-size:12px;font-weight:700;text-decoration:none;">
+              Book Assessment
+            </a>
+          `;
+        } else {
+          const formConfig = {
+            vip_list: { title: 'Join VIP List to access updates and special offers', btnLabel: 'Join VIP List', color: '#7c3aed' },
+            coming_soon: { title: 'Secure Foundation Membership Rate', btnLabel: 'Secure Your Rate', color: '#d97706' },
+            temporary_closed: { title: `Enquire Now! We will be in touch once ${loc.name} reopens.`, btnLabel: 'Enquire Now', color: '#dc2626' },
+          };
+          const fc = formConfig[locStatus];
+          if (fc) {
+            const formId = `iw-form-${loc.id.replace(/[^a-zA-Z0-9]/g, '')}`;
+            ctaHtml = `
+              <div id="${formId}-container" style="margin-top:10px;">
+                <button id="${formId}-btn" style="padding:8px 16px;border-radius:8px;border:none;background:${fc.color};color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">
+                  ${fc.btnLabel}
+                </button>
+                <div id="${formId}-form" style="display:none;margin-top:8px;">
+                  <div style="font-size:12px;font-weight:700;color:#1a1d23;margin-bottom:6px;">${fc.title}</div>
+                  <div style="display:flex;gap:4px;margin-bottom:4px;">
+                    <input id="${formId}-fn" placeholder="First name" style="flex:1;padding:6px 8px;border:1.5px solid #e8eaed;border-radius:6px;font-size:12px;font-family:inherit;outline:none;" />
+                    <input id="${formId}-ln" placeholder="Last name" style="flex:1;padding:6px 8px;border:1.5px solid #e8eaed;border-radius:6px;font-size:12px;font-family:inherit;outline:none;" />
+                  </div>
+                  <input id="${formId}-em" placeholder="Email" type="email" style="width:100%;padding:6px 8px;border:1.5px solid #e8eaed;border-radius:6px;font-size:12px;font-family:inherit;margin-bottom:4px;outline:none;" />
+                  <input id="${formId}-ph" placeholder="Mobile number" type="tel" style="width:100%;padding:6px 8px;border:1.5px solid #e8eaed;border-radius:6px;font-size:12px;font-family:inherit;margin-bottom:6px;outline:none;" />
+                  <div id="${formId}-err" style="font-size:11px;color:#dc2626;margin-bottom:4px;display:none;"></div>
+                  <button id="${formId}-submit" style="width:100%;padding:8px;border-radius:6px;border:none;background:${fc.color};color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">
+                    ${fc.btnLabel}
+                  </button>
+                </div>
+                <div id="${formId}-success" style="display:none;padding:10px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);border-radius:8px;text-align:center;margin-top:8px;">
+                  <div style="font-size:13px;font-weight:700;color:#059669;">✓ Thank you!</div>
+                  <div style="font-size:11px;color:#6b7280;margin-top:2px;">We'll be in touch soon.</div>
+                </div>
+              </div>
+            `;
+          }
+        }
+
         infoWindowRef.current.setContent(`
-          <div style="font-family:'Plus Jakarta Sans',sans-serif;padding:8px 6px;max-width:270px;">
+          <div style="font-family:'Plus Jakarta Sans',sans-serif;padding:8px 6px;max-width:290px;">
             <div style="font-weight:800;font-size:15px;color:#1a1d23;margin-bottom:6px;padding-right:8px;">${loc.name}</div>
             <div style="font-size:12px;color:#6b7280;line-height:1.5;margin-bottom:6px;">${loc.address}</div>
             ${loc.phone ? `<div style="font-size:12px;color:#6b7280;margin-bottom:4px;">${loc.phone}</div>` : ""}
@@ -584,9 +912,76 @@ export default function FindACentre() {
               style="display:inline-block;margin-top:10px;padding:8px 16px;border-radius:8px;background:#E25D25;color:#fff;font-size:12px;font-weight:700;text-decoration:none;">
               Get Directions
             </a>
+            ${ctaHtml}
           </div>
         `);
         infoWindowRef.current.open(mapInstance.current, marker);
+
+        // Attach event listeners for the info window enquiry form (non-open statuses)
+        if (locStatus !== 'open') {
+          const formId = `iw-form-${loc.id.replace(/[^a-zA-Z0-9]/g, '')}`;
+          // Wait for DOM to render
+          setTimeout(() => {
+            const btn = document.getElementById(`${formId}-btn`);
+            const formEl = document.getElementById(`${formId}-form`);
+            const submitBtn = document.getElementById(`${formId}-submit`);
+            const successEl = document.getElementById(`${formId}-success`);
+            const errEl = document.getElementById(`${formId}-err`);
+
+            if (btn && formEl) {
+              btn.addEventListener('click', () => {
+                btn.style.display = 'none';
+                formEl.style.display = 'block';
+              });
+            }
+
+            if (submitBtn) {
+              submitBtn.addEventListener('click', async () => {
+                const fn = document.getElementById(`${formId}-fn`).value.trim();
+                const ln = document.getElementById(`${formId}-ln`).value.trim();
+                const em = document.getElementById(`${formId}-em`).value.trim();
+                const ph = document.getElementById(`${formId}-ph`).value.trim();
+
+                // Validate
+                const errs = [];
+                if (!fn) errs.push('First name is required');
+                if (!ln) errs.push('Last name is required');
+                if (!em || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) errs.push('Valid email is required');
+                if (!ph || !/^[\d\s\-+().]{7,20}$/.test(ph)) errs.push('Valid phone is required');
+
+                if (errs.length > 0) {
+                  errEl.textContent = errs.join('. ');
+                  errEl.style.display = 'block';
+                  return;
+                }
+
+                errEl.style.display = 'none';
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Submitting...';
+
+                try {
+                  await addDoc(collection(db, 'locations', loc.id, 'enquiries'), {
+                    firstName: fn,
+                    lastName: ln,
+                    email: em,
+                    phone: ph,
+                    type: locStatus,
+                    locationName: loc.name,
+                    createdAt: serverTimestamp(),
+                  });
+                  formEl.style.display = 'none';
+                  successEl.style.display = 'block';
+                } catch (err) {
+                  console.error('InfoWindow enquiry error:', err);
+                  errEl.textContent = 'Something went wrong. Please try again.';
+                  errEl.style.display = 'block';
+                  submitBtn.disabled = false;
+                  submitBtn.textContent = submitBtn.dataset.label || 'Submit';
+                }
+              });
+            }
+          }, 100);
+        }
       });
 
       bounds.extend({ lat: loc.lat, lng: loc.lng });
@@ -921,6 +1316,8 @@ export default function FindACentre() {
                           </a>
                         )}
                       </div>
+                      {/* Status-based enquiry forms for non-open locations */}
+                      <EnquiryForm loc={loc} />
                     </div>
                     {loc.distance !== undefined && (
                       <div className="fac-loc-distance">{loc.distance.toFixed(1)} km</div>
