@@ -1446,6 +1446,33 @@ function AuthPage({ portal, onLogin, onBack }) {
         return;
       }
       if (portal === 'fp' && profile.role !== 'franchise_partner') {
+        // Allow HQ users (admin/master_admin) to access the FP portal if their email matches a location
+        if (profile.role === 'master_admin' || profile.role === 'admin') {
+          const locQuery = query(collection(db, 'locations'), where('email', '==', firebaseUser.email));
+          const locSnap = await getDocs(locQuery);
+          if (!locSnap.empty) {
+            const matchedLoc = locSnap.docs[0];
+            const fpProfile = {
+              ...profile,
+              role: 'franchise_partner',
+              locationId: matchedLoc.id,
+              _hqRole: profile.role, // preserve original HQ role
+            };
+            onLogin({ ...fpProfile, uid: firebaseUser.uid, name: profile.name || firebaseUser.displayName });
+            localStorage.setItem('franchise_portal_choice', portal);
+            logUserAction({
+              locationId: matchedLoc.id,
+              userId: firebaseUser.uid,
+              userName: profile.name || firebaseUser.displayName,
+              userEmail: firebaseUser.email || profile.email,
+              action: 'sign_in',
+              category: 'auth',
+              details: 'HQ user signed in to franchise portal (dual-access)',
+            });
+            setLoading(false);
+            return;
+          }
+        }
         setError('You do not have Franchise Partner access. Please use the HQ portal.');
         await auth.signOut();
         setLoading(false);
