@@ -1237,30 +1237,48 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true); // true while checking persisted auth
 
   // Restore session on page refresh via Firebase onAuthStateChanged
+  // We persist the chosen portal in localStorage so refresh keeps the user on the same portal.
+  // On logout we clear both the Firebase session and localStorage, so the selector starts fresh.
   useEffect(() => {
     let cancelled = false;
     const init = async () => {
-      const { onAuthStateChanged } = await import('firebase/auth');
+      const { onAuthStateChanged, signOut } = await import('firebase/auth');
       const { doc, getDoc } = await import('firebase/firestore');
       const { auth, db } = await import('./firebase.js');
 
       const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
         if (cancelled) return;
         if (firebaseUser) {
+          const savedPortal = localStorage.getItem('franchise_portal_choice');
+          if (!savedPortal) {
+            // No portal saved — user hasn't chosen yet (or logged out). Sign out so selector is clean.
+            await signOut(auth);
+            if (!cancelled) setAuthLoading(false);
+            return;
+          }
           try {
             const profileSnap = await getDoc(doc(db, 'users', firebaseUser.uid));
             if (profileSnap.exists()) {
               const profile = profileSnap.data();
               const restoredSession = { ...profile, uid: firebaseUser.uid, name: profile.name || firebaseUser.displayName };
-              // Determine which portal based on role
-              if (profile.role === 'master_admin' || profile.role === 'admin') {
+              // Validate that the user's role matches the saved portal choice
+              const isHqRole = profile.role === 'master_admin' || profile.role === 'admin';
+              const isFpRole = profile.role === 'franchise_partner';
+              if (savedPortal === 'hq' && isHqRole) {
                 setPortal('hq');
                 setSession(restoredSession);
-              } else if (profile.role === 'franchise_partner') {
+              } else if (savedPortal === 'fp' && isFpRole) {
                 setPortal('fp');
                 setSession(restoredSession);
+              } else {
+                // Role/portal mismatch — clear and let user re-pick
+                localStorage.removeItem('franchise_portal_choice');
+                await signOut(auth);
               }
-              // If role doesn't match known portals, fall through to selector
+            } else {
+              // No profile — sign out
+              localStorage.removeItem('franchise_portal_choice');
+              await signOut(auth);
             }
           } catch (err) {
             console.error('Failed to restore session:', err);
@@ -1282,6 +1300,9 @@ export default function App() {
     try {
       const { signOut } = await import('firebase/auth');
       const { auth } = await import('./firebase.js');
+      localStorage.removeItem('franchise_portal_choice');
+      localStorage.removeItem('hq_portal_page');
+      localStorage.removeItem('fp_portal_page');
       await signOut(auth);
     } catch (err) {
       console.error('Sign out error:', err);
@@ -1400,6 +1421,7 @@ function AuthPage({ portal, onLogin, onBack }) {
               category: 'auth',
               details: 'First sign-in (auto-registered as franchise partner)',
             });
+            localStorage.setItem('franchise_portal_choice', portal);
             onLogin({ ...partnerProfile, uid: firebaseUser.uid });
             setLoading(false);
             return;
@@ -1425,6 +1447,7 @@ function AuthPage({ portal, onLogin, onBack }) {
         return;
       }
       onLogin({ ...profile, uid: firebaseUser.uid, name: profile.name || firebaseUser.displayName });
+      localStorage.setItem('franchise_portal_choice', portal);
       // Log sign-in for franchise partners
       if (profile.role === 'franchise_partner' && profile.locationId) {
         logUserAction({
@@ -1489,7 +1512,16 @@ function AuthPage({ portal, onLogin, onBack }) {
 
 // --- HQ Portal ------------------------------------------------------------------
 function HQPortal({ user, onLogout }) {
-  const [page, setPage] = useState('locations');
+  const [page, setPage] = useState(() => {
+    const saved = localStorage.getItem('hq_portal_page');
+    return saved && ['locations', 'users', 'services', 'settings'].includes(saved) ? saved : 'locations';
+  });
+
+  // Persist page choice
+  const setPagePersist = (p) => {
+    setPage(p);
+    localStorage.setItem('hq_portal_page', p);
+  };
   const [locations, setLocations] = useState([]);
   const [locationsLoading, setLocationsLoading] = useState(true);
   const [modal, setModal] = useState(null); // null | 'add' | { type:'edit', loc } | { type:'delete', loc }
@@ -1722,19 +1754,19 @@ function HQPortal({ user, onLogout }) {
           </div>
         </div>
         <nav className="sidebar-nav">
-          <button className={`nav-item ${page === 'locations' ? 'active' : ''}`} onClick={() => { setPage('locations'); setSelectedLocation(null); }}>
+          <button className={`nav-item ${page === 'locations' ? 'active' : ''}`} onClick={() => { setPagePersist('locations'); setSelectedLocation(null); }}>
             <Icon path={icons.map} size={16} /> Locations
           </button>
           {isMaster && (
-            <button className={`nav-item ${page === 'users' ? 'active' : ''}`} onClick={() => { setPage('users'); setSelectedUser(null); }}>
+            <button className={`nav-item ${page === 'users' ? 'active' : ''}`} onClick={() => { setPagePersist('users'); setSelectedUser(null); }}>
               <Icon path={icons.users} size={16} /> Users
             </button>
           )}
           <div className="nav-section-label">Configuration</div>
-          <button className={`nav-item ${page === 'services' ? 'active' : ''}`} onClick={() => setPage('services')}>
+          <button className={`nav-item ${page === 'services' ? 'active' : ''}`} onClick={() => setPagePersist('services')}>
             <Icon path={icons.star} size={16} /> Services
           </button>
-          <button className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => setPage('settings')}>
+          <button className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => setPagePersist('settings')}>
             <Icon path={icons.clock} size={16} /> Settings
           </button>
         </nav>
@@ -2341,8 +2373,7 @@ function ServiceModal({ editing, onSave, onClose }) {
   };
 
   const handleSave = async () => {
-    const finalName = name === 'Other' ? customName : name;
-    if (!finalName || !description) return;
+    if (!name.trim() || !description) return;
     setSaving(true);
 
     let finalImageUrl = imageUrl;
@@ -2352,7 +2383,7 @@ function ServiceModal({ editing, onSave, onClose }) {
     }
 
     await onSave({
-      name: finalName,
+      name: name.trim(),
       description,
       duration: Number(duration),
       maxStudents: Number(maxStudents),
@@ -2376,29 +2407,13 @@ function ServiceModal({ editing, onSave, onClose }) {
         {/* Service Name */}
         <div className="form-group">
           <div className="form-label hq">Service Name</div>
-          <select
+          <input
             className="form-input hq"
+            type="text"
             value={name}
             onChange={e => setName(e.target.value)}
-            style={{
-              appearance: 'none',
-              backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
-              backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '16px',
-              paddingRight: 36, cursor: 'pointer',
-            }}
-          >
-            <option value="">Select a service...</option>
-            {SERVICE_NAMES.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-          {name === 'Other' && (
-            <input
-              className="form-input hq"
-              value={customName}
-              onChange={e => setCustomName(e.target.value)}
-              placeholder="Enter custom service name..."
-              style={{ marginTop: 8 }}
-            />
-          )}
+            placeholder="Enter service name..."
+          />
         </div>
 
         {/* Description */}
@@ -2651,15 +2666,22 @@ function UserLogsTab({ locationId, locationName }) {
   const [loading, setLoading] = useState(true);
   const [expandedUser, setExpandedUser] = useState(null);
   const [filterAction, setFilterAction] = useState('all');
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     const loadLogs = async () => {
       setLoading(true);
+      setError(null);
       try {
         const data = await getActivityLogs(locationId);
         setLogs(data);
       } catch (e) {
         console.error("Failed to load activity logs:", e);
+        if (e.message && (e.message.includes('index') || e.code === 'failed-precondition')) {
+          setError('Activity logs require a Firestore composite index. Please deploy indexes with: firebase deploy --only firestore:indexes');
+        } else {
+          setError('Failed to load activity logs. Please try again.');
+        }
       }
       setLoading(false);
     };
@@ -2759,6 +2781,16 @@ function UserLogsTab({ locationId, locationName }) {
       <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
         <div style={{ fontSize: 24, marginBottom: 8 }}>⏳</div>
         Loading user logs...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="log-empty">
+        <div className="log-empty-icon" style={{ fontSize: 32 }}>⚠️</div>
+        <div className="log-empty-text" style={{ color: 'var(--hq-danger, #e53e3e)' }}>Failed to load activity logs</div>
+        <div className="log-empty-desc">{error}</div>
       </div>
     );
   }
@@ -3402,15 +3434,23 @@ function HqUserLogsTab({ userId, userName }) {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterAction, setFilterAction] = useState('all');
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     const loadLogs = async () => {
       setLoading(true);
+      setError(null);
       try {
         const data = await getHqUserLogs(userId);
         setLogs(data);
       } catch (e) {
         console.error("Failed to load HQ user logs:", e);
+        // Check if it's a missing index error
+        if (e.message && (e.message.includes('index') || e.code === 'failed-precondition')) {
+          setError('Activity logs require a Firestore composite index. Please deploy indexes with: firebase deploy --only firestore:indexes');
+        } else {
+          setError('Failed to load activity logs. Please try again.');
+        }
       }
       setLoading(false);
     };
@@ -3475,6 +3515,16 @@ function HqUserLogsTab({ userId, userName }) {
       <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
         <div style={{ fontSize: 24, marginBottom: 8 }}>⏳</div>
         Loading user logs...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="log-empty">
+        <div className="log-empty-icon" style={{ fontSize: 32 }}>⚠️</div>
+        <div className="log-empty-text" style={{ color: 'var(--hq-danger, #e53e3e)' }}>Failed to load activity logs</div>
+        <div className="log-empty-desc">{error}</div>
       </div>
     );
   }
@@ -3753,7 +3803,15 @@ function InviteUserModal({ onClose, onInvited }) {
 
 // --- Franchise Partner Portal ---------------------------------------------------
 function FranchisePortal({ user, onLogout }) {
-  const [page, setPage] = useState('timetable');
+  const [page, setPage] = useState(() => {
+    const saved = localStorage.getItem('fp_portal_page');
+    return saved && ['timetable', 'bookings', 'members', 'settings'].includes(saved) ? saved : 'timetable';
+  });
+
+  const setPagePersist = (p) => {
+    setPage(p);
+    localStorage.setItem('fp_portal_page', p);
+  };
   const [availability, setAvailability] = useState(INITIAL_AVAILABILITY);
   const [timezone, setTimezone] = useState('Australia/Sydney');
   const [buffer, setBuffer] = useState(15);
@@ -4030,16 +4088,16 @@ function FranchisePortal({ user, onLogout }) {
           </div>
         </div>
         <nav className="sidebar-nav">
-          <button className={`nav-item ${page === 'timetable' ? 'active' : ''}`} onClick={() => setPage('timetable')}>
+          <button className={`nav-item ${page === 'timetable' ? 'active' : ''}`} onClick={() => setPagePersist('timetable')}>
             <Icon path={icons.calendar} size={16} /> Timetable
           </button>
-          <button className={`nav-item ${page === 'bookings' ? 'active' : ''}`} onClick={() => setPage('bookings')}>
+          <button className={`nav-item ${page === 'bookings' ? 'active' : ''}`} onClick={() => setPagePersist('bookings')}>
             <Icon path={icons.users} size={16} /> Bookings
           </button>
-          <button className={`nav-item ${page === 'members' ? 'active' : ''}`} onClick={() => setPage('members')}>
+          <button className={`nav-item ${page === 'members' ? 'active' : ''}`} onClick={() => setPagePersist('members')}>
             <Icon path={icons.users} size={16} /> Members
           </button>
-          <button className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => setPage('settings')}>
+          <button className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => setPagePersist('settings')}>
             <Icon path={icons.clock} size={16} /> Settings
           </button>
         </nav>
