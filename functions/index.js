@@ -439,3 +439,103 @@ exports.onBookingCreated = functions.firestore
       console.error("Failed to update booking:", err);
     }
   });
+
+// ── Trigger: send "new lead" email when an enquiry is created ───────────
+exports.onEnquiryCreated = functions.firestore
+  .document("locations/{locationId}/enquiries/{enquiryId}")
+  .onCreate(async (snap, context) => {
+    const enquiry = snap.data();
+    const { locationId, enquiryId } = context.params;
+
+    // Look up the location to get the franchise partner's email
+    const locationDoc = await getFirestore().doc(`locations/${locationId}`).get();
+    if (!locationDoc.exists) {
+      console.warn(`Location ${locationId} not found — skipping enquiry email.`);
+      return;
+    }
+    const location = locationDoc.data();
+    const partnerEmail = location.email;
+
+    if (!partnerEmail) {
+      console.warn(`Location ${locationId} has no email — skipping.`);
+      return;
+    }
+
+    const apiKey = functions.config().sendgrid?.api_key;
+    if (!apiKey) {
+      console.error("SendGrid API key not set.");
+      return;
+    }
+    sgMail.setApiKey(apiKey);
+
+    // Map form type to a friendly label
+    const formLabels = {
+      vip_list: "VIP List",
+      coming_soon: "Secure Foundation Rate",
+      temporary_closed: "Enquiry (Temp. Closed)",
+    };
+    const formLabel = formLabels[enquiry.type] || "Enquiry";
+
+    const html = `
+      <!DOCTYPE html><html><head><meta charset="utf-8" />
+      <style>
+        body { margin: 0; padding: 0; background: #f7f8fa; font-family: Arial, sans-serif; }
+        .wrapper { max-width: 560px; margin: 40px auto; background: #ffffff; border-radius: 16px; overflow: hidden; }
+        .header { background: linear-gradient(135deg, #E25D25 0%, #c94f1f 100%); padding: 40px; text-align: center; }
+        .header h1 { color: #ffffff; font-size: 24px; margin: 0; }
+        .header p { color: rgba(255,255,255,0.8); font-size: 14px; margin: 8px 0 0; }
+        .body { padding: 40px; }
+        .body p { color: #444; font-size: 15px; line-height: 1.7; }
+        .detail-card { background: #fdf0ea; border-radius: 12px; padding: 24px; margin: 24px 0; }
+        .detail-row { margin-bottom: 10px; font-size: 14px; color: #333; }
+        .detail-label { font-weight: 600; color: #E25D25; }
+        .cta { text-align: center; margin: 28px 0; }
+        .cta a { display: inline-block; background: #E25D25; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 10px; font-weight: 600; font-size: 14px; }
+        .footer { background: #f7f8fa; padding: 24px; text-align: center; font-size: 12px; color: #999; }
+      </style></head>
+      <body>
+        <div class="wrapper">
+          <div class="header">
+            <h1>New Lead!</h1>
+            <p>A new ${formLabel} enquiry for ${location.name}</p>
+          </div>
+          <div class="body">
+            <p>Hi there,</p>
+            <p>You've received a new lead via the <strong>${formLabel}</strong> form for <strong>${location.name}</strong>:</p>
+            <div class="detail-card">
+              <div class="detail-row"><span class="detail-label">Name: </span>${enquiry.firstName} ${enquiry.lastName}</div>
+              <div class="detail-row"><span class="detail-label">Email: </span>${enquiry.email}</div>
+              <div class="detail-row"><span class="detail-label">Phone: </span>${enquiry.phone}</div>
+              <div class="detail-row"><span class="detail-label">Form: </span>${formLabel}</div>
+              <div class="detail-row"><span class="detail-label">Location: </span>${location.name}</div>
+            </div>
+            <p>Log in to your Partner Portal to view all enquiries.</p>
+            <div class="cta"><a href="${PORTAL_URL}">Open Partner Portal &rarr;</a></div>
+          </div>
+          <div class="footer">&copy; ${new Date().getFullYear()} Success Tutoring. All rights reserved.</div>
+        </div>
+      </body></html>
+    `;
+
+    try {
+      await sgMail.send({
+        to: partnerEmail,
+        from: { email: FROM_EMAIL, name: FROM_NAME },
+        subject: "New Lead",
+        text: `New ${formLabel} enquiry for ${location.name}. ${enquiry.firstName} ${enquiry.lastName}, ${enquiry.email}, ${enquiry.phone}`,
+        html,
+      });
+      console.log(`New lead email sent to ${partnerEmail} for enquiry ${enquiryId}`);
+    } catch (err) {
+      console.error("SendGrid error:", err?.response?.body ?? err);
+    }
+
+    // Mark the enquiry as email-sent
+    try {
+      await getFirestore()
+        .doc(`locations/${locationId}/enquiries/${enquiryId}`)
+        .update({ emailSentAt: new Date().toISOString() });
+    } catch (err) {
+      console.error("Failed to update enquiry:", err);
+    }
+  });
