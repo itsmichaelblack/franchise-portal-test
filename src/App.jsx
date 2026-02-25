@@ -2651,6 +2651,9 @@ function LocationDetailView({ location, locations, user, isMaster, onBack, locat
         <button className={`tab-btn ${locationTab === 'user_logs' ? 'active' : ''}`} onClick={() => setLocationTab('user_logs')}>
           <Icon path={icons.clock} size={15} /> User Logs
         </button>
+        <button className={`tab-btn ${locationTab === 'enquiries' ? 'active' : ''}`} onClick={() => setLocationTab('enquiries')}>
+          <Icon path={icons.mail} size={15} /> Enquiries
+        </button>
       </div>
 
       {/* Details Tab */}
@@ -2696,6 +2699,119 @@ function LocationDetailView({ location, locations, user, isMaster, onBack, locat
       {/* User Logs Tab */}
       {locationTab === 'user_logs' && (
         <UserLogsTab locationId={location.id} locationName={location.name} />
+      )}
+
+      {locationTab === 'enquiries' && (
+        <LocationEnquiriesTab locationId={location.id} />
+      )}
+    </>
+  );
+}
+
+// --- Location Enquiries Tab (HQ) ------------------------------------------------
+function LocationEnquiriesTab({ locationId }) {
+  const [enquiries, setEnquiries] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      try {
+        const { collection, getDocs, query, orderBy } = await import('firebase/firestore');
+        const { db } = await import('./firebase.js');
+        const q = query(
+          collection(db, 'locations', locationId, 'enquiries'),
+          orderBy('createdAt', 'desc')
+        );
+        const snap = await getDocs(q);
+        setEnquiries(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (e) { console.error("Failed to load enquiries:", e); }
+      setLoading(false);
+    };
+    load();
+  }, [locationId]);
+
+  const typeLabels = {
+    vip_list: { label: 'VIP List', bg: 'rgba(124,58,237,0.1)', color: '#7c3aed', border: 'rgba(124,58,237,0.2)' },
+    coming_soon: { label: 'Coming Soon', bg: 'rgba(217,119,6,0.1)', color: '#d97706', border: 'rgba(217,119,6,0.2)' },
+    temporary_closed: { label: 'Temp. Closed', bg: 'rgba(239,68,68,0.1)', color: '#dc2626', border: 'rgba(239,68,68,0.2)' },
+  };
+
+  let filtered = [...enquiries];
+  if (filter !== 'all') filtered = filtered.filter(e => e.type === filter);
+  if (search.trim()) {
+    const s = search.toLowerCase();
+    filtered = filtered.filter(e =>
+      `${e.firstName} ${e.lastName}`.toLowerCase().includes(s) ||
+      (e.email || '').toLowerCase().includes(s) ||
+      (e.phone || '').includes(s)
+    );
+  }
+
+  if (loading) return <div className="card hq" style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>Loading enquiries...</div>;
+
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+        <input
+          placeholder="Search by name, email, or phone..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ flex: 1, minWidth: 200, padding: '10px 12px', borderRadius: 10, border: '1.5px solid var(--border)', fontFamily: 'inherit', fontSize: 14, background: '#fff', color: 'var(--text)', outline: 'none' }}
+        />
+        <select
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          style={{ padding: '10px 12px', borderRadius: 10, border: '1.5px solid var(--border)', fontFamily: 'inherit', fontSize: 14, background: '#fff', color: 'var(--text)', cursor: 'pointer' }}
+        >
+          <option value="all">All Types</option>
+          <option value="vip_list">VIP List</option>
+          <option value="coming_soon">Coming Soon</option>
+          <option value="temporary_closed">Temporary Closed</option>
+        </select>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="card hq" style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>No enquiries found.</div>
+      ) : (
+        <div className="card hq" style={{ overflow: 'hidden' }}>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Phone</th>
+                  <th>Type</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(enq => {
+                  const t = typeLabels[enq.type] || typeLabels.vip_list;
+                  const date = enq.createdAt?.toDate ? enq.createdAt.toDate() : enq.createdAt?.seconds ? new Date(enq.createdAt.seconds * 1000) : null;
+                  return (
+                    <tr key={enq.id}>
+                      <td style={{ fontWeight: 600 }}>{enq.firstName} {enq.lastName}</td>
+                      <td><a href={`mailto:${enq.email}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>{enq.email}</a></td>
+                      <td><a href={`tel:${enq.phone?.replace(/\s/g, '')}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>{enq.phone}</a></td>
+                      <td>
+                        <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700, background: t.bg, color: t.color, border: `1px solid ${t.border}` }}>
+                          {t.label}
+                        </span>
+                      </td>
+                      <td style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                        {date ? date.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
     </>
   );
@@ -3846,7 +3962,7 @@ function InviteUserModal({ onClose, onInvited }) {
 function FranchisePortal({ user, onLogout }) {
   const [page, setPage] = useState(() => {
     const saved = localStorage.getItem('fp_portal_page');
-    return saved && ['timetable', 'bookings', 'members', 'settings'].includes(saved) ? saved : 'timetable';
+    return saved && ['timetable', 'bookings', 'members', 'enquiries', 'settings'].includes(saved) ? saved : 'timetable';
   });
 
   const setPagePersist = (p) => {
@@ -3913,6 +4029,12 @@ function FranchisePortal({ user, onLogout }) {
   const [unavailDate, setUnavailDate] = useState('');
   const [unavailReason, setUnavailReason] = useState('');
 
+  // Enquiries state
+  const [enquiries, setEnquiries] = useState([]);
+  const [enquiriesLoading, setEnquiriesLoading] = useState(false);
+  const [enquirySearch, setEnquirySearch] = useState('');
+  const [enquiryFilter, setEnquiryFilter] = useState('all');
+
   const locationId = user.locationId?.toString() || user.uid?.toString();
 
   // Load bookings for this location
@@ -3934,6 +4056,25 @@ function FranchisePortal({ user, onLogout }) {
       setBookingsLoading(false);
     };
     if (locationId) loadBookings();
+  }, [locationId]);
+
+  // Load enquiries for this location
+  useEffect(() => {
+    const loadEnquiries = async () => {
+      setEnquiriesLoading(true);
+      try {
+        const { collection, getDocs, query, orderBy } = await import('firebase/firestore');
+        const { db } = await import('./firebase.js');
+        const q = query(
+          collection(db, 'locations', locationId, 'enquiries'),
+          orderBy('createdAt', 'desc')
+        );
+        const snap = await getDocs(q);
+        setEnquiries(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (e) { console.error("Failed to load enquiries:", e); }
+      setEnquiriesLoading(false);
+    };
+    if (locationId) loadEnquiries();
   }, [locationId]);
 
   // Load members (derived from bookings for this location)
@@ -4137,6 +4278,9 @@ function FranchisePortal({ user, onLogout }) {
           </button>
           <button className={`nav-item ${page === 'members' ? 'active' : ''}`} onClick={() => setPagePersist('members')}>
             <Icon path={icons.users} size={16} /> Members
+          </button>
+          <button className={`nav-item ${page === 'enquiries' ? 'active' : ''}`} onClick={() => setPagePersist('enquiries')}>
+            <Icon path={icons.mail} size={16} /> Enquiries
           </button>
           <button className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => setPagePersist('settings')}>
             <Icon path={icons.clock} size={16} /> Settings
@@ -4559,6 +4703,105 @@ function FranchisePortal({ user, onLogout }) {
                     </div>
                   )}
                 </>
+              );
+            })()}
+          </>
+        )}
+
+        {/* === ENQUIRIES PAGE === */}
+        {page === 'enquiries' && (
+          <>
+            <div className="page-header">
+              <div className="page-header-left">
+                <div className="page-title" style={{ color: 'var(--fp-text)' }}>Enquiries</div>
+                <div className="page-desc" style={{ color: 'var(--fp-muted)' }}>Leads from VIP List, Coming Soon, and Temporary Closed forms.</div>
+              </div>
+            </div>
+
+            {/* Filters */}
+            <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: 200, position: 'relative' }}>
+                <Icon path={icons.eye} size={14} />
+                <input
+                  placeholder="Search by name, email, or phone..."
+                  value={enquirySearch}
+                  onChange={(e) => setEnquirySearch(e.target.value)}
+                  style={{ width: '100%', padding: '10px 12px 10px 12px', borderRadius: 10, border: '1.5px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, background: 'var(--fp-card)', color: 'var(--fp-text)', outline: 'none' }}
+                />
+              </div>
+              <select
+                value={enquiryFilter}
+                onChange={(e) => setEnquiryFilter(e.target.value)}
+                style={{ padding: '10px 12px', borderRadius: 10, border: '1.5px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, background: 'var(--fp-card)', color: 'var(--fp-text)', cursor: 'pointer' }}
+              >
+                <option value="all">All Types</option>
+                <option value="vip_list">VIP List</option>
+                <option value="coming_soon">Coming Soon</option>
+                <option value="temporary_closed">Temporary Closed</option>
+              </select>
+            </div>
+
+            {enquiriesLoading ? (
+              <div className="card fp" style={{ padding: 40, textAlign: 'center', color: 'var(--fp-muted)' }}>Loading enquiries...</div>
+            ) : (() => {
+              const typeLabels = {
+                vip_list: { label: 'VIP List', bg: 'rgba(124,58,237,0.1)', color: '#7c3aed', border: 'rgba(124,58,237,0.2)' },
+                coming_soon: { label: 'Coming Soon', bg: 'rgba(217,119,6,0.1)', color: '#d97706', border: 'rgba(217,119,6,0.2)' },
+                temporary_closed: { label: 'Temp. Closed', bg: 'rgba(239,68,68,0.1)', color: '#dc2626', border: 'rgba(239,68,68,0.2)' },
+              };
+
+              let filtered = [...enquiries];
+              if (enquiryFilter !== 'all') filtered = filtered.filter(e => e.type === enquiryFilter);
+              if (enquirySearch.trim()) {
+                const s = enquirySearch.toLowerCase();
+                filtered = filtered.filter(e =>
+                  `${e.firstName} ${e.lastName}`.toLowerCase().includes(s) ||
+                  (e.email || '').toLowerCase().includes(s) ||
+                  (e.phone || '').includes(s)
+                );
+              }
+
+              if (filtered.length === 0) {
+                return <div className="card fp" style={{ padding: 40, textAlign: 'center', color: 'var(--fp-muted)' }}>No enquiries found.</div>;
+              }
+
+              return (
+                <div className="card fp" style={{ overflow: 'hidden' }}>
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Name</th>
+                          <th>Email</th>
+                          <th>Phone</th>
+                          <th>Type</th>
+                          <th>Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filtered.map(enq => {
+                          const t = typeLabels[enq.type] || typeLabels.vip_list;
+                          const date = enq.createdAt?.toDate ? enq.createdAt.toDate() : enq.createdAt?.seconds ? new Date(enq.createdAt.seconds * 1000) : null;
+                          return (
+                            <tr key={enq.id}>
+                              <td style={{ fontWeight: 600 }}>{enq.firstName} {enq.lastName}</td>
+                              <td><a href={`mailto:${enq.email}`} style={{ color: 'var(--fp-accent)', textDecoration: 'none' }}>{enq.email}</a></td>
+                              <td><a href={`tel:${enq.phone?.replace(/\s/g, '')}`} style={{ color: 'var(--fp-accent)', textDecoration: 'none' }}>{enq.phone}</a></td>
+                              <td>
+                                <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700, background: t.bg, color: t.color, border: `1px solid ${t.border}` }}>
+                                  {t.label}
+                                </span>
+                              </td>
+                              <td style={{ fontSize: 13, color: 'var(--fp-muted)' }}>
+                                {date ? date.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               );
             })()}
           </>
