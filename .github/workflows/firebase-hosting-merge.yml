@@ -1,19 +1,60 @@
-# Deploy to Firebase on merge to main
-# Deploys: Hosting (frontend), Firestore rules, and Cloud Functions
+# Deploy to Firebase on merge to main.
+# Deploys: Hosting (frontend), Firestore rules, and Cloud Functions.
+# All tests must pass before deployment proceeds.
 
-name: Deploy to Firebase Hosting on merge
+name: Test & Deploy on merge
 on:
   push:
     branches:
       - main
 jobs:
-  build_and_deploy:
+  test_and_deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # ── Build the frontend ──────────────────────────────────────────
-      - run: npm ci && npm run build
+      # ── Install dependencies ───────────────────────────────────────
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: cd functions && npm ci
+
+      # ── Install Firebase CLI & cache emulators ─────────────────────
+      - run: npm install -g firebase-tools
+      - name: Cache Firebase emulators
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-${{ runner.os }}
+
+      # ── Cloud Function unit tests (offline, no emulator needed) ────
+      - name: Run Cloud Function unit tests
+        run: npm run test:functions
+
+      # ── Firestore rules tests ──────────────────────────────────────
+      - name: Run Firestore rules tests
+        run: |
+          firebase emulators:exec \
+            --only firestore \
+            --project success-tutoring-test \
+            "npm run test:rules"
+
+      # ── Playwright E2E tests ───────────────────────────────────────
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+      - name: Run E2E tests against emulators
+        run: |
+          firebase emulators:exec \
+            --only auth,firestore \
+            --project success-tutoring-test \
+            "npm run test:e2e"
+        env:
+          VITE_USE_EMULATOR: 'true'
+
+      # ── Build the frontend ─────────────────────────────────────────
+      - run: npm run build
 
       # ── Deploy Hosting (frontend) ──────────────────────────────────
       - uses: FirebaseExtended/action-hosting-deploy@v0
@@ -24,12 +65,6 @@ jobs:
           projectId: success-tutoring-test
 
       # ── Deploy Firestore rules + Cloud Functions ───────────────────
-      - name: Install Firebase CLI
-        run: npm install -g firebase-tools
-
-      - name: Install Cloud Functions dependencies
-        run: cd functions && npm ci
-
       - name: Authenticate and deploy Firestore rules & Cloud Functions
         run: |
           echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_SUCCESS_TUTORING_TEST }}' > "$RUNNER_TEMP/gha-creds.json"
