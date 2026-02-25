@@ -71,6 +71,24 @@ service cloud.firestore {
 
       // Only master_admin can delete locations
       allow delete: if isMasterAdmin();
+
+      // ── Enquiries sub-collection (public lead forms) ───────────────────
+      match /enquiries/{enquiryId} {
+        // Anyone can create an enquiry (public form — like bookings)
+        allow create: if true;
+
+        // HQ admins can read all enquiries
+        allow read: if isAdmin();
+
+        // Franchise partners can read enquiries for their location
+        allow read: if isFranchisePartner(locationId);
+
+        // HQ admins can update/delete enquiries
+        allow update, delete: if isAdmin();
+
+        // Franchise partners can update enquiries for their location (e.g. mark as read)
+        allow update: if isFranchisePartner(locationId);
+      }
     }
 
     // ── Availability collection ─────────────────────────────────────────────
