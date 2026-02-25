@@ -39,13 +39,6 @@ const INITIAL_AVAILABILITY = DAYS.map((day, i) => ({
   unavailable: [], // Array of { date: 'YYYY-MM-DD', reason: '' }
 }));
 
-const SERVICE_NAMES = [
-  'Free Assessment', 'One-on-One Tutoring', 'Small Group Tutoring', 'Homework Club',
-  'Exam Preparation', 'HSC Preparation', 'VCE Preparation', 'QCE Preparation',
-  'ATAR Preparation', 'Selective School Prep', 'Scholarship Prep', 'NAPLAN Preparation',
-  'Holiday Intensive', 'Reading Program', 'Writing Workshop', 'Maths Masterclass',
-  'Science Lab', 'English Workshop', 'Study Skills Workshop', 'Parent Information Session', 'Other',
-];
 
 const COUNTRIES_STATES = {
   'Australia': ['New South Wales', 'Victoria', 'Queensland', 'Western Australia', 'South Australia', 'Tasmania', 'Northern Territory', 'ACT'],
@@ -1489,7 +1482,7 @@ function AuthPage({ portal, onLogin, onBack }) {
 
 // --- HQ Portal ------------------------------------------------------------------
 function HQPortal({ user, onLogout }) {
-  const [page, setPage] = useState('locations');
+  const [page, setPage] = useState(() => sessionStorage.getItem('hq_page') || 'locations');
   const [locations, setLocations] = useState([]);
   const [locationsLoading, setLocationsLoading] = useState(true);
   const [modal, setModal] = useState(null); // null | 'add' | { type:'edit', loc } | { type:'delete', loc }
@@ -1521,6 +1514,9 @@ function HQPortal({ user, onLogout }) {
   const [serviceModal, setServiceModal] = useState(null);
   const [svcFilterCountry, setSvcFilterCountry] = useState('all');
   const [svcFilterState, setSvcFilterState] = useState('all');
+
+  // Persist current page to sessionStorage so refresh lands on the same section
+  useEffect(() => { sessionStorage.setItem('hq_page', page); }, [page]);
 
   // Load HQ settings
   useEffect(() => {
@@ -2300,7 +2296,6 @@ function HQPortal({ user, onLogout }) {
 // --- Service Modal --------------------------------------------------------------
 function ServiceModal({ editing, onSave, onClose }) {
   const [name, setName] = useState(editing?.name || '');
-  const [customName, setCustomName] = useState(editing?.customName || '');
   const [description, setDescription] = useState(editing?.description || '');
   const [duration, setDuration] = useState(editing?.duration || 40);
   const [maxStudents, setMaxStudents] = useState(editing?.maxStudents || 1);
@@ -2341,7 +2336,7 @@ function ServiceModal({ editing, onSave, onClose }) {
   };
 
   const handleSave = async () => {
-    const finalName = name === 'Other' ? customName : name;
+    const finalName = name;
     if (!finalName || !description) return;
     setSaving(true);
 
@@ -2376,29 +2371,12 @@ function ServiceModal({ editing, onSave, onClose }) {
         {/* Service Name */}
         <div className="form-group">
           <div className="form-label hq">Service Name</div>
-          <select
+          <input
             className="form-input hq"
             value={name}
             onChange={e => setName(e.target.value)}
-            style={{
-              appearance: 'none',
-              backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
-              backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '16px',
-              paddingRight: 36, cursor: 'pointer',
-            }}
-          >
-            <option value="">Select a service...</option>
-            {SERVICE_NAMES.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-          {name === 'Other' && (
-            <input
-              className="form-input hq"
-              value={customName}
-              onChange={e => setCustomName(e.target.value)}
-              placeholder="Enter custom service name..."
-              style={{ marginTop: 8 }}
-            />
-          )}
+            placeholder="Enter service name..."
+          />
         </div>
 
         {/* Description */}
@@ -2534,7 +2512,7 @@ function ServiceModal({ editing, onSave, onClose }) {
 
         <div className="modal-actions">
           <button className="btn btn-ghost hq" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary hq" onClick={handleSave} disabled={saving || (!name || (name === 'Other' && !customName) || !description)}>
+          <button className="btn btn-primary hq" onClick={handleSave} disabled={saving || !name || !description}>
             <Icon path={icons.check} size={14} />
             {saving ? 'Saving...' : editing ? 'Save Changes' : 'Create Service'}
           </button>
@@ -3753,7 +3731,7 @@ function InviteUserModal({ onClose, onInvited }) {
 
 // --- Franchise Partner Portal ---------------------------------------------------
 function FranchisePortal({ user, onLogout }) {
-  const [page, setPage] = useState('timetable');
+  const [page, setPage] = useState(() => sessionStorage.getItem('fp_page') || 'timetable');
   const [availability, setAvailability] = useState(INITIAL_AVAILABILITY);
   const [timezone, setTimezone] = useState('Australia/Sydney');
   const [buffer, setBuffer] = useState(15);
@@ -3815,6 +3793,9 @@ function FranchisePortal({ user, onLogout }) {
   const [unavailReason, setUnavailReason] = useState('');
 
   const locationId = user.locationId?.toString() || user.uid?.toString();
+
+  // Persist current page to sessionStorage so refresh lands on the same section
+  useEffect(() => { sessionStorage.setItem('fp_page', page); }, [page]);
 
   // Load bookings for this location
   useEffect(() => {
