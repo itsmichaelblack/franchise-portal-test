@@ -1433,6 +1433,33 @@ function AuthPage({ portal, onLogin, onBack }) {
           }
         }
 
+        // Check if this user's email matches a pending HQ invite (HQ auto-registration)
+        if (portal === 'hq') {
+          const inviteQuery = query(collection(db, 'invites'), where('email', '==', firebaseUser.email), where('status', '==', 'pending'));
+          const inviteSnap = await getDocs(inviteQuery);
+
+          if (!inviteSnap.empty) {
+            const invite = inviteSnap.docs[0].data();
+            const inviteId = inviteSnap.docs[0].id;
+            // Auto-create HQ user profile from the invite
+            const hqProfile = {
+              name: invite.name || firebaseUser.displayName || '',
+              email: firebaseUser.email,
+              role: invite.role || 'admin',
+              jobTitle: invite.jobTitle || '',
+              updatedAt: serverTimestamp(),
+            };
+            await setDoc(doc(db, 'users', firebaseUser.uid), hqProfile);
+            // Mark invite as accepted
+            const { updateDoc } = await import('firebase/firestore');
+            await updateDoc(doc(db, 'invites', inviteId), { status: 'accepted', acceptedAt: serverTimestamp(), uid: firebaseUser.uid });
+            localStorage.setItem('franchise_portal_choice', portal);
+            onLogin({ ...hqProfile, uid: firebaseUser.uid });
+            setLoading(false);
+            return;
+          }
+        }
+
         setError('Your account has not been set up yet. Please contact HQ.');
         await auth.signOut();
         setLoading(false);
