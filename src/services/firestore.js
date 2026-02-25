@@ -170,32 +170,76 @@ export async function logUserAction(logEntry) {
 
 /**
  * Fetch activity logs for a specific location, ordered by most recent first.
+ * Falls back to unordered query if composite index is not yet available.
  * @param {string} locationId
  * @returns {Promise<Array>}
  */
 export async function getActivityLogs(locationId) {
   const { where } = await import("firebase/firestore");
-  const q = query(
-    collection(db, "activity_logs"),
-    where("locationId", "==", locationId),
-    orderBy("timestamp", "desc")
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  try {
+    const q = query(
+      collection(db, "activity_logs"),
+      where("locationId", "==", locationId),
+      orderBy("timestamp", "desc")
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    console.warn("getActivityLogs: indexed query failed, trying fallback:", e.message);
+    // Fallback: query without orderBy (no composite index needed), sort client-side
+    try {
+      const q = query(
+        collection(db, "activity_logs"),
+        where("locationId", "==", locationId)
+      );
+      const snap = await getDocs(q);
+      const results = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      return results.sort((a, b) => {
+        const tsA = a.timestamp?.seconds || 0;
+        const tsB = b.timestamp?.seconds || 0;
+        return tsB - tsA;
+      });
+    } catch (fallbackErr) {
+      console.error("getActivityLogs: fallback query also failed:", fallbackErr);
+      return [];
+    }
+  }
 }
 
 /**
  * Fetch all activity logs for a specific HQ user (global across all locations).
+ * Falls back to unordered query if composite index is not yet available.
  * @param {string} userId
  * @returns {Promise<Array>}
  */
 export async function getHqUserLogs(userId) {
   const { where } = await import("firebase/firestore");
-  const q = query(
-    collection(db, "activity_logs"),
-    where("userId", "==", userId),
-    orderBy("timestamp", "desc")
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  try {
+    const q = query(
+      collection(db, "activity_logs"),
+      where("userId", "==", userId),
+      orderBy("timestamp", "desc")
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    console.warn("getHqUserLogs: indexed query failed, trying fallback:", e.message);
+    // Fallback: query without orderBy (no composite index needed), sort client-side
+    try {
+      const q = query(
+        collection(db, "activity_logs"),
+        where("userId", "==", userId)
+      );
+      const snap = await getDocs(q);
+      const results = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      return results.sort((a, b) => {
+        const tsA = a.timestamp?.seconds || 0;
+        const tsB = b.timestamp?.seconds || 0;
+        return tsB - tsA;
+      });
+    } catch (fallbackErr) {
+      console.error("getHqUserLogs: fallback query also failed:", fallbackErr);
+      return [];
+    }
+  }
 }
