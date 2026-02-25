@@ -25,3 +25,8 @@ ui-debug.log
 # OS
 .DS_Store
 Thumbs.db
+
+# Playwright
+tests/playwright/.auth/tokens.json
+playwright-report/
+test-results/

@@ -1,16 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { createLocation, updateLocation, deleteLocation, saveAvailability, getLocations, resendConfirmationEmail, resendInviteEmail, updateHqUser, logUserAction, getActivityLogs, getHqUserLogs } from "./services/firestore";
 
-// --- Simulated Data -------------------------------------------------------------
-const SIMULATED_USERS = {
-  hq: [
-    { id: 1, email: "master@hq.com", password: "master123", role: "master_admin", name: "Sarah Chen" },
-    { id: 2, email: "admin@hq.com", password: "admin123", role: "admin", name: "James Wright" },
-  ],
-  franchise: [
-    { id: 10, email: "partner@franchise.com", password: "partner123", name: "Alex Morgan", locationId: 1 },
-  ],
-};
 
 const INITIAL_LOCATIONS = [];
 
@@ -1357,7 +1347,7 @@ function AuthPage({ portal, onLogin, onBack }) {
     setLoading(true);
     try {
       const { signInWithPopup, GoogleAuthProvider, getAuth } = await import('firebase/auth');
-      const { doc, getDoc, setDoc, collection, getDocs, query, where, serverTimestamp } = await import('firebase/firestore');
+      const { doc, getDoc, setDoc, updateDoc, collection, getDocs, query, where, serverTimestamp } = await import('firebase/firestore');
       const firebaseModule = await import('./firebase.js');
       const auth = firebaseModule.auth;
       const db = firebaseModule.db;
@@ -1396,6 +1386,41 @@ function AuthPage({ portal, onLogin, onBack }) {
             onLogin({ ...partnerProfile, uid: firebaseUser.uid });
             setLoading(false);
             return;
+          }
+        }
+
+        // HQ portal: check for a valid one-time invite token in the URL
+        if (portal === 'hq') {
+          const inviteId = new URLSearchParams(window.location.search).get('invite');
+          if (inviteId) {
+            const inviteSnap = await getDoc(doc(db, 'invites', inviteId));
+            if (inviteSnap.exists() && !inviteSnap.data().used) {
+              const inviteData = inviteSnap.data();
+              const hqProfile = {
+                name: firebaseUser.displayName || firebaseUser.email,
+                email: firebaseUser.email,
+                role: inviteData.role,
+                createdAt: serverTimestamp(),
+              };
+              await setDoc(doc(db, 'users', firebaseUser.uid), hqProfile);
+              await updateDoc(doc(db, 'invites', inviteId), {
+                used: true,
+                usedAt: serverTimestamp(),
+                usedBy: firebaseUser.uid,
+              });
+              logUserAction({
+                locationId: 'hq',
+                userId: firebaseUser.uid,
+                userName: hqProfile.name,
+                userEmail: firebaseUser.email,
+                action: 'sign_in',
+                category: 'auth',
+                details: `First sign-in via invite as ${inviteData.role}`,
+              });
+              onLogin({ ...hqProfile, uid: firebaseUser.uid });
+              setLoading(false);
+              return;
+            }
           }
         }
 

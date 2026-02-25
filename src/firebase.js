@@ -2,9 +2,9 @@
 // Firebase SDK initialisation — import from this file throughout the app.
 
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
-import { getFunctions } from "firebase/functions";
+import { getAuth, GoogleAuthProvider, connectAuthEmulator, signInWithCustomToken } from "firebase/auth";
+import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
+import { getFunctions, connectFunctionsEmulator } from "firebase/functions";
 
 const firebaseConfig = {
   apiKey:            "AIzaSyDG1LOpFz05Ty9_J7IO6XQvKUJnLTXoriE",
@@ -27,5 +27,15 @@ export const db = getFirestore(app);
 
 // ── Functions ──────────────────────────────────────────────────────────────────
 export const functions = getFunctions(app);
+
+// ── Emulator connections (local development & E2E testing only) ────────────────
+if (import.meta.env.VITE_USE_EMULATOR === 'true') {
+  connectAuthEmulator(auth, 'http://localhost:9099', { disableWarnings: true });
+  connectFirestoreEmulator(db, 'localhost', 8080);
+  connectFunctionsEmulator(functions, 'localhost', 5001);
+
+  // Expose test-only auth helper for Playwright E2E tests
+  window.__signInWithToken__ = (token) => signInWithCustomToken(auth, token);
+}
 
 export default app;
