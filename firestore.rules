@@ -45,6 +45,11 @@ service cloud.firestore {
       allow create: if isAuth() && request.auth.uid == userId
         && request.resource.data.role == 'franchise_partner';
 
+      // Allow HQ invited users to create their own profile during first sign-in
+      // (role must be 'admin' or 'master_admin' — validated against invite in app code)
+      allow create: if isAuth() && request.auth.uid == userId
+        && (request.resource.data.role == 'admin' || request.resource.data.role == 'master_admin');
+
       // Nobody can delete user documents through the client (use Admin SDK only)
       allow delete: if false;
     }
@@ -142,11 +147,18 @@ service cloud.firestore {
       // Master admins can read all invites
       allow read: if isMasterAdmin();
 
+      // Allow authenticated users to read invites matching their email (for auto-registration)
+      allow read: if isAuth() && resource.data.email == request.auth.token.email;
+
       // Master admins can create invites
       allow create: if isMasterAdmin();
 
       // Master admins can update invites (e.g. status changes)
       allow update: if isMasterAdmin();
+
+      // Allow invited users to mark their own invite as accepted during first sign-in
+      allow update: if isAuth() && resource.data.email == request.auth.token.email
+        && resource.data.status == 'pending';
 
       // Master admins can delete invites (e.g. revoking pending invites)
       allow delete: if isMasterAdmin();
