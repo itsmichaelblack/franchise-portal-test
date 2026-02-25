@@ -54,6 +54,16 @@ const COUNTRIES_STATES = {
   'United States': ['California', 'New York', 'Texas', 'Florida', 'Illinois', 'Pennsylvania'],
 };
 
+// --- Date formatting helper (handles Firestore Timestamps, Date objects, and strings) ---
+const formatDateValue = (val) => {
+  if (!val) return null;
+  if (typeof val === 'string') return val;
+  if (val?.toDate) return val.toDate().toLocaleDateString('en-AU', { year: 'numeric', month: 'short', day: 'numeric' });
+  if (val instanceof Date) return val.toLocaleDateString('en-AU', { year: 'numeric', month: 'short', day: 'numeric' });
+  if (val?.seconds) return new Date(val.seconds * 1000).toLocaleDateString('en-AU', { year: 'numeric', month: 'short', day: 'numeric' });
+  return String(val);
+};
+
 // --- Icons ----------------------------------------------------------------------
 const Icon = ({ path, size = 20 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1224,9 +1234,76 @@ const styles = `
 export default function App() {
   const [portal, setPortal] = useState(null); // 'hq' | 'fp'
   const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true); // true while checking persisted auth
+
+  // Restore session on page refresh via Firebase onAuthStateChanged
+  useEffect(() => {
+    let cancelled = false;
+    const init = async () => {
+      const { onAuthStateChanged } = await import('firebase/auth');
+      const { doc, getDoc } = await import('firebase/firestore');
+      const { auth, db } = await import('./firebase.js');
+
+      const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
+        if (cancelled) return;
+        if (firebaseUser) {
+          try {
+            const profileSnap = await getDoc(doc(db, 'users', firebaseUser.uid));
+            if (profileSnap.exists()) {
+              const profile = profileSnap.data();
+              const restoredSession = { ...profile, uid: firebaseUser.uid, name: profile.name || firebaseUser.displayName };
+              // Determine which portal based on role
+              if (profile.role === 'master_admin' || profile.role === 'admin') {
+                setPortal('hq');
+                setSession(restoredSession);
+              } else if (profile.role === 'franchise_partner') {
+                setPortal('fp');
+                setSession(restoredSession);
+              }
+              // If role doesn't match known portals, fall through to selector
+            }
+          } catch (err) {
+            console.error('Failed to restore session:', err);
+          }
+        }
+        if (!cancelled) setAuthLoading(false);
+      });
+
+      return unsub;
+    };
+
+    let unsub;
+    init().then(u => { unsub = u; });
+    return () => { cancelled = true; if (unsub) unsub(); };
+  }, []);
 
   const handleLogin = (user) => setSession(user);
-  const handleLogout = () => { setSession(null); setPortal(null); };
+  const handleLogout = async () => {
+    try {
+      const { signOut } = await import('firebase/auth');
+      const { auth } = await import('./firebase.js');
+      await signOut(auth);
+    } catch (err) {
+      console.error('Sign out error:', err);
+    }
+    setSession(null);
+    setPortal(null);
+  };
+
+  // Show a brief loading state while checking for persisted auth
+  if (authLoading) {
+    return (
+      <>
+        <style>{styles}</style>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: 'Inter, sans-serif', color: '#888' }}>
+          <div style={{ textAlign: 'center' }}>
+            <img src="/logo-sticker.png" alt="Success Tutoring" style={{ width: 48, height: 48, objectFit: 'contain', marginBottom: 16, opacity: 0.7 }} />
+            <div style={{ fontSize: 14 }}>Loading...</div>
+          </div>
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
@@ -1858,7 +1935,7 @@ function HQPortal({ user, onLogout }) {
                         <td className="hq"><span className="td-muted hq">{loc.phone}</span></td>
                         <td className="hq"><span className="td-muted hq">{loc.email}</span></td>
                         <td className="hq">{statusBadge(loc.status || 'open')}</td>
-                        <td className="hq"><span className="td-muted hq">{loc.createdAt}</span></td>
+                        <td className="hq"><span className="td-muted hq">{formatDateValue(loc.createdAt)}</span></td>
                         <td className="hq">
                           <div className="actions">
                             <button className="btn btn-ghost hq" style={{ padding: '7px 12px' }} onClick={() => { setSelectedLocation(loc); setLocationTab('details'); }}>
@@ -2552,7 +2629,7 @@ function LocationDetailView({ location, locations, user, isMaster, onBack, locat
             </div>
             <div>
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 6 }}>Created</div>
-              <div style={{ fontSize: 15, color: 'var(--text)' }}>{location.createdAt || '—'}</div>
+              <div style={{ fontSize: 15, color: 'var(--text)' }}>{formatDateValue(location.createdAt) || '—'}</div>
             </div>
             <div>
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 6 }}>Location ID</div>
@@ -3273,7 +3350,7 @@ function HqUserDetailView({ hqUser, currentUser, onBack, userDetailTab, setUserD
             </div>
             <div>
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 6 }}>Created</div>
-              <div style={{ fontSize: 15, color: 'var(--text)' }}>{hqUser.createdAt || hqUser.updatedAt || '—'}</div>
+              <div style={{ fontSize: 15, color: 'var(--text)' }}>{formatDateValue(hqUser.createdAt) || formatDateValue(hqUser.updatedAt) || '—'}</div>
             </div>
             <div>
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 6 }}>User ID</div>
