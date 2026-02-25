@@ -1242,7 +1242,7 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     const init = async () => {
-      const { onAuthStateChanged, signOut } = await import('firebase/auth');
+      const { onAuthStateChanged } = await import('firebase/auth');
       const { doc, getDoc } = await import('firebase/firestore');
       const { auth, db } = await import('./firebase.js');
 
@@ -1251,8 +1251,8 @@ export default function App() {
         if (firebaseUser) {
           const savedPortal = localStorage.getItem('franchise_portal_choice');
           if (!savedPortal) {
-            // No portal saved — user hasn't chosen yet (or logged out). Sign out so selector is clean.
-            await signOut(auth);
+            // No portal saved — user logged out or hasn't chosen yet.
+            // Just show the portal selector; don't restore the session.
             if (!cancelled) setAuthLoading(false);
             return;
           }
@@ -1273,15 +1273,14 @@ export default function App() {
               } else {
                 // Role/portal mismatch — clear and let user re-pick
                 localStorage.removeItem('franchise_portal_choice');
-                await signOut(auth);
               }
             } else {
-              // No profile — sign out
+              // No profile found — clear saved choice
               localStorage.removeItem('franchise_portal_choice');
-              await signOut(auth);
             }
           } catch (err) {
             console.error('Failed to restore session:', err);
+            localStorage.removeItem('franchise_portal_choice');
           }
         }
         if (!cancelled) setAuthLoading(false);
@@ -1384,11 +1383,17 @@ function AuthPage({ portal, onLogin, onBack }) {
     setError('');
     setLoading(true);
     try {
-      const { signInWithPopup, GoogleAuthProvider, getAuth } = await import('firebase/auth');
+      const { signInWithPopup, signOut, GoogleAuthProvider, getAuth } = await import('firebase/auth');
       const { doc, getDoc, setDoc, collection, getDocs, query, where, serverTimestamp } = await import('firebase/firestore');
       const firebaseModule = await import('./firebase.js');
       const auth = firebaseModule.auth;
       const db = firebaseModule.db;
+
+      // Sign out any stale session first to ensure a clean Google sign-in
+      if (auth.currentUser) {
+        await signOut(auth);
+      }
+
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
       const firebaseUser = result.user;
