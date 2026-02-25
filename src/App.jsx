@@ -2682,11 +2682,7 @@ function UserLogsTab({ locationId, locationName }) {
         setLogs(data);
       } catch (e) {
         console.error("Failed to load activity logs:", e);
-        if (e.message && (e.message.includes('index') || e.code === 'failed-precondition')) {
-          setError('Activity logs require a Firestore composite index. Please deploy indexes with: firebase deploy --only firestore:indexes');
-        } else {
-          setError('Failed to load activity logs. Please try again.');
-        }
+        setError(`Failed to load activity logs: ${e.code || ''} ${e.message || 'Unknown error'}`);
       }
       setLoading(false);
     };
@@ -3450,12 +3446,7 @@ function HqUserLogsTab({ userId, userName }) {
         setLogs(data);
       } catch (e) {
         console.error("Failed to load HQ user logs:", e);
-        // Check if it's a missing index error
-        if (e.message && (e.message.includes('index') || e.code === 'failed-precondition')) {
-          setError('Activity logs require a Firestore composite index. Please deploy indexes with: firebase deploy --only firestore:indexes');
-        } else {
-          setError('Failed to load activity logs. Please try again.');
-        }
+        setError(`Failed to load activity logs: ${e.code || ''} ${e.message || 'Unknown error'}`);
       }
       setLoading(false);
     };
