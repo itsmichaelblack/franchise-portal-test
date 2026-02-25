@@ -6,10 +6,10 @@ functions/node_modules/
 dist/
 build/
 
-# Environment variables — NEVER commit these
+# Environment variables — NEVER commit .env or .env.local (may contain overrides)
+# .env.production IS committed — Firebase client keys are public by design
 .env
 .env.local
-.env.production
 
 # Firebase
 .firebase/
