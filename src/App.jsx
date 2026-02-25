@@ -1,51 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { createLocation, updateLocation, deleteLocation, saveAvailability, getLocations, resendConfirmationEmail, resendInviteEmail, updateHqUser, logUserAction, getActivityLogs, getHqUserLogs } from "./services/firestore";
+import { TIMEZONES, COUNTRY_CODES, DAYS, INITIAL_AVAILABILITY, COUNTRIES_STATES } from "./utils/constants";
+import { formatDateValue, formatUTCDate, formatRelativeTime, fmtTime, getActionBadgeClass, getActionLabel, buildSummary } from "./utils/formatters";
 
 
 const INITIAL_LOCATIONS = [];
-
-const TIMEZONES = [
-  "Pacific/Auckland", "Australia/Sydney", "Australia/Melbourne", "Australia/Brisbane",
-  "Australia/Perth", "Asia/Singapore", "Asia/Tokyo", "Asia/Dubai",
-  "Europe/London", "Europe/Paris", "America/New_York", "America/Los_Angeles",
-  "America/Chicago", "America/Denver",
-];
-
-const COUNTRY_CODES = [
-  { code: "+1", country: "US/CA" }, { code: "+44", country: "UK" },
-  { code: "+61", country: "AU" }, { code: "+64", country: "NZ" },
-  { code: "+65", country: "SG" }, { code: "+81", country: "JP" },
-  { code: "+49", country: "DE" }, { code: "+33", country: "FR" },
-  { code: "+971", country: "AE" }, { code: "+91", country: "IN" },
-];
-
-const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-
-const INITIAL_AVAILABILITY = DAYS.map((day, i) => ({
-  day,
-  enabled: i < 5,
-  start: "09:00",
-  end: "17:00",
-  unavailable: [], // Array of { date: 'YYYY-MM-DD', reason: '' }
-}));
-
-
-const COUNTRIES_STATES = {
-  'Australia': ['New South Wales', 'Victoria', 'Queensland', 'Western Australia', 'South Australia', 'Tasmania', 'Northern Territory', 'ACT'],
-  'New Zealand': ['Auckland', 'Wellington', 'Canterbury', 'Waikato', 'Bay of Plenty', 'Otago'],
-  'United Kingdom': ['England', 'Scotland', 'Wales', 'Northern Ireland'],
-  'United States': ['California', 'New York', 'Texas', 'Florida', 'Illinois', 'Pennsylvania'],
-};
-
-// --- Date formatting helper (handles Firestore Timestamps, Date objects, and strings) ---
-const formatDateValue = (val) => {
-  if (!val) return null;
-  if (typeof val === 'string') return val;
-  if (val?.toDate) return val.toDate().toLocaleDateString('en-AU', { year: 'numeric', month: 'short', day: 'numeric' });
-  if (val instanceof Date) return val.toLocaleDateString('en-AU', { year: 'numeric', month: 'short', day: 'numeric' });
-  if (val?.seconds) return new Date(val.seconds * 1000).toLocaleDateString('en-AU', { year: 'numeric', month: 'short', day: 'numeric' });
-  return String(val);
-};
 
 // --- Icons ----------------------------------------------------------------------
 const Icon = ({ path, size = 20 }) => (

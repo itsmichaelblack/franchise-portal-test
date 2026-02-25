@@ -14,9 +14,26 @@ const FROM_EMAIL = "michael@successtutoring.com";
 const FROM_NAME  = "Success Tutoring";
 const PORTAL_URL = "https://success-tutoring-test.web.app";
 
+// ── HTML escaping helper (prevents XSS in email clients) ─────────────────────
+function escapeHtml(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// Make escapeHtml available for testing
+exports._escapeHtml = escapeHtml;
+
 // ── Helper: build the confirmation email ─────────────────────────────────────
 function buildConfirmationEmail(location) {
-  const { name, address, phone, email } = location;
+  const name = escapeHtml(location.name);
+  const address = escapeHtml(location.address);
+  const phone = escapeHtml(location.phone);
+  const email = escapeHtml(location.email);
 
   const html = `
     <!DOCTYPE html>
@@ -63,7 +80,7 @@ function buildConfirmationEmail(location) {
     </html>
   `;
 
-  const text = `Welcome! Your location "${name}" has been created. Access your portal: ${PORTAL_URL}`;
+  const text = `Welcome! Your location "${location.name}" has been created. Access your portal: ${PORTAL_URL}`;
   return { html, text };
 }
 
@@ -92,7 +109,7 @@ exports.onLocationCreated = functions.firestore
       await sgMail.send({
         to:      location.email,
         from:    { email: FROM_EMAIL, name: FROM_NAME },
-        subject: `Welcome! Your franchise location "${location.name}" is now active`,
+        subject: `Welcome! Your franchise location "${escapeHtml(location.name)}" is now active`,
         text,
         html,
       });
@@ -127,20 +144,29 @@ exports.resendConfirmationEmail = functions.https.onCall(async (data, context) =
     throw new functions.https.HttpsError("not-found", `Location ${locationId} not found.`);
   }
 
-  const location = locationDoc.data();
   const apiKey = functions.config().sendgrid?.api_key;
+  if (!apiKey) {
+    throw new functions.https.HttpsError("internal", "SendGrid API key not configured.");
+  }
+
+  const location = locationDoc.data();
   sgMail.setApiKey(apiKey);
   const { html, text } = buildConfirmationEmail(location);
 
-  await sgMail.send({
-    to:      location.email,
-    from:    { email: FROM_EMAIL, name: FROM_NAME },
-    subject: `Reminder: Access your partner portal — ${location.name}`,
-    text,
-    html,
-  });
+  try {
+    await sgMail.send({
+      to:      location.email,
+      from:    { email: FROM_EMAIL, name: FROM_NAME },
+      subject: `Reminder: Access your partner portal — ${escapeHtml(location.name)}`,
+      text,
+      html,
+    });
 
-  return { success: true };
+    return { success: true };
+  } catch (err) {
+    console.error("SendGrid error:", err?.response?.body ?? err);
+    throw new functions.https.HttpsError("internal", "Failed to send email.");
+  }
 });
 
 // ── Trigger: send invite email when an invite document is created ─────────────
@@ -158,6 +184,8 @@ exports.onInviteCreated = functions.firestore
     }
 
     sgMail.setApiKey(apiKey);
+
+    const safeName = escapeHtml(invite.name);
 
     const html = `
       <!DOCTYPE html><html><head><meta charset="utf-8" />
@@ -180,7 +208,7 @@ exports.onInviteCreated = functions.firestore
             <p>Success Tutoring HQ Portal</p>
           </div>
           <div class="body">
-            <p>Hi ${invite.name},</p>
+            <p>Hi ${safeName},</p>
             <p>You've been invited to join the <strong>Success Tutoring HQ Portal</strong> as an <strong>Admin</strong>. You'll be able to add and edit franchise locations.</p>
             <p>Click the button below to sign in with your Google account and get started.</p>
             <div class="cta"><a href="${PORTAL_URL_WITH_INVITE}">Accept Invite & Sign In →</a></div>
@@ -237,6 +265,9 @@ exports.resendInviteEmail = functions.https.onCall(async (data, context) => {
 
   sgMail.setApiKey(apiKey);
 
+  const safeName = escapeHtml(invite.name);
+  const safeRole = escapeHtml(invite.role === 'master_admin' ? 'Master Admin' : 'Admin');
+
   const html = `
     <!DOCTYPE html><html><head><meta charset="utf-8" />
     <style>
@@ -258,8 +289,8 @@ exports.resendInviteEmail = functions.https.onCall(async (data, context) => {
           <p>Success Tutoring HQ Portal</p>
         </div>
         <div class="body">
-          <p>Hi ${invite.name},</p>
-          <p>This is a reminder that you've been invited to join the <strong>Success Tutoring HQ Portal</strong> as an <strong>${invite.role === 'master_admin' ? 'Master Admin' : 'Admin'}</strong>.</p>
+          <p>Hi ${safeName},</p>
+          <p>This is a reminder that you've been invited to join the <strong>Success Tutoring HQ Portal</strong> as an <strong>${safeRole}</strong>.</p>
           <p>Click the button below to sign in with your Google account and get started.</p>
           <div class="cta"><a href="${PORTAL_URL_WITH_INVITE}">Accept Invite & Sign In →</a></div>
           <p style="font-size: 13px; color: #888;">If you weren't expecting this invite, you can safely ignore this email.</p>
@@ -312,6 +343,14 @@ exports.onBookingCreated = functions.firestore
     const timeStr = `${h % 12 || 12}:${String(m).padStart(2, "0")} ${ampm}`;
     const refCode = bookingId.slice(0, 8).toUpperCase();
 
+    // Escape user-provided data for HTML
+    const safeCustomerName = escapeHtml(booking.customerName);
+    const safeLocationName = escapeHtml(booking.locationName);
+    const safeLocationAddress = escapeHtml(booking.locationAddress);
+    const safeCustomerEmail = escapeHtml(booking.customerEmail);
+    const safeCustomerPhone = escapeHtml(booking.customerPhone);
+    const safeNotes = escapeHtml(booking.notes);
+
     // ── 1. Email to the CUSTOMER ─────────────────────────────────────────
     const customerHtml = `
       <!DOCTYPE html><html><head><meta charset="utf-8" />
@@ -338,11 +377,11 @@ exports.onBookingCreated = functions.firestore
             <p>Your booking is all set</p>
           </div>
           <div class="body">
-            <p>Hi ${booking.customerName},</p>
+            <p>Hi ${safeCustomerName},</p>
             <p>Your free 40-minute assessment has been confirmed. Here are your booking details:</p>
             <div class="detail-card">
-              <div class="detail-row"><span class="detail-label">Location: </span>${booking.locationName}</div>
-              <div class="detail-row"><span class="detail-label">Address: </span>${booking.locationAddress}</div>
+              <div class="detail-row"><span class="detail-label">Location: </span>${safeLocationName}</div>
+              <div class="detail-row"><span class="detail-label">Address: </span>${safeLocationAddress}</div>
               <div class="detail-row"><span class="detail-label">Date: </span>${dateStr}</div>
               <div class="detail-row"><span class="detail-label">Time: </span>${timeStr} (40 minutes)</div>
               <div class="ref">Booking Ref: ${refCode}</div>
@@ -385,14 +424,14 @@ exports.onBookingCreated = functions.firestore
           </div>
           <div class="body">
             <p>Hi there,</p>
-            <p>A new assessment has been booked at <strong>${booking.locationName}</strong>:</p>
+            <p>A new assessment has been booked at <strong>${safeLocationName}</strong>:</p>
             <div class="detail-card">
-              <div class="detail-row"><span class="detail-label">Customer: </span>${booking.customerName}</div>
-              <div class="detail-row"><span class="detail-label">Email: </span>${booking.customerEmail}</div>
-              <div class="detail-row"><span class="detail-label">Phone: </span>${booking.customerPhone}</div>
+              <div class="detail-row"><span class="detail-label">Customer: </span>${safeCustomerName}</div>
+              <div class="detail-row"><span class="detail-label">Email: </span>${safeCustomerEmail}</div>
+              <div class="detail-row"><span class="detail-label">Phone: </span>${safeCustomerPhone}</div>
               <div class="detail-row"><span class="detail-label">Date: </span>${dateStr}</div>
               <div class="detail-row"><span class="detail-label">Time: </span>${timeStr} (40 minutes)</div>
-              ${booking.notes ? `<div class="detail-row"><span class="detail-label">Notes: </span>${booking.notes}</div>` : ""}
+              ${booking.notes ? `<div class="detail-row"><span class="detail-label">Notes: </span>${safeNotes}</div>` : ""}
               <div class="ref">Booking Ref: ${refCode}</div>
             </div>
             <p>Log in to your Partner Portal to view all upcoming bookings.</p>
@@ -437,5 +476,41 @@ exports.onBookingCreated = functions.firestore
       });
     } catch (err) {
       console.error("Failed to update booking:", err);
+    }
+  });
+
+// ── Scheduled: automated Firestore backup ─────────────────────────────────────
+// Exports all Firestore collections to a GCS bucket daily using the Firestore
+// Admin REST API. Uses Google Auth from the Cloud Functions service account.
+// Setup required:
+//   1. Create GCS bucket: gsutil mb gs://success-tutoring-test-backups
+//   2. Set config: firebase functions:config:set backup.bucket=success-tutoring-test-backups
+//   3. Grant IAM role: Cloud Datastore Import Export Admin to the default service account
+exports.scheduledFirestoreBackup = functions.pubsub
+  .schedule("every 24 hours")
+  .timeZone("Australia/Sydney")
+  .onRun(async () => {
+    const { GoogleAuth } = require("google-auth-library");
+    const projectId = process.env.GCLOUD_PROJECT || "success-tutoring-test";
+    const bucket = functions.config().backup?.bucket || `${projectId}-backups`;
+    const timestamp = new Date().toISOString().split("T")[0];
+
+    const auth = new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/datastore"] });
+    const client = await auth.getClient();
+
+    const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default):exportDocuments`;
+
+    try {
+      const response = await client.request({
+        url,
+        method: "POST",
+        data: {
+          outputUriPrefix: `gs://${bucket}/firestore-backups/${timestamp}`,
+          collectionIds: [], // empty = all collections
+        },
+      });
+      console.log(`Firestore backup started: ${response.data.name}`);
+    } catch (err) {
+      console.error("Firestore backup failed:", err.message || err);
     }
   });

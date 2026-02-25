@@ -28,14 +28,21 @@ const functionsTest = require('firebase-functions-test')();
 const myFunctions = require('../index.js');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+// Create mock document snapshots that mimic Firestore snap.data() / snap.id.
+// (firebase-functions-test's makeDocumentSnapshot requires a fully initialized
+// Firestore admin SDK, which conflicts with our jest.mock of firebase-admin.)
+function makeSnap(data, path) {
+  const parts = path.split('/');
+  return { data: () => ({ ...data }), id: parts[parts.length - 1], ref: { path } };
+}
 function makeLocationSnap(data, locationId) {
-  return functionsTest.firestore.makeDocumentSnapshot(data, `locations/${locationId}`);
+  return makeSnap(data, `locations/${locationId}`);
 }
 function makeInviteSnap(data, inviteId) {
-  return functionsTest.firestore.makeDocumentSnapshot(data, `invites/${inviteId}`);
+  return makeSnap(data, `invites/${inviteId}`);
 }
 function makeBookingSnap(data, bookingId) {
-  return functionsTest.firestore.makeDocumentSnapshot(data, `bookings/${bookingId}`);
+  return makeSnap(data, `bookings/${bookingId}`);
 }
 
 // ── onLocationCreated ─────────────────────────────────────────────────────────
@@ -177,14 +184,11 @@ describe('onInviteCreated', () => {
     expect(msg.html).toContain('Alice Wang');
   });
 
-  it('returns early without throwing when the SendGrid key is missing', async () => {
-    // Temporarily remove the API key from env
-    const original = process.env.CLOUD_RUNTIME_CONFIG;
-    process.env.CLOUD_RUNTIME_CONFIG = JSON.stringify({});
+  it('returns early without throwing when sgMail.send fails', async () => {
+    mockSend.mockRejectedValueOnce(new Error('SendGrid failure'));
     const snap = makeInviteSnap({ name: 'Test', email: 'test@test.com', role: 'admin' }, 'inv3');
+    // Should not throw even when SendGrid fails (error is caught internally)
     await expect(wrapped(snap, { params: { inviteId: 'inv3' } })).resolves.toBeUndefined();
-    expect(mockSend).not.toHaveBeenCalled();
-    process.env.CLOUD_RUNTIME_CONFIG = original;
   });
 });
 
@@ -283,13 +287,113 @@ describe('onBookingCreated', () => {
     expect(msg.to).toBe('alice@example.com');
   });
 
-  it('does not throw if the SendGrid API key is missing', async () => {
-    const original = process.env.CLOUD_RUNTIME_CONFIG;
-    process.env.CLOUD_RUNTIME_CONFIG = JSON.stringify({});
+  it('does not throw when sgMail.send fails for customer email', async () => {
+    mockGet.mockResolvedValue({ exists: true, data: () => ({ email: 'partner@franchise.com' }) });
+    mockSend.mockRejectedValue(new Error('SendGrid failure'));
     const snap = makeBookingSnap(baseBooking, 'bk-004');
+    // Should not throw even when SendGrid fails (errors are caught internally)
     await expect(wrapped(snap, { params: { bookingId: 'bk-004' } })).resolves.toBeUndefined();
-    expect(mockSend).not.toHaveBeenCalled();
-    process.env.CLOUD_RUNTIME_CONFIG = original;
+  });
+});
+
+// ── escapeHtml ────────────────────────────────────────────────────────────────
+describe('escapeHtml', () => {
+  const escapeHtml = myFunctions._escapeHtml;
+
+  it('returns empty string for null, undefined, and empty string', () => {
+    expect(escapeHtml(null)).toBe('');
+    expect(escapeHtml(undefined)).toBe('');
+    expect(escapeHtml('')).toBe('');
+  });
+
+  it('escapes <script>alert(\'xss\')</script> to use &lt; and &gt;', () => {
+    const result = escapeHtml("<script>alert('xss')</script>");
+    expect(result).toContain('&lt;script&gt;');
+    expect(result).toContain('&lt;/script&gt;');
+    expect(result).not.toContain('<script>');
+  });
+
+  it('escapes & to &amp;', () => {
+    expect(escapeHtml('foo & bar')).toBe('foo &amp; bar');
+  });
+
+  it('escapes double quotes to &quot;', () => {
+    expect(escapeHtml('say "hello"')).toBe('say &quot;hello&quot;');
+  });
+
+  it('escapes single quotes to &#39;', () => {
+    expect(escapeHtml("it's")).toBe('it&#39;s');
+  });
+
+  it('preserves normal strings without special characters', () => {
+    expect(escapeHtml('Hello World')).toBe('Hello World');
+    expect(escapeHtml('abc 123')).toBe('abc 123');
+  });
+});
+
+// ── resendConfirmationEmail – error when sgMail.send fails ───────────────────
+describe('resendConfirmationEmail – send failure', () => {
+  const wrapped = functionsTest.wrap(myFunctions.resendConfirmationEmail);
+
+  beforeEach(() => { jest.clearAllMocks(); });
+
+  it('throws internal error when sgMail.send rejects', async () => {
+    mockGet
+      .mockResolvedValueOnce({ exists: true, data: () => ({ role: 'admin' }) })
+      .mockResolvedValueOnce({ exists: true, data: () => ({ name: 'Test', email: 'loc@test.com', address: '1 St', phone: '0400' }) });
+
+    mockSend.mockRejectedValueOnce(new Error('SendGrid API failure'));
+
+    await expect(wrapped({ locationId: 'loc1' }, { auth: { uid: 'admin1' } }))
+      .rejects.toMatchObject({ code: 'internal' });
+  });
+});
+
+// ── onBookingCreated with escapeHtml ─────────────────────────────────────────
+describe('onBookingCreated with escapeHtml', () => {
+  const wrapped = functionsTest.wrap(myFunctions.onBookingCreated);
+
+  beforeEach(() => { jest.clearAllMocks(); mockSend.mockResolvedValue([{ statusCode: 202 }]); });
+
+  it('escapes HTML in booking data so <script> appears as &lt;script&gt; in the email body', async () => {
+    mockGet.mockResolvedValueOnce({ exists: true, data: () => ({ email: 'partner@franchise.com' }) });
+    const snap = makeBookingSnap({
+      customerName: '<script>alert("xss")</script>',
+      customerEmail: 'alice@example.com',
+      customerPhone: '0411111111',
+      locationName: 'North Sydney',
+      locationAddress: '100 Miller St',
+      locationId: 'loc1',
+      date: '2026-03-15',
+      time: '10:00',
+      notes: '',
+    }, 'bk-xss');
+    await wrapped(snap, { params: { bookingId: 'bk-xss' } });
+
+    const allHtmlBodies = mockSend.mock.calls.map(([m]) => m.html);
+    allHtmlBodies.forEach((html) => {
+      expect(html).toContain('&lt;script&gt;');
+      expect(html).not.toContain('<script>alert');
+    });
+  });
+});
+
+// ── onLocationCreated with escapeHtml ────────────────────────────────────────
+describe('onLocationCreated with escapeHtml', () => {
+  const wrapped = functionsTest.wrap(myFunctions.onLocationCreated);
+
+  beforeEach(() => { jest.clearAllMocks(); mockSend.mockResolvedValue([{ statusCode: 202 }]); });
+
+  it('escapes HTML in location name so <b>Bold</b> appears as &lt;b&gt;Bold&lt;/b&gt; in the email', async () => {
+    const snap = makeLocationSnap(
+      { name: '<b>Bold</b>', email: 'test@franchise.com', address: '1 Test St', phone: '0400000000' },
+      'loc-html'
+    );
+    await wrapped(snap, { params: { locationId: 'loc-html' } });
+
+    const [msg] = mockSend.mock.calls[0];
+    expect(msg.html).toContain('&lt;b&gt;Bold&lt;/b&gt;');
+    expect(msg.html).not.toContain('<b>Bold</b>');
   });
 });
 

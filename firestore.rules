@@ -81,8 +81,19 @@ service cloud.firestore {
 
     // ── Bookings collection ──────────────────────────────────────────────
     match /bookings/{bookingId} {
-      // Anyone can create a booking (public booking form)
-      allow create: if true;
+      // Anyone can create a booking (public booking form) with required field validation.
+      // NOTE: For rate limiting, enable Firebase App Check in the Firebase Console.
+      allow create: if true
+        && request.resource.data.keys().hasAll(['customerName', 'customerEmail', 'customerPhone', 'locationId', 'date', 'time'])
+        && request.resource.data.customerName is string
+        && request.resource.data.customerName.size() > 0
+        && request.resource.data.customerName.size() <= 200
+        && request.resource.data.customerEmail is string
+        && request.resource.data.customerEmail.size() > 0
+        && request.resource.data.customerPhone is string
+        && request.resource.data.locationId is string
+        && request.resource.data.date is string
+        && request.resource.data.time is string;
 
       // HQ admins can read all bookings
       allow read: if isAdmin();

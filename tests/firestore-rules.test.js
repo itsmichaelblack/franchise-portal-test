@@ -310,3 +310,187 @@ describe('invites collection', () => {
     await assertSucceeds(getDoc(doc(authedFs(partnerUid), 'invites', 'inv-001')));
   });
 });
+
+// ── bookings collection ───────────────────────────────────────────────────────
+describe('bookings collection', () => {
+  const adminUid = 'admin-006';
+  const partnerUid = 'partner-006';
+  const otherPartnerUid = 'partner-006b';
+
+  const validBooking = {
+    customerName: 'Jane Doe',
+    customerEmail: 'jane@example.com',
+    customerPhone: '0412345678',
+    locationId: 'loc-001',
+    date: '2026-03-15',
+    time: '10:00',
+  };
+
+  beforeEach(async () => {
+    await seedUser(adminUid, { role: 'admin', name: 'Admin', email: 'a@test.com' });
+    await seedUser(partnerUid, { role: 'franchise_partner', name: 'Partner', email: 'p@test.com', locationId: 'loc-001' });
+    await seedUser(otherPartnerUid, { role: 'franchise_partner', name: 'Other Partner', email: 'op@test.com', locationId: 'loc-002' });
+    await seedDoc('bookings/bk-001', { ...validBooking });
+  });
+
+  // ── Creation (unauthenticated) ──
+
+  it('allows valid booking creation (unauthenticated)', async () => {
+    await assertSucceeds(
+      setDoc(doc(unauthedFs(), 'bookings', 'bk-new'), { ...validBooking })
+    );
+  });
+
+  it('denies booking creation when customerName is missing', async () => {
+    const { customerName, ...missingName } = validBooking;
+    await assertFails(
+      setDoc(doc(unauthedFs(), 'bookings', 'bk-bad1'), missingName)
+    );
+  });
+
+  it('denies booking creation when customerEmail is missing', async () => {
+    const { customerEmail, ...missingEmail } = validBooking;
+    await assertFails(
+      setDoc(doc(unauthedFs(), 'bookings', 'bk-bad2'), missingEmail)
+    );
+  });
+
+  it('denies booking creation when customerName is empty string', async () => {
+    await assertFails(
+      setDoc(doc(unauthedFs(), 'bookings', 'bk-bad3'), {
+        ...validBooking,
+        customerName: '',
+      })
+    );
+  });
+
+  it('denies booking creation when customerName exceeds 200 characters', async () => {
+    await assertFails(
+      setDoc(doc(unauthedFs(), 'bookings', 'bk-bad4'), {
+        ...validBooking,
+        customerName: 'A'.repeat(201),
+      })
+    );
+  });
+
+  it('denies booking creation when customerName is a number (non-string)', async () => {
+    await assertFails(
+      setDoc(doc(unauthedFs(), 'bookings', 'bk-bad5'), {
+        ...validBooking,
+        customerName: 12345,
+      })
+    );
+  });
+
+  // ── Read access ──
+
+  it('allows admin to read all bookings', async () => {
+    await assertSucceeds(getDoc(doc(authedFs(adminUid), 'bookings', 'bk-001')));
+  });
+
+  it('allows franchise partner to read bookings for their location', async () => {
+    await assertSucceeds(getDoc(doc(authedFs(partnerUid), 'bookings', 'bk-001')));
+  });
+
+  it('denies franchise partner reading bookings for other locations', async () => {
+    await assertFails(getDoc(doc(authedFs(otherPartnerUid), 'bookings', 'bk-001')));
+  });
+
+  it('denies unauthenticated user reading bookings', async () => {
+    await assertFails(getDoc(doc(unauthedFs(), 'bookings', 'bk-001')));
+  });
+
+  // ── Update access ──
+
+  it('allows admin to update bookings', async () => {
+    await assertSucceeds(
+      updateDoc(doc(authedFs(adminUid), 'bookings', 'bk-001'), { time: '14:00' })
+    );
+  });
+
+  it('denies unauthenticated user updating bookings', async () => {
+    await assertFails(
+      updateDoc(doc(unauthedFs(), 'bookings', 'bk-001'), { time: '14:00' })
+    );
+  });
+});
+
+// ── availability collection ───────────────────────────────────────────────────
+describe('availability collection', () => {
+  const adminUid = 'admin-007';
+  const partnerUid = 'partner-007';
+  const otherPartnerUid = 'partner-007b';
+
+  beforeEach(async () => {
+    await seedUser(adminUid, { role: 'admin', name: 'Admin', email: 'a@test.com' });
+    await seedUser(partnerUid, { role: 'franchise_partner', name: 'Partner', email: 'p@test.com', locationId: 'loc-001' });
+    await seedUser(otherPartnerUid, { role: 'franchise_partner', name: 'Other Partner', email: 'op@test.com', locationId: 'loc-002' });
+    await seedDoc('availability/avail-001', { locationId: 'loc-001', day: 'Monday', slots: ['09:00', '10:00'] });
+  });
+
+  it('allows franchise partner to write availability for their location', async () => {
+    await assertSucceeds(
+      setDoc(doc(authedFs(partnerUid), 'availability', 'avail-new'), {
+        locationId: 'loc-001', day: 'Tuesday', slots: ['11:00', '12:00'],
+      })
+    );
+  });
+
+  it('denies franchise partner writing availability for another location', async () => {
+    await assertFails(
+      setDoc(doc(authedFs(otherPartnerUid), 'availability', 'avail-new2'), {
+        locationId: 'loc-001', day: 'Wednesday', slots: ['13:00'],
+      })
+    );
+  });
+
+  it('allows admin to read availability', async () => {
+    await assertSucceeds(getDoc(doc(authedFs(adminUid), 'availability', 'avail-001')));
+  });
+
+  it('denies admin writing availability', async () => {
+    await assertFails(
+      setDoc(doc(authedFs(adminUid), 'availability', 'avail-new3'), {
+        locationId: 'loc-001', day: 'Thursday', slots: ['14:00'],
+      })
+    );
+  });
+
+  it('denies unauthenticated user reading availability', async () => {
+    await assertFails(getDoc(doc(unauthedFs(), 'availability', 'avail-001')));
+  });
+
+  it('denies unauthenticated user writing availability', async () => {
+    await assertFails(
+      setDoc(doc(unauthedFs(), 'availability', 'avail-new4'), {
+        locationId: 'loc-001', day: 'Friday', slots: ['15:00'],
+      })
+    );
+  });
+});
+
+// ── settings collection ───────────────────────────────────────────────────────
+describe('settings collection', () => {
+  const adminUid = 'admin-008';
+
+  beforeEach(async () => {
+    await seedUser(adminUid, { role: 'admin', name: 'Admin', email: 'a@test.com' });
+    await seedDoc('settings/general', { siteName: 'Franchise Portal', maintenanceMode: false });
+  });
+
+  it('allows public (unauthenticated) read of settings', async () => {
+    await assertSucceeds(getDoc(doc(unauthedFs(), 'settings', 'general')));
+  });
+
+  it('allows admin to write settings', async () => {
+    await assertSucceeds(
+      updateDoc(doc(authedFs(adminUid), 'settings', 'general'), { maintenanceMode: true })
+    );
+  });
+
+  it('denies unauthenticated user writing settings', async () => {
+    await assertFails(
+      updateDoc(doc(unauthedFs(), 'settings', 'general'), { maintenanceMode: true })
+    );
+  });
+});

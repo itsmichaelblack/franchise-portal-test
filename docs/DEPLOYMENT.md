@@ -163,12 +163,14 @@ From `firebase.json`:
 
 The four deployed functions and their triggers:
 
-| Function                  | Trigger Type       | Collection  |
-| ------------------------- | ------------------ | ----------- |
-| `onLocationCreated`       | Firestore onCreate | `locations` |
-| `onBookingCreated`        | Firestore onCreate | `bookings`  |
-| `onInviteCreated`         | Firestore onCreate | `invites`   |
-| `resendConfirmationEmail` | HTTPS callable     | N/A         |
+| Function                    | Trigger Type       | Collection  |
+| --------------------------- | ------------------ | ----------- |
+| `onLocationCreated`         | Firestore onCreate | `locations` |
+| `onBookingCreated`          | Firestore onCreate | `bookings`  |
+| `onInviteCreated`           | Firestore onCreate | `invites`   |
+| `resendConfirmationEmail`   | HTTPS callable     | N/A         |
+| `resendInviteEmail`         | HTTPS callable     | N/A         |
+| `scheduledFirestoreBackup`  | Pub/Sub schedule   | N/A (all)   |
 
 After deploying functions, verify they are active:
 
@@ -211,6 +213,73 @@ Current composite indexes:
 | `activity_logs`  | `locationId` ASC, `timestamp` DESC     | Collection  |
 
 The `activity_logs` index is required for the User Logs tab to query logs by location sorted by most recent first.
+
+---
+
+## Automated Firestore Backup
+
+A scheduled Cloud Function (`scheduledFirestoreBackup`) runs daily at midnight AEST and exports all Firestore collections to a Google Cloud Storage bucket.
+
+### Setup
+
+1. **Create the GCS bucket**:
+   ```bash
+   gsutil mb -l australia-southeast1 gs://success-tutoring-test-backups
+   ```
+
+2. **Set the functions config**:
+   ```bash
+   firebase functions:config:set backup.bucket=success-tutoring-test-backups
+   firebase deploy --only functions
+   ```
+
+3. **Grant IAM permissions** to the default Cloud Functions service account:
+   ```bash
+   gcloud projects add-iam-policy-binding success-tutoring-test \
+     --member="serviceAccount:success-tutoring-test@appspot.gserviceaccount.com" \
+     --role="roles/datastore.importExportAdmin"
+
+   gsutil iam ch serviceAccount:success-tutoring-test@appspot.gserviceaccount.com:objectAdmin \
+     gs://success-tutoring-test-backups
+   ```
+
+4. **Verify** the backup runs by checking Cloud Functions logs:
+   ```bash
+   firebase functions:log --only scheduledFirestoreBackup
+   ```
+
+### Backup Structure
+
+Backups are stored at:
+```
+gs://success-tutoring-test-backups/firestore-backups/YYYY-MM-DD/
+```
+
+### Restore from Backup
+
+To restore a backup:
+```bash
+gcloud firestore import gs://success-tutoring-test-backups/firestore-backups/2026-02-25/
+```
+
+### Retention Policy
+
+Consider setting a lifecycle policy on the bucket to auto-delete old backups:
+```bash
+gsutil lifecycle set lifecycle.json gs://success-tutoring-test-backups
+```
+
+Where `lifecycle.json` deletes objects older than 90 days:
+```json
+{
+  "rule": [
+    {
+      "action": { "type": "Delete" },
+      "condition": { "age": 90 }
+    }
+  ]
+}
+```
 
 ---
 
