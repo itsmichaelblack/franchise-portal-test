@@ -1792,12 +1792,10 @@ function HQPortal({ user, onLogout }) {
             <div className="stat-label">Coming Soon</div>
           </div>
           <div className="stat-card hq">
-            <div className="stat-num">
-              <span style={{ fontSize: 14, display: 'flex', alignItems: 'center', gap: 6, paddingTop: 4, color: 'var(--orange)' }}>
-                <Icon path={icons.shield} size={20} /> 2FA Enabled
-              </span>
+            <div className="stat-num" style={{ color: '#dc2626' }}>
+              {locations.filter(l => l.status === 'temporary_closed').length}
             </div>
-            <div className="stat-label">Google Authenticator</div>
+            <div className="stat-label">Temporarily Closed</div>
           </div>
         </div>
 
