@@ -4526,11 +4526,13 @@ function FranchisePortal({ user, onLogout }) {
     try {
       const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
       const { db } = await import('./firebase.js');
+      const selectedSvc = locationServices?.find(s => s.id === data.serviceId);
       const sessionData = {
         type: 'session',
         locationId,
         date: data.date,
         time: data.time,
+        duration: selectedSvc?.duration ? Number(selectedSvc.duration) : 40,
         sessionType: data.sessionType, // 'one_off' or 'recurring'
         serviceId: data.serviceId,
         serviceName: data.serviceName,
@@ -6114,7 +6116,7 @@ function FranchisePortal({ user, onLogout }) {
         <div className="modal-overlay" onClick={() => setSelectedBooking(null)}>
           <div className="modal fp" onClick={e => e.stopPropagation()} style={{ maxWidth: 440 }}>
             <div className="modal-header fp" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div className="modal-title fp">Booking Details</div>
+              <div className="modal-title fp">{selectedBooking?.type === 'session' ? 'Session Details' : 'Booking Details'}</div>
               <button className="modal-close" onClick={() => setSelectedBooking(null)} style={{ marginLeft: 'auto' }}>✕</button>
             </div>
             <div className="modal-body" style={{ padding: '24px' }}>
@@ -6124,28 +6126,47 @@ function FranchisePortal({ user, onLogout }) {
                 const dateLabel = dateObj.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
                 const timeLabel = fmtTime(b.time);
                 const [bh, bm] = b.time.split(':').map(Number);
-                const endMin = bh * 60 + bm + 40;
+                // Duration: use stored duration, or look up from service, or fallback to 40 min
+                const svcMatch = b.serviceId ? locationServices.find(s => s.id === b.serviceId) : null;
+                const duration = b.duration ? Number(b.duration) : (svcMatch?.duration ? Number(svcMatch.duration) : 40);
+                const endMin = bh * 60 + bm + duration;
                 const endLabel = fmtTime(`${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`);
                 const refCode = b.id.slice(0, 8).toUpperCase();
+                const serviceName = b.serviceName || svcMatch?.name || '';
+                const isSession = b.type === 'session';
 
                 return (
                   <>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 }}>
-                      <div style={{ width: 52, height: 52, borderRadius: 12, background: 'linear-gradient(135deg, #E25D25, #f0845a)', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <div style={{ width: 52, height: 52, borderRadius: 12, background: isSession ? 'linear-gradient(135deg, #3d9695, #6DCBCA)' : 'linear-gradient(135deg, #E25D25, #f0845a)', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                         <div style={{ fontSize: 18, fontWeight: 800, lineHeight: 1 }}>{dateObj.getDate()}</div>
                         <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase' }}>{dateObj.toLocaleDateString('en-AU', { month: 'short' })}</div>
                       </div>
                       <div>
-                        <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--fp-text)' }}>{b.customerName}</div>
+                        <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--fp-text)' }}>{isSession ? (serviceName || 'Session') : b.customerName}</div>
                         <div style={{ fontSize: 13, color: 'var(--fp-muted)' }}>{dateLabel}</div>
                       </div>
                     </div>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 20 }}>
+                      {serviceName && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'var(--fp-bg)', borderRadius: 8 }}>
+                          <Icon path={icons.star} size={15} style={{ color: 'var(--fp-accent)', flexShrink: 0 }} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 11, color: 'var(--fp-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Service</div>
+                            <div style={{ fontSize: 14, color: 'var(--fp-text)', fontWeight: 600 }}>{serviceName}</div>
+                          </div>
+                        </div>
+                      )}
                       {[
-                        { icon: icons.clock, label: 'Time', value: `${timeLabel} — ${endLabel} (40 min)` },
-                        { icon: icons.mail, label: 'Email', value: b.customerEmail, href: `mailto:${b.customerEmail}` },
-                        { icon: icons.phone, label: 'Phone', value: b.customerPhone, href: `tel:${b.customerPhone?.replace(/\s/g, '')}` },
+                        { icon: icons.clock, label: 'Time', value: `${timeLabel} — ${endLabel} (${duration} min)` },
+                        ...(isSession ? [
+                          { icon: icons.users, label: 'Tutor', value: b.tutorName || '—' },
+                          { icon: icons.calendar, label: 'Session Type', value: b.sessionType === 'recurring' ? 'Recurring' : 'One Off' },
+                        ] : [
+                          { icon: icons.mail, label: 'Email', value: b.customerEmail, href: `mailto:${b.customerEmail}` },
+                          { icon: icons.phone, label: 'Phone', value: b.customerPhone, href: `tel:${b.customerPhone?.replace(/\s/g, '')}` },
+                        ]),
                       ].map((row, ri) => (
                         <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'var(--fp-bg)', borderRadius: 8 }}>
                           <Icon path={row.icon} size={15} style={{ color: 'var(--fp-accent)', flexShrink: 0 }} />
@@ -6169,14 +6190,27 @@ function FranchisePortal({ user, onLogout }) {
 
                     <div style={{ fontSize: 11, color: 'var(--fp-muted)', textAlign: 'center' }}>Ref: {refCode}</div>
 
-                    <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-                      <a href={`mailto:${b.customerEmail}`} className="btn btn-primary fp" style={{ flex: 1, textDecoration: 'none', textAlign: 'center', justifyContent: 'center' }}>
-                        <Icon path={icons.mail} size={14} /> Email Customer
-                      </a>
-                      <a href={`tel:${b.customerPhone?.replace(/\s/g, '')}`} className="btn btn-ghost fp" style={{ flex: 1, textDecoration: 'none', textAlign: 'center', justifyContent: 'center', border: '1px solid var(--fp-border)' }}>
-                        <Icon path={icons.phone} size={14} /> Call
-                      </a>
-                    </div>
+                    {isSession ? (
+                      <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+                        <div style={{
+                          flex: 1, textAlign: 'center', padding: '10px 16px', borderRadius: 10,
+                          background: b.status === 'completed' ? '#ecfdf5' : b.status === 'cancelled' ? '#fef2f2' : 'rgba(109,203,202,0.1)',
+                          color: b.status === 'completed' ? '#059669' : b.status === 'cancelled' ? '#dc2626' : 'var(--fp-accent)',
+                          fontWeight: 700, fontSize: 13, textTransform: 'capitalize',
+                        }}>
+                          Status: {b.status || 'Scheduled'}
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+                        <a href={`mailto:${b.customerEmail}`} className="btn btn-primary fp" style={{ flex: 1, textDecoration: 'none', textAlign: 'center', justifyContent: 'center' }}>
+                          <Icon path={icons.mail} size={14} /> Email Customer
+                        </a>
+                        <a href={`tel:${b.customerPhone?.replace(/\s/g, '')}`} className="btn btn-ghost fp" style={{ flex: 1, textDecoration: 'none', textAlign: 'center', justifyContent: 'center', border: '1px solid var(--fp-border)' }}>
+                          <Icon path={icons.phone} size={14} /> Call
+                        </a>
+                      </div>
+                    )}
                   </>
                 );
               })()}
