@@ -4620,6 +4620,8 @@ function FranchisePortal({ user, onLogout }) {
   const [stripeAccountStatus, setStripeAccountStatus] = useState(null); // {chargesEnabled, payoutsEnabled, detailsSubmitted}
   const [cardCollecting, setCardCollecting] = useState(null); // saleId being collected for
   const [locationStripeId, setLocationStripeId] = useState(null); // stripeAccountId from location doc
+  const [cardFormState, setCardFormState] = useState(null); // { clientSecret, stripeAccountId } for embedded form
+  const [cardFormSaving, setCardFormSaving] = useState(false);
   const [settingsTab, setSettingsTab] = useState('general'); // 'general' | 'marketing' | 'availability' | 'payments'
   const [locationData, setLocationData] = useState(null); // full location document for General tab
   const [marketingData, setMarketingData] = useState({ instagramUrl: '', facebookUrl: '' });
@@ -7582,28 +7584,90 @@ function FranchisePortal({ user, onLogout }) {
                           </div>
                         ) : (
                           <div>
-                            {/* No card — collect */}
-                            <div style={{ padding: '32px', textAlign: 'center', background: 'var(--fp-bg)', borderRadius: 12, border: '1px dashed var(--fp-border)' }}>
-                              <div style={{ fontSize: 32, marginBottom: 8 }}>💳</div>
-                              <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--fp-text)', marginBottom: 4 }}>No card on file</div>
-                              <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginBottom: 16 }}>Collect a payment method to enable recurring billing.</div>
-                              <button className="btn btn-primary fp" onClick={async () => {
-                                try {
-                                  const { getFunctions, httpsCallable } = await import('firebase/functions');
-                                  const fns = getFunctions();
-                                  const createLink = httpsCallable(fns, 'createPaymentLink');
-                                  const parentSale = sales.find(s => s.parentEmail?.toLowerCase() === selectedMember.email?.toLowerCase());
-                                  const result = await createLink({ saleId: parentSale?.id || 'none', locationId, parentEmail: selectedMember.email });
-                                  window.open(result.data.url, '_blank');
-                                  showToast('Stripe checkout opened in a new tab. Ask the parent to enter their card details.');
-                                } catch (e) {
-                                  console.error('Collect card error:', e);
-                                  showToast('✗ Failed to open payment form. Is Stripe connected in Settings?');
-                                }
-                              }}>
-                                <Icon path={icons.creditCard} size={14} /> Collect Card Details
-                              </button>
-                            </div>
+                            {/* No card — collect with inline form */}
+                            {!cardFormState ? (
+                              <div style={{ padding: '32px', textAlign: 'center', background: 'var(--fp-bg)', borderRadius: 12, border: '1px dashed var(--fp-border)' }}>
+                                <div style={{ fontSize: 32, marginBottom: 8 }}>💳</div>
+                                <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--fp-text)', marginBottom: 4 }}>No payment method on file</div>
+                                <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginBottom: 16 }}>Add a card or bank account to enable recurring billing.</div>
+                                <button className="btn btn-primary fp" onClick={async () => {
+                                  try {
+                                    const { getFunctions, httpsCallable } = await import('firebase/functions');
+                                    const fns = getFunctions();
+                                    const createSetup = httpsCallable(fns, 'createSetupIntent');
+                                    const result = await createSetup({ parentEmail: selectedMember.email, parentName: selectedMember.name, parentPhone: selectedMember.phone, locationId, saleId: '' });
+                                    setCardFormState({ clientSecret: result.data.clientSecret, stripeAccountId: result.data.stripeAccountId, customerId: result.data.customerId });
+                                  } catch (e) {
+                                    console.error('Setup intent error:', e);
+                                    showToast('✗ Failed to initialize card form. Is Stripe connected in Settings?');
+                                  }
+                                }}>
+                                  <Icon path={icons.creditCard} size={14} /> Add Payment Method
+                                </button>
+                              </div>
+                            ) : (
+                              <div style={{ background: '#fff', borderRadius: 12, border: '2px solid var(--fp-border)', padding: 20 }}>
+                                <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--fp-text)', marginBottom: 16 }}>Enter Card Details</div>
+                                <div id="stripe-card-element" ref={el => {
+                                  if (el && !el.dataset.mounted && cardFormState?.clientSecret) {
+                                    el.dataset.mounted = 'true';
+                                    try {
+                                      const stripeInstance = window.Stripe(
+                                        'pk_test_51T5SUvLsPU0tzh4WBBfeISFfSFTLC0rD2c7fuB9h3ePAToMm0levx9XYwQ2yqIDxwswTVmcX9EaTHqhUOuL38d0Y00DHJQZK6H',
+                                        { stripeAccount: cardFormState.stripeAccountId }
+                                      );
+                                      const elements = stripeInstance.elements({ clientSecret: cardFormState.clientSecret });
+                                      const paymentElement = elements.create('payment');
+                                      paymentElement.mount(el);
+                                      // Store on the element for later use
+                                      el._stripe = stripeInstance;
+                                      el._elements = elements;
+                                    } catch (err) { console.error('Stripe mount error:', err); }
+                                  }
+                                }} style={{ minHeight: 120, marginBottom: 16 }} />
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                  <button className="btn btn-ghost fp" onClick={() => setCardFormState(null)}>Cancel</button>
+                                  <button className="btn btn-primary fp" disabled={cardFormSaving} style={{ flex: 1 }} onClick={async () => {
+                                    const el = document.getElementById('stripe-card-element');
+                                    if (!el?._stripe || !el?._elements) { showToast('✗ Card form not ready.'); return; }
+                                    setCardFormSaving(true);
+                                    try {
+                                      const { error } = await el._stripe.confirmSetup({
+                                        elements: el._elements,
+                                        confirmParams: { return_url: window.location.origin + '?payment_setup=success&sale_id=' + (sales.find(s => s.parentEmail?.toLowerCase() === selectedMember.email?.toLowerCase())?.id || 'none') },
+                                        redirect: 'if_required',
+                                      });
+                                      if (error) {
+                                        showToast('✗ ' + error.message);
+                                        setCardFormSaving(false);
+                                        return;
+                                      }
+                                      // Success — save payment to Firestore
+                                      const { getFunctions, httpsCallable } = await import('firebase/functions');
+                                      const fns = getFunctions();
+                                      const savePayment = httpsCallable(fns, 'savePaymentFromCheckout');
+                                      const result = await savePayment({ parentEmail: selectedMember.email, locationId });
+                                      showToast(`✓ ${result.data.brand} •••• ${result.data.last4} saved!`);
+                                      setCardFormState(null);
+                                      // Refresh sales
+                                      const { collection, getDocs, query, where } = await import('firebase/firestore');
+                                      const { db } = await import('./firebase.js');
+                                      const q = query(collection(db, 'sales'), where('locationId', '==', locationId));
+                                      const snap = await getDocs(q);
+                                      setSales(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+                                      // Update selected member
+                                      setSelectedMember(prev => ({ ...prev, paymentMethod: result.data }));
+                                    } catch (e) {
+                                      console.error('Save card error:', e);
+                                      showToast('✗ ' + (e.message || 'Failed to save card.'));
+                                    }
+                                    setCardFormSaving(false);
+                                  }}>
+                                    {cardFormSaving ? 'Saving...' : 'Save Payment Method'}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
 
