@@ -3987,12 +3987,12 @@ function InviteUserModal({ onClose, onInvited }) {
 
 // --- Franchise Partner Portal ---------------------------------------------------
 // ── New Session Modal ─────────────────────────────────────────────────────────
-function NewSessionModal({ initialDate, initialHour, services, tutors, saving, onSave, onClose }) {
-  const [date, setDate] = useState(initialDate || '');
-  const [time, setTime] = useState(initialHour != null ? `${String(initialHour).padStart(2, '0')}:00` : '');
-  const [sessionType, setSessionType] = useState('one_off');
-  const [serviceId, setServiceId] = useState('');
-  const [tutorId, setTutorId] = useState('');
+function NewSessionModal({ initialDate, initialHour, editing, services, tutors, saving, onSave, onClose }) {
+  const [date, setDate] = useState(editing?.date || initialDate || '');
+  const [time, setTime] = useState(editing?.time || (initialHour != null ? `${String(initialHour).padStart(2, '0')}:00` : ''));
+  const [sessionType, setSessionType] = useState(editing?.sessionType || 'one_off');
+  const [serviceId, setServiceId] = useState(editing?.serviceId || '');
+  const [tutorId, setTutorId] = useState(editing?.tutorId || '');
 
   // Generate 15-minute increment time options
   const timeOptions = [];
@@ -4033,7 +4033,7 @@ function NewSessionModal({ initialDate, initialHour, services, tutors, saving, o
       serviceName: selectedService?.name || '',
       tutorId,
       tutorName: selectedTutor ? `${selectedTutor.firstName} ${selectedTutor.lastName}` : '',
-    });
+    }, editing?.id || null);
   };
 
   const inputStyle = {
@@ -4059,7 +4059,7 @@ function NewSessionModal({ initialDate, initialHour, services, tutors, saving, o
       <div style={{ background: '#fff', borderRadius: 16, padding: 32, maxWidth: 480, width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)', maxHeight: '90vh', overflow: 'auto' }}
         onClick={e => e.stopPropagation()}>
         <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--fp-text)', marginBottom: 24 }}>
-          New Session
+          {editing ? 'Edit Session' : 'New Session'}
         </div>
 
         {/* Date */}
@@ -4119,7 +4119,7 @@ function NewSessionModal({ initialDate, initialHour, services, tutors, saving, o
           <button className="btn btn-primary fp" onClick={handleSubmit}
             disabled={saving || !date || !time || !serviceId || !tutorId}
             style={{ opacity: (saving || !date || !time || !serviceId || !tutorId) ? 0.5 : 1 }}>
-            {saving ? 'Creating...' : 'Create Session'}
+            {saving ? 'Saving...' : (editing ? 'Update Session' : 'Create Session')}
           </button>
         </div>
       </div>
@@ -4342,8 +4342,9 @@ function FranchisePortal({ user, onLogout }) {
   const [bookingsLoading, setBookingsLoading] = useState(false);
   const [calendarWeekOffset, setCalendarWeekOffset] = useState(0);
   const [selectedBooking, setSelectedBooking] = useState(null);
-  const [sessionModal, setSessionModal] = useState(null); // null | { date: 'YYYY-MM-DD', hour: number }
+  const [sessionModal, setSessionModal] = useState(null); // null | { date: 'YYYY-MM-DD', hour: number, editing?: booking }
   const [sessionSaving, setSessionSaving] = useState(false);
+  const [sessionDeleteConfirm, setSessionDeleteConfirm] = useState(null); // null | booking to delete
 
   // Members state
   const [members, setMembers] = useState([]);
@@ -4550,6 +4551,50 @@ function FranchisePortal({ user, onLogout }) {
     }
     setSessionSaving(false);
     setSessionModal(null);
+  };
+
+  // Edit Session handler
+  const handleEditSession = async (data, sessionId) => {
+    setSessionSaving(true);
+    try {
+      const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
+      const { db } = await import('./firebase.js');
+      const selectedSvc = locationServices?.find(s => s.id === data.serviceId);
+      const updateData = {
+        date: data.date,
+        time: data.time,
+        duration: selectedSvc?.duration ? Number(selectedSvc.duration) : 40,
+        sessionType: data.sessionType,
+        serviceId: data.serviceId,
+        serviceName: data.serviceName,
+        tutorId: data.tutorId,
+        tutorName: data.tutorName,
+        updatedAt: serverTimestamp(),
+      };
+      await setDoc(doc(db, 'bookings', sessionId), updateData, { merge: true });
+      setBookings(prev => prev.map(b => b.id === sessionId ? { ...b, ...updateData } : b));
+      showToast('✓ Session updated.');
+    } catch (err) {
+      console.error("Failed to update session:", err);
+      showToast('✗ Failed to update session.');
+    }
+    setSessionSaving(false);
+    setSessionModal(null);
+  };
+
+  // Delete Session handler
+  const handleDeleteSession = async (sessionId) => {
+    try {
+      const { doc, deleteDoc } = await import('firebase/firestore');
+      const { db } = await import('./firebase.js');
+      await deleteDoc(doc(db, 'bookings', sessionId));
+      setBookings(prev => prev.filter(b => b.id !== sessionId));
+      showToast('✓ Session deleted.');
+    } catch (err) {
+      console.error("Failed to delete session:", err);
+      showToast('✗ Failed to delete session.');
+    }
+    setSessionDeleteConfirm(null);
   };
 
   useEffect(() => {
@@ -5076,15 +5121,16 @@ function FranchisePortal({ user, onLogout }) {
                                 <div key={di} style={{
                                   borderRight: di < 6 ? '1px solid #eef0f2' : 'none',
                                   borderBottom: '1px solid #eef0f2',
-                                  padding: 3, minHeight: 56, position: 'relative',
+                                  padding: 0, minHeight: 56, position: 'relative',
                                   background: isToday ? 'rgba(109,203,202,0.08)' : 'transparent',
                                   borderLeft: isToday ? '2px solid var(--fp-accent)' : 'none',
                                   borderLeftColor: isToday ? 'rgba(109,203,202,0.3)' : undefined,
                                   cursor: 'pointer',
+                                  overflow: 'visible',
                                 }}
                                 onClick={() => {
-                                  const dateStr = d.toISOString().split('T')[0];
-                                  setSessionModal({ date: dateStr, hour: h });
+                                  const dateStr2 = d.toISOString().split('T')[0];
+                                  setSessionModal({ date: dateStr2, hour: h });
                                 }}
                                 >
                                   {/* Current time line */}
@@ -5103,19 +5149,31 @@ function FranchisePortal({ user, onLogout }) {
                                     const [bh, bm] = b.time.split(':').map(Number);
                                     const timeLabel = fmtTime(b.time);
                                     const isSession = b.type === 'session';
+                                    // Calculate duration and visual height
+                                    const svcMatch = b.serviceId ? locationServices.find(s => s.id === b.serviceId) : null;
+                                    const duration = b.duration ? Number(b.duration) : (svcMatch?.duration ? Number(svcMatch.duration) : 40);
+                                    const topOffset = (bm / 60) * 56; // minutes into the hour -> px
+                                    const heightPx = Math.max((duration / 60) * 56, 24); // duration in px, min 24px
                                     return (
                                       <div key={bi} onClick={(e) => { e.stopPropagation(); setSelectedBooking(b); }} style={{
+                                        position: 'absolute',
+                                        top: topOffset + 2,
+                                        left: 3,
+                                        right: 3,
+                                        height: heightPx - 4,
                                         background: isSession ? 'linear-gradient(135deg, #3d9695, #6DCBCA)' : 'linear-gradient(135deg, #E25D25, #f0845a)',
-                                        color: '#fff', borderRadius: 6, padding: '6px 8px', fontSize: 11,
-                                        marginBottom: 2, cursor: 'pointer',
-                                        lineHeight: 1.3, position: 'relative', zIndex: 2,
+                                        color: '#fff', borderRadius: 6, padding: '4px 8px', fontSize: 11,
+                                        cursor: 'pointer',
+                                        lineHeight: 1.3, zIndex: 3,
                                         transition: 'transform 0.1s, box-shadow 0.1s',
+                                        overflow: 'hidden',
                                       }}
-                                      onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.boxShadow = isSession ? '0 4px 12px rgba(109,203,202,0.4)' : '0 4px 12px rgba(226,93,37,0.3)'; }}
+                                      onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.02)'; e.currentTarget.style.boxShadow = isSession ? '0 4px 12px rgba(109,203,202,0.4)' : '0 4px 12px rgba(226,93,37,0.3)'; }}
                                       onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = 'none'; }}
                                       >
                                         <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{isSession ? (b.serviceName || 'Session') : b.customerName}</div>
                                         <div style={{ opacity: 0.85, fontSize: 10 }}>{timeLabel}{isSession ? ` · ${b.tutorName || ''}` : ''}</div>
+                                        {heightPx > 50 && <div style={{ opacity: 0.7, fontSize: 10, marginTop: 2 }}>{duration} min</div>}
                                       </div>
                                     );
                                   })}
@@ -5190,17 +5248,41 @@ function FranchisePortal({ user, onLogout }) {
               );
             })()}
 
-            {/* New Session Modal */}
+            {/* New/Edit Session Modal */}
             {sessionModal && (
               <NewSessionModal
                 initialDate={sessionModal.date}
                 initialHour={sessionModal.hour}
+                editing={sessionModal.editing || null}
                 services={locationServices}
                 tutors={tutors}
                 saving={sessionSaving}
-                onSave={handleCreateSession}
+                onSave={(data, editingId) => editingId ? handleEditSession(data, editingId) : handleCreateSession(data)}
                 onClose={() => setSessionModal(null)}
               />
+            )}
+
+            {/* Delete Session Confirmation */}
+            {sessionDeleteConfirm && (
+              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                onClick={() => setSessionDeleteConfirm(null)}>
+                <div style={{ background: '#fff', borderRadius: 16, padding: 32, maxWidth: 420, width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}
+                  onClick={e => e.stopPropagation()}>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--fp-text)', marginBottom: 8 }}>Delete Session</div>
+                  <div style={{ fontSize: 14, color: 'var(--fp-muted)', marginBottom: 24, lineHeight: 1.6 }}>
+                    Are you sure you want to delete the <strong>{sessionDeleteConfirm.serviceName || 'session'}</strong> on <strong>{sessionDeleteConfirm.date}</strong>? This action cannot be undone.
+                  </div>
+                  <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                    <button className="btn btn-ghost fp" onClick={() => setSessionDeleteConfirm(null)}>Cancel</button>
+                    <button style={{
+                      padding: '10px 20px', borderRadius: 10, border: 'none', background: '#dc2626', color: '#fff',
+                      fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit',
+                    }} onClick={() => handleDeleteSession(sessionDeleteConfirm.id)}>
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
           </>
         )}
@@ -6191,14 +6273,28 @@ function FranchisePortal({ user, onLogout }) {
                     <div style={{ fontSize: 11, color: 'var(--fp-muted)', textAlign: 'center' }}>Ref: {refCode}</div>
 
                     {isSession ? (
-                      <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
                         <div style={{
-                          flex: 1, textAlign: 'center', padding: '10px 16px', borderRadius: 10,
+                          textAlign: 'center', padding: '10px 16px', borderRadius: 10,
                           background: b.status === 'completed' ? '#ecfdf5' : b.status === 'cancelled' ? '#fef2f2' : 'rgba(109,203,202,0.1)',
                           color: b.status === 'completed' ? '#059669' : b.status === 'cancelled' ? '#dc2626' : 'var(--fp-accent)',
                           fontWeight: 700, fontSize: 13, textTransform: 'capitalize',
                         }}>
                           Status: {b.status || 'Scheduled'}
+                        </div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button className="btn btn-primary fp" style={{ flex: 1, justifyContent: 'center' }} onClick={() => {
+                            setSelectedBooking(null);
+                            setSessionModal({ date: b.date, hour: Number(b.time.split(':')[0]), editing: b });
+                          }}>
+                            <Icon path={icons.edit} size={14} /> Edit Session
+                          </button>
+                          <button className="btn btn-ghost fp" style={{ flex: 1, justifyContent: 'center', color: '#dc2626', border: '1px solid #fecaca' }} onClick={() => {
+                            setSelectedBooking(null);
+                            setSessionDeleteConfirm(b);
+                          }}>
+                            <Icon path={icons.trash} size={14} /> Delete
+                          </button>
                         </div>
                       </div>
                     ) : (
