@@ -147,6 +147,23 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // ── Recurrence Rules collection ─────────────────────────────────────────
+    // Stores recurring session templates
+    match /recurrence_rules/{ruleId} {
+      // HQ admins can read all rules
+      allow read: if isAdmin();
+
+      // Franchise partners can read rules for their location
+      allow read: if isAuth() && resource.data.locationId == userDoc().locationId;
+
+      // Franchise partners can create, update, delete rules at their location
+      allow create: if isAuth();
+      allow update, delete: if isAuth() && resource.data.locationId == userDoc().locationId;
+
+      // HQ admins can manage all rules
+      allow create, update, delete: if isAdmin();
+    }
+
     // ── Settings collection ────────────────────────────────────────────────
     match /settings/{settingId} {
       allow read: if true;

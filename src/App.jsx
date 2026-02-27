@@ -5316,7 +5316,7 @@ function FranchisePortal({ user, onLogout }) {
                                       onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.02)'; e.currentTarget.style.boxShadow = isSession ? '0 4px 12px rgba(109,203,202,0.4)' : '0 4px 12px rgba(226,93,37,0.3)'; }}
                                       onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = 'none'; }}
                                       >
-                                        <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{isSession ? (b.serviceName || 'Session') : b.customerName}</div>
+                                        <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{isSession ? (b.serviceName || 'Session') : b.customerName}{b.recurrenceRuleId ? ' ↻' : ''}</div>
                                         <div style={{ opacity: 0.85, fontSize: 10 }}>{timeLabel}{isSession ? ` · ${b.tutorName || ''}` : ''}</div>
                                         {heightPx > 50 && <div style={{ opacity: 0.7, fontSize: 10, marginTop: 2 }}>{duration} min</div>}
                                       </div>
