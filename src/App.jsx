@@ -6899,12 +6899,12 @@ function FranchisePortal({ user, onLogout }) {
               </button>
             </div>
           ) : (
-            <>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
               {/* Summary cards */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 20 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
                 <div className="card fp" style={{ padding: '20px', textAlign: 'center' }}>
                   <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--fp-accent)' }}>{sales.filter(s => s.status === 'active').length}</div>
-                  <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 4 }}>Active</div>
+                  <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 4 }}>Active Memberships</div>
                 </div>
                 <div className="card fp" style={{ padding: '20px', textAlign: 'center' }}>
                   <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--fp-accent)' }}>
@@ -6918,48 +6918,51 @@ function FranchisePortal({ user, onLogout }) {
                 </div>
               </div>
 
-              {/* Sales table */}
-              <div className="card fp" style={{ padding: 0, overflow: 'hidden' }}>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                    <thead>
-                      <tr style={{ background: 'var(--fp-bg)', borderBottom: '2px solid var(--fp-border)' }}>
-                        <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 700, color: 'var(--fp-muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Children</th>
-                        <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 700, color: 'var(--fp-muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Membership</th>
-                        <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 700, color: 'var(--fp-muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Amount</th>
-                        <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 700, color: 'var(--fp-muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Activation</th>
-                        <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 700, color: 'var(--fp-muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>First Payment</th>
-                        <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 700, color: 'var(--fp-muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sales.map(s => (
-                        <tr key={s.id} style={{ borderBottom: '1px solid var(--fp-border)' }}>
-                          <td style={{ padding: '12px 16px', fontWeight: 600, color: 'var(--fp-text)' }}>
-                            {(s.children || []).map(c => c.name).join(', ') || '—'}
-                            {s.parentName && <div style={{ fontSize: 11, color: 'var(--fp-muted)', fontWeight: 400 }}>{s.parentName}</div>}
-                          </td>
-                          <td style={{ padding: '12px 16px', color: 'var(--fp-text)' }}>{s.membershipName || '—'}</td>
-                          <td style={{ padding: '12px 16px', fontWeight: 700, color: 'var(--fp-text)' }}>
-                            ${Number(s.weeklyAmount || 0).toFixed(2)}/wk
-                            {s.setupFee > 0 && <div style={{ fontSize: 11, color: 'var(--fp-muted)', fontWeight: 400 }}>+ ${Number(s.setupFee).toFixed(2)} setup</div>}
-                          </td>
-                          <td style={{ padding: '12px 16px', color: 'var(--fp-muted)' }}>{s.activationDate || '—'}</td>
-                          <td style={{ padding: '12px 16px', color: 'var(--fp-muted)' }}>{s.firstPaymentDate || '—'}</td>
-                          <td style={{ padding: '12px 16px' }}>
+              {/* Sales list as cards */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>All Memberships</div>
+                {sales.map(s => {
+                  const fmtDate = (d) => { if (!d) return '—'; const dt = new Date(d + 'T00:00:00'); return dt.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }); };
+                  const hasPayment = s.stripeStatus === 'connected' || s.paymentMethod;
+                  return (
+                    <div key={s.id} className="card fp" style={{ padding: '18px 20px' }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+                        {/* Avatar */}
+                        <div style={{ width: 44, height: 44, borderRadius: 10, background: 'linear-gradient(135deg, #3d9695, #6DCBCA)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 16, flexShrink: 0 }}>
+                          {(s.children?.[0]?.name || '?')[0]}
+                        </div>
+                        {/* Main info */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)' }}>
+                              {(s.children || []).map(c => c.name).join(', ') || '—'}
+                            </div>
                             <span style={{
-                              padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, textTransform: 'capitalize',
+                              padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700, textTransform: 'capitalize',
                               background: s.status === 'active' ? '#ecfdf5' : '#f5f5f5',
                               color: s.status === 'active' ? '#059669' : 'var(--fp-muted)',
                             }}>{s.status || 'active'}</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                            {!hasPayment && (
+                              <span style={{ padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700, background: '#fef2f2', color: '#dc2626' }}>
+                                No payment method
+                              </span>
+                            )}
+                          </div>
+                          {s.parentName && <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 2 }}>Parent: {s.parentName}</div>}
+                          <div style={{ fontSize: 13, color: 'var(--fp-muted)', marginTop: 4 }}>{s.membershipName || '—'}</div>
+                          <div style={{ display: 'flex', gap: 16, marginTop: 8, flexWrap: 'wrap', fontSize: 12, color: 'var(--fp-muted)' }}>
+                            <span><strong style={{ color: 'var(--fp-text)' }}>${Number(s.weeklyAmount || 0).toFixed(2)}</strong>/wk</span>
+                            {s.setupFee > 0 && <span>Setup: ${Number(s.setupFee).toFixed(2)}</span>}
+                            <span>Started: {fmtDate(s.activationDate)}</span>
+                            <span>First payment: {fmtDate(s.firstPaymentDate)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            </>
+            </div>
           )}
 
           {/* New Sale Modal */}
@@ -7002,6 +7005,53 @@ function FranchisePortal({ user, onLogout }) {
 
               const handleProcessSale = async () => {
                 if (!saleChildren.length || !selectedMembership || !activationDate || !firstPaymentDate) return;
+
+                // Check if parent has payment method on file
+                const parentEmail = saleChildren[0]?.parentEmail || '';
+                const parentMember = members.find(m => m.email?.toLowerCase() === parentEmail.toLowerCase());
+                const hasPaymentMethod = parentMember?.paymentMethod || parentMember?.stripeCustomerId;
+
+                if (!hasPaymentMethod) {
+                  // Save sale with pending payment status
+                  setSaleSaving(true);
+                  try {
+                    const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
+                    const { db } = await import('./firebase.js');
+                    const saleData = {
+                      locationId,
+                      children: saleChildren,
+                      parentName: saleChildren[0]?.parentName || '',
+                      parentEmail: parentEmail,
+                      parentPhone: saleChildren[0]?.parentPhone || '',
+                      membershipId: selectedMembership,
+                      membershipName: chosenMembership?.name || '',
+                      membershipCategory: chosenMembership?.category || '',
+                      basePrice,
+                      discountType,
+                      discountValue: Number(discountValue) || 0,
+                      weeklyAmount: finalPrice,
+                      setupFee: Number(setupFee) || 0,
+                      activationDate,
+                      firstPaymentDate,
+                      billingFrequency: 'weekly',
+                      status: 'active',
+                      stripeStatus: 'requires_payment_method',
+                      paymentMethod: null,
+                      createdAt: serverTimestamp(),
+                    };
+                    const ref = await addDoc(collection(db, 'sales'), saleData);
+                    setSales(prev => [{ id: ref.id, ...saleData, createdAt: new Date() }, ...prev]);
+                    showToast('⚠ Sale saved — payment method required. A payment link will be sent to the parent once Stripe is connected.');
+                    setShowNewSaleModal(false);
+                  } catch (e) {
+                    console.error('Failed to process sale:', e);
+                    showToast('✗ Failed to process sale.');
+                  }
+                  setSaleSaving(false);
+                  return;
+                }
+
+                // Has payment method — process normally
                 setSaleSaving(true);
                 try {
                   const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
@@ -7010,7 +7060,7 @@ function FranchisePortal({ user, onLogout }) {
                     locationId,
                     children: saleChildren,
                     parentName: saleChildren[0]?.parentName || '',
-                    parentEmail: saleChildren[0]?.parentEmail || '',
+                    parentEmail: parentEmail,
                     parentPhone: saleChildren[0]?.parentPhone || '',
                     membershipId: selectedMembership,
                     membershipName: chosenMembership?.name || '',
@@ -7024,7 +7074,7 @@ function FranchisePortal({ user, onLogout }) {
                     firstPaymentDate,
                     billingFrequency: 'weekly',
                     status: 'active',
-                    stripeStatus: 'pending', // placeholder for future Stripe integration
+                    stripeStatus: 'pending',
                     createdAt: serverTimestamp(),
                   };
                   const ref = await addDoc(collection(db, 'sales'), saleData);
@@ -7088,6 +7138,26 @@ function FranchisePortal({ user, onLogout }) {
                         </div>
                       )}
                     </div>
+
+                    {/* Payment method check */}
+                    {saleChildren.length > 0 && (() => {
+                      const pEmail = saleChildren[0]?.parentEmail || '';
+                      const pMember = members.find(m => m.email?.toLowerCase() === pEmail.toLowerCase());
+                      const hasPm = pMember?.paymentMethod || pMember?.stripeCustomerId;
+                      if (hasPm) return null;
+                      return (
+                        <div style={{ padding: '12px 16px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, marginBottom: 16, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                          <span style={{ fontSize: 18, lineHeight: 1 }}>⚠️</span>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: '#92400e' }}>No payment method on file</div>
+                            <div style={{ fontSize: 12, color: '#a16207', marginTop: 2, lineHeight: 1.5 }}>
+                              {saleChildren[0]?.parentName || 'This parent'} has no payment details connected.
+                              The sale will be saved but payments won't be processed until Stripe is connected in Phase 2.
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {/* Step 2: Select Membership */}
                     <div style={{ marginBottom: 16 }}>
