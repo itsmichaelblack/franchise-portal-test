@@ -4559,7 +4559,7 @@ function TutorModal({ editing, services, saving, onSave, onClose }) {
 function FranchisePortal({ user, onLogout }) {
   const [page, setPage] = useState(() => {
     const saved = localStorage.getItem('fp_portal_page');
-    return saved && ['timetable', 'bookings', 'members', 'enquiries', 'tutors', 'payments', 'settings'].includes(saved) ? saved : 'timetable';
+    return saved && ['bookings', 'members', 'enquiries', 'tutors', 'payments', 'settings'].includes(saved) ? saved : 'settings';
   });
 
   const setPagePersist = (p) => {
@@ -4620,6 +4620,10 @@ function FranchisePortal({ user, onLogout }) {
   const [stripeAccountStatus, setStripeAccountStatus] = useState(null); // {chargesEnabled, payoutsEnabled, detailsSubmitted}
   const [cardCollecting, setCardCollecting] = useState(null); // saleId being collected for
   const [locationStripeId, setLocationStripeId] = useState(null); // stripeAccountId from location doc
+  const [settingsTab, setSettingsTab] = useState('general'); // 'general' | 'marketing' | 'availability' | 'payments'
+  const [locationData, setLocationData] = useState(null); // full location document for General tab
+  const [marketingData, setMarketingData] = useState({ instagramUrl: '', facebookUrl: '' });
+  const [currency, setCurrency] = useState('AUD');
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [sessionModal, setSessionModal] = useState(null); // null | { date: 'YYYY-MM-DD', hour: number, editing?: booking }
   const [sessionSaving, setSessionSaving] = useState(false);
@@ -5140,9 +5144,9 @@ function FranchisePortal({ user, onLogout }) {
     if (locationId) loadAvail();
   }, [locationId]);
 
-  // Check Stripe Connect status
+  // Check Stripe Connect status + load location data
   useEffect(() => {
-    const checkStripe = async () => {
+    const loadLocationData = async () => {
       if (!locationId) return;
       try {
         const { doc, getDoc } = await import('firebase/firestore');
@@ -5150,7 +5154,14 @@ function FranchisePortal({ user, onLogout }) {
         const locSnap = await getDoc(doc(db, 'locations', locationId));
         if (!locSnap.exists()) return;
         const locData = locSnap.data();
+        setLocationData(locData);
         setLocationStripeId(locData.stripeAccountId || null);
+        // Set currency based on country
+        const countryToCurrency = { AU: 'AUD', NZ: 'NZD', US: 'USD', GB: 'GBP', CA: 'CAD', SG: 'SGD', HK: 'HKD', MY: 'MYR' };
+        setCurrency(locData.currency || countryToCurrency[(locData.country || 'AU').toUpperCase()] || 'AUD');
+        // Set marketing
+        setMarketingData({ instagramUrl: locData.instagramUrl || '', facebookUrl: locData.facebookUrl || '' });
+        // Check Stripe status
         if (!locData.stripeAccountId) { setStripeAccountStatus(null); return; }
         const { getFunctions, httpsCallable } = await import('firebase/functions');
         const fns = getFunctions();
@@ -5161,9 +5172,9 @@ function FranchisePortal({ user, onLogout }) {
           const { setDoc } = await import('firebase/firestore');
           await setDoc(doc(db, 'locations', locationId), { stripeOnboardingStatus: 'complete' }, { merge: true });
         }
-      } catch (e) { console.error('Failed to check Stripe status:', e); }
+      } catch (e) { console.error('Failed to load location data:', e); }
     };
-    if (locationId) checkStripe();
+    if (locationId) loadLocationData();
   }, [locationId]);
 
   // Load sales/memberships
@@ -5264,9 +5275,6 @@ function FranchisePortal({ user, onLogout }) {
           </div>
         </div>
         <nav className="sidebar-nav">
-          <button className={`nav-item ${page === 'timetable' ? 'active' : ''}`} onClick={() => setPagePersist('timetable')}>
-            <Icon path={icons.calendar} size={16} /> Timetable
-          </button>
           <button className={`nav-item ${page === 'bookings' ? 'active' : ''}`} onClick={() => setPagePersist('bookings')}>
             <Icon path={icons.users} size={16} /> Bookings
           </button>
@@ -5301,184 +5309,7 @@ function FranchisePortal({ user, onLogout }) {
       </aside>
 
       <main className="main fp">
-        {/* === TIMETABLE PAGE === */}
-        {page === 'timetable' && (
-          <>
-            <div className="page-header">
-              <div className="page-title" style={{ color: 'var(--fp-text)' }}>Availability Timetable</div>
-              <div className="page-desc" style={{ color: 'var(--fp-muted)' }}>Set the days and hours you're available for bookings.</div>
-            </div>
 
-            <div className="card fp" style={{ padding: '28px' }}>
-              <div style={{ fontWeight: 700, color: 'var(--fp-text)', fontSize: 15, marginBottom: 20 }}>Weekly Schedule</div>
-              <div className="timetable">
-                {availability.map((day, i) => {
-                  // Generate half-hour time options
-                  const timeOptions = [];
-                  for (let h = 6; h <= 22; h++) {
-                    for (let m = 0; m < 60; m += 30) {
-                      const val = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-                      const ampm = h >= 12 ? 'PM' : 'AM';
-                      const label = `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`;
-                      timeOptions.push({ val, label });
-                    }
-                  }
-                  return (
-                    <div key={day.day} style={{
-                      display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0',
-                      borderBottom: i < availability.length - 1 ? '1px solid var(--fp-border)' : 'none',
-                    }}>
-                      <div style={{ width: 100, flexShrink: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: 14, color: day.enabled ? 'var(--fp-text)' : 'var(--fp-muted)' }}>{day.day}</div>
-                      </div>
-                      <div
-                        onClick={() => toggleDay(i)}
-                        style={{
-                          padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                          background: day.enabled ? 'rgba(109,203,202,0.12)' : 'rgba(226,93,37,0.08)',
-                          color: day.enabled ? '#3d9695' : '#c0552a',
-                          border: `1px solid ${day.enabled ? 'rgba(109,203,202,0.3)' : 'rgba(226,93,37,0.2)'}`,
-                          userSelect: 'none', transition: 'all 0.15s', flexShrink: 0,
-                        }}
-                      >
-                        {day.enabled ? 'Available' : 'Unavailable'}
-                      </div>
-                      {day.enabled ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
-                          <select
-                            value={day.start}
-                            onChange={e => updateTime(i, 'start', e.target.value)}
-                            style={{
-                              padding: '10px 32px 10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)',
-                              background: '#fff', fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
-                              color: 'var(--fp-text)', outline: 'none', cursor: 'pointer',
-                              appearance: 'none',
-                              backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
-                              backgroundRepeat: 'no-repeat', backgroundPosition: 'right 8px center', backgroundSize: '16px',
-                            }}
-                          >
-                            {timeOptions.map(t => <option key={t.val} value={t.val}>{t.label}</option>)}
-                          </select>
-                          <span style={{ color: 'var(--fp-muted)', fontSize: 14 }}>→</span>
-                          <select
-                            value={day.end}
-                            onChange={e => updateTime(i, 'end', e.target.value)}
-                            style={{
-                              padding: '10px 32px 10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)',
-                              background: '#fff', fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
-                              color: 'var(--fp-text)', outline: 'none', cursor: 'pointer',
-                              appearance: 'none',
-                              backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
-                              backgroundRepeat: 'no-repeat', backgroundPosition: 'right 8px center', backgroundSize: '16px',
-                            }}
-                          >
-                            {timeOptions.map(t => <option key={t.val} value={t.val}>{t.label}</option>)}
-                          </select>
-                        </div>
-                      ) : (
-                        <div style={{ flex: 1, fontSize: 13, color: 'var(--fp-muted)', fontStyle: 'italic' }}>No bookings on this day</div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Unavailable Dates Section */}
-            <div className="card fp" style={{ padding: '28px', marginTop: 20 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                <div>
-                  <div style={{ fontWeight: 700, color: 'var(--fp-text)', fontSize: 15 }}>Unavailable Dates</div>
-                  <div style={{ fontSize: 13, color: 'var(--fp-muted)', marginTop: 2 }}>Block specific dates when you can't take bookings (e.g. holidays, training days).</div>
-                </div>
-                <button className="btn btn-primary fp" style={{ padding: '8px 16px', fontSize: 13 }} onClick={() => setShowUnavailModal(true)}>
-                  <Icon path={icons.plus} size={13} /> Add Date
-                </button>
-              </div>
-
-              {unavailableDates.length === 0 ? (
-                <div style={{ padding: 20, textAlign: 'center', color: 'var(--fp-muted)', fontSize: 13, background: 'var(--fp-bg)', borderRadius: 10, border: '1px dashed var(--fp-border)' }}>
-                  No unavailable dates set. All enabled days are open for bookings.
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {unavailableDates.map(u => {
-                    const d = new Date(u.date + 'T00:00:00');
-                    const label = d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
-                    const isPast = u.date < new Date().toISOString().split('T')[0];
-                    return (
-                      <div key={u.date} style={{
-                        display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
-                        background: isPast ? 'var(--fp-bg)' : '#fff', borderRadius: 8,
-                        border: '1px solid var(--fp-border)', opacity: isPast ? 0.5 : 1,
-                      }}>
-                        <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(226,93,37,0.08)', color: '#E25D25', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 12, fontWeight: 800 }}>
-                          <div style={{ lineHeight: 1 }}>{d.getDate()}</div>
-                          <div style={{ fontSize: 8, textTransform: 'uppercase' }}>{d.toLocaleDateString('en-AU', { month: 'short' })}</div>
-                        </div>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fp-text)' }}>{label}</div>
-                          {u.reason && <div style={{ fontSize: 11, color: 'var(--fp-muted)' }}>{u.reason}</div>}
-                        </div>
-                        <button onClick={() => removeUnavailableDate(u.date)} style={{
-                          background: 'none', border: 'none', color: 'var(--fp-muted)', cursor: 'pointer', padding: '4px 8px', fontSize: 12, fontWeight: 600,
-                        }}>✕</button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            <div className="save-bar" style={{ marginTop: 16 }}>
-              <button className="btn btn-primary fp" onClick={handleSave}>
-                <Icon path={icons.check} size={14} /> Save Availability
-              </button>
-            </div>
-
-            {/* Add Unavailable Date Modal */}
-            {showUnavailModal && (
-              <div className="modal-overlay" onClick={() => setShowUnavailModal(false)}>
-                <div className="modal fp" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
-                  <div className="modal-header fp">
-                    <div className="modal-title fp">Add Unavailable Date</div>
-                    <button className="modal-close" onClick={() => setShowUnavailModal(false)}>✕</button>
-                  </div>
-                  <div className="modal-body" style={{ padding: '24px' }}>
-                    <div style={{ marginBottom: 16 }}>
-                      <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>Date</label>
-                      <input
-                        type="date"
-                        className="form-input fp"
-                        value={unavailDate}
-                        onChange={e => setUnavailDate(e.target.value)}
-                        min={new Date().toISOString().split('T')[0]}
-                        style={{ width: '100%' }}
-                      />
-                    </div>
-                    <div style={{ marginBottom: 20 }}>
-                      <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>Reason (optional)</label>
-                      <input
-                        type="text"
-                        className="form-input fp"
-                        value={unavailReason}
-                        onChange={e => setUnavailReason(e.target.value)}
-                        placeholder="e.g. Public holiday, Staff training"
-                        style={{ width: '100%' }}
-                      />
-                    </div>
-                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                      <button className="btn btn-ghost fp" onClick={() => setShowUnavailModal(false)}>Cancel</button>
-                      <button className="btn btn-primary fp" onClick={addUnavailableDate} disabled={!unavailDate}>
-                        <Icon path={icons.check} size={14} /> Add Date
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </>
-        )}
 
         {/* === BOOKINGS PAGE === */}
         {page === 'bookings' && (
@@ -6379,136 +6210,317 @@ function FranchisePortal({ user, onLogout }) {
         {/* === SETTINGS PAGE === */}
         {page === 'settings' && (
           <>
-            <div className="page-header">
-              <div className="page-title" style={{ color: 'var(--fp-text)' }}>Booking Settings</div>
-              <div className="page-desc" style={{ color: 'var(--fp-muted)' }}>Configure your timezone and booking buffer preferences.</div>
+            <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <div className="page-title" style={{ color: 'var(--fp-text)' }}>Settings</div>
+                <div className="page-desc" style={{ color: 'var(--fp-muted)' }}>Manage your centre's configuration and preferences.</div>
+              </div>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 560 }}>
-              {/* Timezone */}
-              <div className="card fp" style={{ padding: '24px' }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 16 }}>
-                  <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(109,203,202,0.1)', color: 'var(--fp-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <Icon path={icons.globe} size={18} />
-                  </div>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)' }}>Timezone</div>
-                    <div style={{ fontSize: 13, color: 'var(--fp-muted)', marginTop: 2 }}>All bookings and availability times will be displayed in this timezone.</div>
-                  </div>
-                </div>
-                <select
-                  value={timezone}
-                  onChange={e => setTimezone(e.target.value)}
-                  style={{
-                    width: '100%', padding: '12px 14px', borderRadius: 10,
-                    border: '2px solid var(--fp-border)', background: '#fff',
-                    fontFamily: 'inherit', fontSize: 14, color: 'var(--fp-text)',
-                    outline: 'none', cursor: 'pointer',
-                    appearance: 'none',
-                    backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
-                    backgroundRepeat: 'no-repeat',
-                    backgroundPosition: 'right 12px center',
-                    backgroundSize: '18px',
-                    paddingRight: 40,
-                  }}
-                >
-                  {TIMEZONES.map(tz => <option key={tz} value={tz}>{tz.replace(/_/g, ' ')}</option>)}
-                </select>
-              </div>
+            {/* Tab bar */}
+            <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid var(--fp-border)', marginBottom: 24 }}>
+              {[
+                { key: 'general', label: 'General', icon: icons.building },
+                { key: 'marketing', label: 'Marketing', icon: icons.globe },
+                { key: 'availability', label: 'Availability', icon: icons.calendar },
+                { key: 'payments', label: 'Payments', icon: icons.creditCard },
+              ].map(tab => (
+                <button key={tab.key} onClick={() => setSettingsTab(tab.key)} style={{
+                  padding: '12px 20px', fontSize: 13, fontWeight: 600, fontFamily: 'inherit',
+                  border: 'none', borderBottom: settingsTab === tab.key ? '2px solid var(--fp-accent)' : '2px solid transparent',
+                  background: 'none', color: settingsTab === tab.key ? 'var(--fp-accent)' : 'var(--fp-muted)',
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, marginBottom: -2,
+                  transition: 'color 0.15s, border-color 0.15s',
+                }}>
+                  <Icon path={tab.icon} size={14} /> {tab.label}
+                </button>
+              ))}
+            </div>
 
-              {/* Buffer */}
-              <div className="card fp" style={{ padding: '24px' }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 16 }}>
-                  <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(109,203,202,0.1)', color: 'var(--fp-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <Icon path={icons.clock} size={18} />
+            {/* ── GENERAL TAB ── */}
+            {settingsTab === 'general' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 600 }}>
+                <div className="card fp" style={{ padding: 24 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)', marginBottom: 16 }}>Location Details</div>
+                  <div style={{ fontSize: 11, color: 'var(--fp-muted)', background: 'var(--fp-bg)', padding: '8px 12px', borderRadius: 8, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Icon path={icons.shield} size={12} /> Managed by HQ — contact headquarters to update these fields.
                   </div>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)' }}>Booking Buffer</div>
-                    <div style={{ fontSize: 13, color: 'var(--fp-muted)', marginTop: 2 }}>Minimum gap between consecutive bookings to allow preparation time.</div>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {bufferOptions.map(b => (
-                    <button
-                      key={b}
-                      onClick={() => setBuffer(b)}
-                      style={{
-                        flex: 1, padding: '12px 8px', borderRadius: 10, border: '2px solid',
-                        borderColor: buffer === b ? 'var(--fp-accent)' : 'var(--fp-border)',
-                        background: buffer === b ? 'rgba(109,203,202,0.1)' : '#fff',
-                        color: buffer === b ? 'var(--fp-accent)' : 'var(--fp-text)',
-                        fontFamily: 'inherit', fontSize: 14, fontWeight: 700, cursor: 'pointer',
-                        transition: 'all 0.15s',
-                      }}
-                    >
-                      {b === 0 ? 'None' : `${b} min`}
-                    </button>
+                  {[
+                    { label: 'Location Name', value: locationData?.name || '—' },
+                    { label: 'Address', value: locationData?.address || '—' },
+                    { label: 'Email', value: locationData?.email || '—' },
+                    { label: 'Phone', value: locationData?.phone || '—' },
+                  ].map(field => (
+                    <div key={field.label} style={{ marginBottom: 14 }}>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>{field.label}</label>
+                      <div style={{ padding: '11px 14px', borderRadius: 10, border: '2px solid var(--fp-border)', background: 'var(--fp-bg)', fontSize: 14, color: 'var(--fp-text)', opacity: 0.7 }}>
+                        {field.value}
+                      </div>
+                    </div>
                   ))}
                 </div>
+
+                {/* Timezone */}
+                <div className="card fp" style={{ padding: 24 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)', marginBottom: 4 }}>Timezone</div>
+                  <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginBottom: 16 }}>All bookings and availability times are displayed in this timezone.</div>
+                  <select value={timezone} onChange={e => setTimezone(e.target.value)} style={{
+                    width: '100%', padding: '12px 14px', borderRadius: 10, border: '2px solid var(--fp-border)', background: '#fff',
+                    fontFamily: 'inherit', fontSize: 14, color: 'var(--fp-text)', outline: 'none', cursor: 'pointer', appearance: 'none',
+                    backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+                    backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '16px',
+                  }}>
+                    {['Australia/Sydney','Australia/Melbourne','Australia/Brisbane','Australia/Perth','Australia/Adelaide','Australia/Hobart','Pacific/Auckland','Pacific/Fiji','Asia/Singapore','Asia/Hong_Kong','America/New_York','America/Los_Angeles','America/Chicago','America/Denver','Europe/London','Europe/Paris'].map(tz => (
+                      <option key={tz} value={tz}>{tz.replace(/_/g, ' ')}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Currency */}
+                <div className="card fp" style={{ padding: 24 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)', marginBottom: 4 }}>Currency</div>
+                  <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginBottom: 16 }}>Auto-detected from your location. Change if needed.</div>
+                  <select value={currency} onChange={e => setCurrency(e.target.value)} style={{
+                    width: '100%', padding: '12px 14px', borderRadius: 10, border: '2px solid var(--fp-border)', background: '#fff',
+                    fontFamily: 'inherit', fontSize: 14, color: 'var(--fp-text)', outline: 'none', cursor: 'pointer', appearance: 'none',
+                    backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+                    backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '16px',
+                  }}>
+                    {[{v:'AUD',l:'AUD — Australian Dollar'},{v:'NZD',l:'NZD — New Zealand Dollar'},{v:'USD',l:'USD — US Dollar'},{v:'GBP',l:'GBP — British Pound'},{v:'CAD',l:'CAD — Canadian Dollar'},{v:'SGD',l:'SGD — Singapore Dollar'},{v:'HKD',l:'HKD — Hong Kong Dollar'},{v:'MYR',l:'MYR — Malaysian Ringgit'}].map(c => (
+                      <option key={c.v} value={c.v}>{c.l}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <button className="btn btn-primary fp" style={{ alignSelf: 'flex-start' }} onClick={async () => {
+                  try {
+                    const { doc, setDoc } = await import('firebase/firestore');
+                    const { db } = await import('./firebase.js');
+                    await setDoc(doc(db, 'locations', locationId), { timezone, currency }, { merge: true });
+                    showToast('\u2713 General settings saved.');
+                  } catch (e) { showToast('\u2717 Failed to save.'); }
+                }}>
+                  <Icon path={icons.check} size={14} /> Save General Settings
+                </button>
               </div>
-            </div>
+            )}
 
-            <div style={{ marginTop: 20 }}>
-              <button className="btn btn-primary fp" onClick={async () => {
-                try {
-                  await saveAvailability(locationId, {
-                    schedule: availability,
-                    timezone,
-                    bufferMinutes: buffer,
-                    unavailableDates,
-                  });
-                  showToast('✓ Settings saved.');
-                } catch (err) {
-                  console.error("Failed to save settings:", err);
-                  showToast('✗ Failed to save settings. Please try again.');
-                }
-              }}>
-                <Icon path={icons.check} size={14} /> Save Settings
-              </button>
-            </div>
+            {/* ── MARKETING TAB ── */}
+            {settingsTab === 'marketing' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 600 }}>
+                <div className="card fp" style={{ padding: 24 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)', marginBottom: 16 }}>Social Media Links</div>
 
-            {/* Stripe Connect */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 700, marginTop: 32 }}>
-              <div>
-                <div style={{ fontWeight: 800, fontSize: 18, color: 'var(--fp-text)', marginBottom: 4 }}>Stripe Payments</div>
-                <div style={{ fontSize: 13, color: 'var(--fp-muted)' }}>Connect your Stripe account to process payments from parents.</div>
-              </div>
-
-              <div className="card fp" style={{ padding: '24px' }}>
-                {(() => {
-                  const hasStripe = !!locationStripeId;
-                  const isConnected = stripeAccountStatus?.chargesEnabled && stripeAccountStatus?.payoutsEnabled;
-
-                  if (isConnected) {
-                    return (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                        <div style={{ width: 48, height: 48, borderRadius: 12, background: '#ecfdf5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <Icon path={icons.check} size={22} style={{ color: '#059669' }} />
-                        </div>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: 700, fontSize: 15, color: '#059669' }}>Stripe Connected</div>
-                          <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 2 }}>
-                            Payments and payouts are enabled. Account: {locationStripeId}
-                          </div>
-                        </div>
-                        <a href="https://dashboard.stripe.com" target="_blank" rel="noopener noreferrer" className="btn btn-ghost fp" style={{ fontSize: 12, textDecoration: 'none' }}>
-                          Open Stripe Dashboard →
-                        </a>
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>Instagram</label>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <div style={{ width: 40, height: 40, borderRadius: 10, background: 'linear-gradient(135deg, #833ab4, #fd1d1d, #fcb045)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M16 11.37A4 4 0 1112.63 8 4 4 0 0116 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
                       </div>
-                    );
-                  }
+                      <input type="url" placeholder="https://instagram.com/yourpage" value={marketingData.instagramUrl}
+                        onChange={e => setMarketingData(prev => ({ ...prev, instagramUrl: e.target.value }))}
+                        style={{ flex: 1, padding: '11px 14px', borderRadius: 10, border: '2px solid var(--fp-border)', background: '#fff', fontFamily: 'inherit', fontSize: 14, color: 'var(--fp-text)', outline: 'none' }} />
+                      {marketingData.instagramUrl && (
+                        <a href={marketingData.instagramUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--fp-accent)', fontSize: 12, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap' }}>Open \u2192</a>
+                      )}
+                    </div>
+                  </div>
 
-                  if (hasStripe && !isConnected) {
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>Facebook</label>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <div style={{ width: 40, height: 40, borderRadius: 10, background: '#1877F2', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z"/></svg>
+                      </div>
+                      <input type="url" placeholder="https://facebook.com/yourpage" value={marketingData.facebookUrl}
+                        onChange={e => setMarketingData(prev => ({ ...prev, facebookUrl: e.target.value }))}
+                        style={{ flex: 1, padding: '11px 14px', borderRadius: 10, border: '2px solid var(--fp-border)', background: '#fff', fontFamily: 'inherit', fontSize: 14, color: 'var(--fp-text)', outline: 'none' }} />
+                      {marketingData.facebookUrl && (
+                        <a href={marketingData.facebookUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--fp-accent)', fontSize: 12, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap' }}>Open \u2192</a>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <button className="btn btn-primary fp" style={{ alignSelf: 'flex-start' }} onClick={async () => {
+                  try {
+                    const { doc, setDoc } = await import('firebase/firestore');
+                    const { db } = await import('./firebase.js');
+                    await setDoc(doc(db, 'locations', locationId), { instagramUrl: marketingData.instagramUrl, facebookUrl: marketingData.facebookUrl }, { merge: true });
+                    showToast('\u2713 Marketing settings saved.');
+                  } catch (e) { showToast('\u2717 Failed to save.'); }
+                }}>
+                  <Icon path={icons.check} size={14} /> Save Marketing Settings
+                </button>
+              </div>
+            )}
+
+            {/* ── AVAILABILITY TAB ── */}
+            {settingsTab === 'availability' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 700 }}>
+                {/* Weekly Schedule */}
+                <div className="card fp" style={{ padding: '28px' }}>
+                  <div style={{ fontWeight: 700, color: 'var(--fp-text)', fontSize: 15, marginBottom: 20 }}>Weekly Schedule</div>
+                  <div className="timetable">
+                    {availability.map((day, i) => {
+                      const timeOptions = [];
+                      for (let h = 6; h <= 22; h++) {
+                        for (let m = 0; m < 60; m += 30) {
+                          const val = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+                          const ampm = h >= 12 ? 'PM' : 'AM';
+                          const label = `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`;
+                          timeOptions.push({ val, label });
+                        }
+                      }
+                      return (
+                        <div key={day.day} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: i < availability.length - 1 ? '1px solid var(--fp-border)' : 'none' }}>
+                          <div style={{ width: 100, flexShrink: 0 }}>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: day.enabled ? 'var(--fp-text)' : 'var(--fp-muted)' }}>{day.day}</div>
+                          </div>
+                          <div onClick={() => toggleDay(i)} style={{
+                            padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                            background: day.enabled ? 'rgba(109,203,202,0.12)' : 'rgba(226,93,37,0.08)',
+                            color: day.enabled ? '#3d9695' : '#c0552a',
+                            border: `1px solid ${day.enabled ? 'rgba(109,203,202,0.3)' : 'rgba(226,93,37,0.2)'}`,
+                          }}>{day.enabled ? 'Open' : 'Closed'}</div>
+                          {day.enabled && (
+                            <div className="time-inputs" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <select value={day.start} onChange={e => updateTime(i, 'start', e.target.value)} style={{
+                                padding: '8px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 13, color: 'var(--fp-text)', background: '#fff', outline: 'none', cursor: 'pointer',
+                              }}>
+                                {timeOptions.map(t => <option key={t.val} value={t.val}>{t.label}</option>)}
+                              </select>
+                              <span style={{ color: 'var(--fp-muted)', fontWeight: 600 }}>to</span>
+                              <select value={day.end} onChange={e => updateTime(i, 'end', e.target.value)} style={{
+                                padding: '8px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 13, color: 'var(--fp-text)', background: '#fff', outline: 'none', cursor: 'pointer',
+                              }}>
+                                {timeOptions.map(t => <option key={t.val} value={t.val}>{t.label}</option>)}
+                              </select>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Unavailable Dates */}
+                <div className="card fp" style={{ padding: '28px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                    <div>
+                      <div style={{ fontWeight: 700, color: 'var(--fp-text)', fontSize: 15 }}>Unavailable Dates</div>
+                      <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 2 }}>Block specific dates from bookings.</div>
+                    </div>
+                    <button className="btn btn-ghost fp" style={{ fontSize: 12 }} onClick={() => setShowUnavailModal(true)}>
+                      <Icon path={icons.plus} size={12} /> Add Date
+                    </button>
+                  </div>
+                  {unavailableDates.length === 0 ? (
+                    <div style={{ padding: 20, textAlign: 'center', color: 'var(--fp-muted)', fontSize: 13, background: 'var(--fp-bg)', borderRadius: 10, border: '1px dashed var(--fp-border)' }}>
+                      No unavailable dates set. All enabled days are open for bookings.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {unavailableDates.map(u => {
+                        const d = new Date(u.date + 'T00:00:00');
+                        const label = d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
+                        const isPast = u.date < new Date().toISOString().split('T')[0];
+                        return (
+                          <div key={u.date} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: isPast ? 'var(--fp-bg)' : '#fff', borderRadius: 8, border: '1px solid var(--fp-border)', opacity: isPast ? 0.5 : 1 }}>
+                            <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(226,93,37,0.08)', color: '#E25D25', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 12, fontWeight: 800 }}>
+                              <div style={{ lineHeight: 1 }}>{d.getDate()}</div>
+                              <div style={{ fontSize: 8, textTransform: 'uppercase' }}>{d.toLocaleDateString('en-AU', { month: 'short' })}</div>
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fp-text)' }}>{label}</div>
+                              {u.reason && <div style={{ fontSize: 11, color: 'var(--fp-muted)' }}>{u.reason}</div>}
+                            </div>
+                            <button onClick={() => removeUnavailableDate(u.date)} style={{ background: 'none', border: 'none', color: 'var(--fp-muted)', cursor: 'pointer', padding: '4px 8px', fontSize: 12, fontWeight: 600 }}>\u2715</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Booking Buffer */}
+                <div className="card fp" style={{ padding: 24 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)', marginBottom: 4 }}>Booking Buffer</div>
+                  <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginBottom: 16 }}>Minimum gap between the last available booking slot and closing time.</div>
+                  <div className="buffer-chips" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                    {[{ val: 0, label: 'None' }, { val: 15, label: '15 min' }, { val: 30, label: '30 min' }, { val: 45, label: '45 min' }, { val: 60, label: '60 min' }].map(opt => (
+                      <div key={opt.val} onClick={() => setBuffer(opt.val)} style={{
+                        padding: '12px 24px', borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: 'pointer', textAlign: 'center', minWidth: 80,
+                        border: `2px solid ${buffer === opt.val ? 'var(--fp-accent)' : 'var(--fp-border)'}`,
+                        background: buffer === opt.val ? 'rgba(109,203,202,0.08)' : '#fff',
+                        color: buffer === opt.val ? 'var(--fp-accent)' : 'var(--fp-text)',
+                      }}>{opt.label}</div>
+                    ))}
+                  </div>
+                </div>
+
+                <button className="btn btn-primary fp" style={{ alignSelf: 'flex-start' }} onClick={handleSave}>
+                  <Icon path={icons.check} size={14} /> Save Availability
+                </button>
+              </div>
+            )}
+
+            {/* ── PAYMENTS TAB ── */}
+            {settingsTab === 'payments' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 700 }}>
+                {/* Stripe Connect */}
+                <div className="card fp" style={{ padding: '24px' }}>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)', marginBottom: 16 }}>Stripe Payments</div>
+                  {(() => {
+                    const hasStripe = !!locationStripeId;
+                    const isConnected = stripeAccountStatus?.chargesEnabled && stripeAccountStatus?.payoutsEnabled;
+
+                    if (isConnected) {
+                      return (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                          <div style={{ width: 48, height: 48, borderRadius: 12, background: '#ecfdf5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Icon path={icons.check} size={22} style={{ color: '#059669' }} />
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 700, fontSize: 15, color: '#059669' }}>Stripe Connected</div>
+                            <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 2 }}>Payments and payouts are enabled. Account: {locationStripeId}</div>
+                          </div>
+                          <a href="https://dashboard.stripe.com" target="_blank" rel="noopener noreferrer" className="btn btn-ghost fp" style={{ fontSize: 12, textDecoration: 'none' }}>Open Stripe Dashboard \u2192</a>
+                        </div>
+                      );
+                    }
+                    if (hasStripe && !isConnected) {
+                      return (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                          <div style={{ width: 48, height: 48, borderRadius: 12, background: '#fffbeb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Icon path={icons.alert} size={22} style={{ color: '#d97706' }} />
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 700, fontSize: 15, color: '#d97706' }}>Onboarding Incomplete</div>
+                            <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 2 }}>Your Stripe account needs additional information before you can accept payments.</div>
+                          </div>
+                          <button className="btn btn-primary fp" disabled={stripeConnecting} onClick={async () => {
+                            setStripeConnecting(true);
+                            try {
+                              const { getFunctions, httpsCallable } = await import('firebase/functions');
+                              const fns = getFunctions();
+                              const createAccount = httpsCallable(fns, 'createStripeConnectAccount');
+                              const result = await createAccount({ locationId });
+                              window.open(result.data.url, '_blank');
+                            } catch (e) { console.error('Stripe connect error:', e); showToast('\u2717 Failed to open Stripe onboarding.'); }
+                            setStripeConnecting(false);
+                          }}>{stripeConnecting ? 'Opening...' : 'Complete Onboarding'}</button>
+                        </div>
+                      );
+                    }
                     return (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                        <div style={{ width: 48, height: 48, borderRadius: 12, background: '#fffbeb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <Icon path={icons.alert} size={22} style={{ color: '#d97706' }} />
+                        <div style={{ width: 48, height: 48, borderRadius: 12, background: 'var(--fp-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <Icon path={icons.creditCard} size={22} style={{ color: 'var(--fp-muted)' }} />
                         </div>
                         <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: 700, fontSize: 15, color: '#d97706' }}>Onboarding Incomplete</div>
-                          <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 2 }}>
-                            Your Stripe account needs additional information before you can accept payments.
-                          </div>
+                          <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)' }}>Connect Stripe</div>
+                          <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 2, lineHeight: 1.5 }}>Connect your Stripe account to accept card payments. Payments go directly to your account.</div>
                         </div>
                         <button className="btn btn-primary fp" disabled={stripeConnecting} onClick={async () => {
                           setStripeConnecting(true);
@@ -6518,121 +6530,101 @@ function FranchisePortal({ user, onLogout }) {
                             const createAccount = httpsCallable(fns, 'createStripeConnectAccount');
                             const result = await createAccount({ locationId });
                             window.open(result.data.url, '_blank');
-                          } catch (e) {
-                            console.error('Stripe connect error:', e);
-                            showToast('✗ Failed to open Stripe onboarding.');
-                          }
+                          } catch (e) { console.error('Stripe connect error:', e); showToast('\u2717 Failed to start Stripe onboarding.'); }
                           setStripeConnecting(false);
-                        }}>
-                          {stripeConnecting ? 'Opening...' : 'Complete Onboarding'}
-                        </button>
+                        }}>{stripeConnecting ? 'Setting up...' : 'Connect Stripe'}</button>
                       </div>
                     );
-                  }
+                  })()}
+                </div>
 
-                  return (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                      <div style={{ width: 48, height: 48, borderRadius: 12, background: 'var(--fp-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <Icon path={icons.creditCard} size={22} style={{ color: 'var(--fp-muted)' }} />
+                {/* Pricing Options */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)', marginBottom: 4 }}>Pricing Options</div>
+                    <div style={{ fontSize: 12, color: 'var(--fp-muted)' }}>Toggle services on or off and set pricing for your centre.</div>
+                  </div>
+
+                  {Object.entries(PRICING_OPTIONS).map(([catKey, category]) => (
+                    <div key={catKey} className="card fp" style={{ padding: 0, overflow: 'hidden' }}>
+                      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--fp-border)', background: 'var(--fp-bg)' }}>
+                        <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)' }}>{category.label}</div>
                       </div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)' }}>Connect Stripe</div>
-                        <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 2, lineHeight: 1.5 }}>
-                          Connect your Stripe account to accept card payments from parents. Payments go directly to your account.
-                        </div>
-                      </div>
-                      <button className="btn btn-primary fp" disabled={stripeConnecting} onClick={async () => {
-                        setStripeConnecting(true);
-                        try {
-                          const { getFunctions, httpsCallable } = await import('firebase/functions');
-                          const fns = getFunctions();
-                          const createAccount = httpsCallable(fns, 'createStripeConnectAccount');
-                          const result = await createAccount({ locationId });
-                          window.open(result.data.url, '_blank');
-                        } catch (e) {
-                          console.error('Stripe connect error:', e);
-                          showToast('✗ Failed to start Stripe onboarding.');
-                        }
-                        setStripeConnecting(false);
-                      }}>
-                        {stripeConnecting ? 'Setting up...' : 'Connect Stripe'}
+                      {category.items.map((item, idx) => {
+                        const enabled = pricing[item.id]?.enabled ?? false;
+                        const price = pricing[item.id]?.price ?? '';
+                        return (
+                          <div key={item.id} style={{ padding: '16px 20px', borderBottom: idx < category.items.length - 1 ? '1px solid var(--fp-border)' : 'none', display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+                            <div onClick={() => setPricing(prev => ({ ...prev, [item.id]: { ...prev[item.id], enabled: !enabled, price: prev[item.id]?.price || '' } }))}
+                              style={{ width: 44, height: 24, borderRadius: 12, background: enabled ? '#3d9695' : '#d1d5db', cursor: 'pointer', position: 'relative', transition: 'background 0.2s', flexShrink: 0, marginTop: 2 }}>
+                              <div style={{ width: 20, height: 20, borderRadius: '50%', background: '#fff', position: 'absolute', top: 2, left: enabled ? 22 : 2, transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontWeight: 700, fontSize: 14, color: enabled ? 'var(--fp-text)' : 'var(--fp-muted)' }}>{item.name}</div>
+                              <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 2, lineHeight: 1.4 }}>{item.desc}</div>
+                            </div>
+                            <div style={{ flexShrink: 0, width: 110, opacity: enabled ? 1 : 0.4 }}>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Price</div>
+                              <div style={{ display: 'flex', alignItems: 'center', border: '2px solid var(--fp-border)', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
+                                <span style={{ padding: '8px 8px 8px 10px', color: 'var(--fp-muted)', fontSize: 14, fontWeight: 700 }}>$</span>
+                                <input type="number" min="0" step="0.01" value={price} disabled={!enabled}
+                                  onChange={e => setPricing(prev => ({ ...prev, [item.id]: { ...prev[item.id], enabled, price: e.target.value } }))}
+                                  placeholder="0.00"
+                                  style={{ width: '100%', padding: '8px 8px 8px 0', border: 'none', outline: 'none', fontFamily: 'inherit', fontSize: 14, fontWeight: 600, color: 'var(--fp-text)', background: 'transparent' }} />
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+
+                  <button className="btn btn-primary fp" style={{ alignSelf: 'flex-start' }} disabled={pricingSaving} onClick={async () => {
+                    setPricingSaving(true);
+                    try {
+                      const { doc, setDoc } = await import('firebase/firestore');
+                      const { db } = await import('./firebase.js');
+                      await setDoc(doc(db, 'pricing', locationId), pricing);
+                      showToast('\u2713 Pricing saved.');
+                    } catch (e) { console.error('Failed to save pricing:', e); showToast('\u2717 Failed to save pricing.'); }
+                    setPricingSaving(false);
+                  }}>
+                    <Icon path={icons.check} size={14} /> {pricingSaving ? 'Saving...' : 'Save Pricing'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Unavailable Date Modal */}
+            {showUnavailModal && (
+              <div className="modal-overlay" onClick={() => setShowUnavailModal(false)}>
+                <div className="modal fp" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
+                  <div className="modal-header fp">
+                    <div className="modal-title fp">Add Unavailable Date</div>
+                    <button className="modal-close" onClick={() => setShowUnavailModal(false)}>\u2715</button>
+                  </div>
+                  <div className="modal-body" style={{ padding: '24px' }}>
+                    <div style={{ marginBottom: 16 }}>
+                      <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>Date</label>
+                      <input type="date" className="form-input fp" value={unavailDate} onChange={e => setUnavailDate(e.target.value)} min={new Date().toISOString().split('T')[0]} style={{ width: '100%' }} />
+                    </div>
+                    <div style={{ marginBottom: 20 }}>
+                      <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>Reason (optional)</label>
+                      <input type="text" className="form-input fp" value={unavailReason} onChange={e => setUnavailReason(e.target.value)} placeholder="e.g. Public holiday, Staff training" style={{ width: '100%' }} />
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                      <button className="btn btn-ghost fp" onClick={() => setShowUnavailModal(false)}>Cancel</button>
+                      <button className="btn btn-primary fp" onClick={addUnavailableDate} disabled={!unavailDate}>
+                        <Icon path={icons.check} size={14} /> Add Date
                       </button>
                     </div>
-                  );
-                })()}
-              </div>
-            </div>
-
-            {/* Pricing Options */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 700, marginTop: 32 }}>
-              <div>
-                <div style={{ fontWeight: 800, fontSize: 18, color: 'var(--fp-text)', marginBottom: 4 }}>Pricing Options</div>
-                <div style={{ fontSize: 13, color: 'var(--fp-muted)' }}>Toggle services on or off and set pricing for your centre.</div>
-              </div>
-
-              {Object.entries(PRICING_OPTIONS).map(([catKey, category]) => (
-                <div key={catKey} className="card fp" style={{ padding: 0, overflow: 'hidden' }}>
-                  <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--fp-border)', background: 'var(--fp-bg)' }}>
-                    <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)' }}>{category.label}</div>
                   </div>
-                  {category.items.map((item, idx) => {
-                    const enabled = pricing[item.id]?.enabled ?? false;
-                    const price = pricing[item.id]?.price ?? '';
-                    return (
-                      <div key={item.id} style={{ padding: '16px 20px', borderBottom: idx < category.items.length - 1 ? '1px solid var(--fp-border)' : 'none', display: 'flex', alignItems: 'flex-start', gap: 14 }}>
-                        {/* Toggle */}
-                        <div onClick={() => setPricing(prev => ({ ...prev, [item.id]: { ...prev[item.id], enabled: !enabled, price: prev[item.id]?.price || '' } }))}
-                          style={{ width: 44, height: 24, borderRadius: 12, background: enabled ? '#3d9695' : '#d1d5db', cursor: 'pointer', position: 'relative', transition: 'background 0.2s', flexShrink: 0, marginTop: 2 }}>
-                          <div style={{ width: 20, height: 20, borderRadius: '50%', background: '#fff', position: 'absolute', top: 2, left: enabled ? 22 : 2, transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
-                        </div>
-                        {/* Info */}
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: 700, fontSize: 14, color: enabled ? 'var(--fp-text)' : 'var(--fp-muted)' }}>{item.name}</div>
-                          <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 2, lineHeight: 1.4 }}>{item.desc}</div>
-                        </div>
-                        {/* Price input */}
-                        <div style={{ flexShrink: 0, width: 110, opacity: enabled ? 1 : 0.4 }}>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Price</div>
-                          <div style={{ display: 'flex', alignItems: 'center', border: '2px solid var(--fp-border)', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
-                            <span style={{ padding: '8px 8px 8px 10px', color: 'var(--fp-muted)', fontSize: 14, fontWeight: 700 }}>$</span>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={price}
-                              disabled={!enabled}
-                              onChange={e => setPricing(prev => ({ ...prev, [item.id]: { ...prev[item.id], enabled, price: e.target.value } }))}
-                              placeholder="0.00"
-                              style={{ width: '100%', padding: '8px 8px 8px 0', border: 'none', outline: 'none', fontFamily: 'inherit', fontSize: 14, fontWeight: 600, color: 'var(--fp-text)', background: 'transparent' }}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
                 </div>
-              ))}
-
-              <button className="btn btn-primary fp" style={{ alignSelf: 'flex-start' }}
-                disabled={pricingSaving}
-                onClick={async () => {
-                  setPricingSaving(true);
-                  try {
-                    const { doc, setDoc } = await import('firebase/firestore');
-                    const { db } = await import('./firebase.js');
-                    await setDoc(doc(db, 'pricing', locationId), pricing);
-                    showToast('✓ Pricing saved.');
-                  } catch (e) {
-                    console.error('Failed to save pricing:', e);
-                    showToast('✗ Failed to save pricing.');
-                  }
-                  setPricingSaving(false);
-                }}>
-                <Icon path={icons.check} size={14} /> {pricingSaving ? 'Saving...' : 'Save Pricing'}
-              </button>
-            </div>
+              </div>
+            )}
           </>
         )}
+
 
         {/* === MEMBERS PAGE === */}
         {page === 'members' && (
