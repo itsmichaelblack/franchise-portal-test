@@ -152,6 +152,14 @@ service cloud.firestore {
       }
     }
 
+    // ── Pricing collection ──────────────────────────────────────────────
+    match /pricing/{locationId} {
+      allow read: if isAdmin();
+      allow read: if isAuth() && resource.data != null;
+      allow write: if isAuth();
+      allow write: if isAdmin();
+    }
+
     // ── Sales/Memberships collection ──────────────────────────────────────
     match /sales/{saleId} {
       allow read: if isAdmin();

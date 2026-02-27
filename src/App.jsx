@@ -6456,8 +6456,8 @@ function FranchisePortal({ user, onLogout }) {
                       <div key={item.id} style={{ padding: '16px 20px', borderBottom: idx < category.items.length - 1 ? '1px solid var(--fp-border)' : 'none', display: 'flex', alignItems: 'flex-start', gap: 14 }}>
                         {/* Toggle */}
                         <div onClick={() => setPricing(prev => ({ ...prev, [item.id]: { ...prev[item.id], enabled: !enabled, price: prev[item.id]?.price || '' } }))}
-                          style={{ width: 44, height: 24, borderRadius: 12, background: enabled ? 'var(--fp-accent)' : '#d1d5db', cursor: 'pointer', position: 'relative', transition: 'background 0.2s', flexShrink: 0, marginTop: 2 }}>
-                          <div style={{ width: 20, height: 20, borderRadius: '50%', background: '#fff', position: 'absolute', top: 2, left: enabled ? 22 : 2, transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }} />
+                          style={{ width: 44, height: 24, borderRadius: 12, background: enabled ? '#3d9695' : '#d1d5db', cursor: 'pointer', position: 'relative', transition: 'background 0.2s', flexShrink: 0, marginTop: 2 }}>
+                          <div style={{ width: 20, height: 20, borderRadius: '50%', background: '#fff', position: 'absolute', top: 2, left: enabled ? 22 : 2, transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
                         </div>
                         {/* Info */}
                         <div style={{ flex: 1 }}>
