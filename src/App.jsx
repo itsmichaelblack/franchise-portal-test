@@ -4358,6 +4358,9 @@ function FranchisePortal({ user, onLogout }) {
   const [bookings, setBookings] = useState([]);
   const [bookingsLoading, setBookingsLoading] = useState(false);
   const [calendarWeekOffset, setCalendarWeekOffset] = useState(0);
+  const [calendarView, setCalendarView] = useState('week'); // 'week' | 'day' | 'month'
+  const [calendarDayOffset, setCalendarDayOffset] = useState(0); // for day view
+  const [calendarMonthOffset, setCalendarMonthOffset] = useState(0); // for month view
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [sessionModal, setSessionModal] = useState(null); // null | { date: 'YYYY-MM-DD', hour: number, editing?: booking }
   const [sessionSaving, setSessionSaving] = useState(false);
@@ -5183,23 +5186,62 @@ function FranchisePortal({ user, onLogout }) {
 
               return (
                 <>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-                    <button className="btn btn-ghost fp" style={{ padding: '8px 14px' }} onClick={() => setCalendarWeekOffset(w => w - 1)}>
-                      ← Previous
-                    </button>
-                    <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)' }}>
-                      {weekLabel}
+                  {/* View toggle + navigation */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
+                    <div style={{ display: 'flex', gap: 4, background: 'var(--fp-bg)', borderRadius: 10, padding: 3 }}>
+                      {['day', 'week', 'month'].map(v => (
+                        <button key={v} className="btn btn-ghost fp" style={{
+                          padding: '6px 14px', fontSize: 13, fontWeight: 700, textTransform: 'capitalize', borderRadius: 8,
+                          ...(calendarView === v ? { background: '#fff', color: 'var(--fp-accent)', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' } : {}),
+                        }} onClick={() => setCalendarView(v)}>
+                          {v}
+                        </button>
+                      ))}
                     </div>
+
+                    <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)' }}>
+                      {calendarView === 'week' && weekLabel}
+                      {calendarView === 'day' && (() => {
+                        const d = new Date(today);
+                        d.setDate(d.getDate() + calendarDayOffset);
+                        return d.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+                      })()}
+                      {calendarView === 'month' && (() => {
+                        const d = new Date(today.getFullYear(), today.getMonth() + calendarMonthOffset, 1);
+                        return d.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' });
+                      })()}
+                    </div>
+
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <button className="btn btn-ghost fp" style={{ padding: '8px 14px', ...(calendarWeekOffset === 0 ? { background: 'rgba(109,203,202,0.1)', color: 'var(--fp-accent)', border: '1px solid var(--fp-accent)' } : {}) }} onClick={() => setCalendarWeekOffset(0)}>
+                      <button className="btn btn-ghost fp" style={{ padding: '8px 14px' }} onClick={() => {
+                        if (calendarView === 'week') setCalendarWeekOffset(w => w - 1);
+                        else if (calendarView === 'day') setCalendarDayOffset(d => d - 1);
+                        else setCalendarMonthOffset(m => m - 1);
+                      }}>
+                        ←
+                      </button>
+                      <button className="btn btn-ghost fp" style={{
+                        padding: '8px 14px',
+                        ...((calendarView === 'week' ? calendarWeekOffset === 0 : calendarView === 'day' ? calendarDayOffset === 0 : calendarMonthOffset === 0) ? { background: 'rgba(109,203,202,0.1)', color: 'var(--fp-accent)', border: '1px solid var(--fp-accent)' } : {}),
+                      }} onClick={() => {
+                        if (calendarView === 'week') setCalendarWeekOffset(0);
+                        else if (calendarView === 'day') setCalendarDayOffset(0);
+                        else setCalendarMonthOffset(0);
+                      }}>
                         Today
                       </button>
-                      <button className="btn btn-ghost fp" style={{ padding: '8px 14px' }} onClick={() => setCalendarWeekOffset(w => w + 1)}>
-                        Next →
+                      <button className="btn btn-ghost fp" style={{ padding: '8px 14px' }} onClick={() => {
+                        if (calendarView === 'week') setCalendarWeekOffset(w => w + 1);
+                        else if (calendarView === 'day') setCalendarDayOffset(d => d + 1);
+                        else setCalendarMonthOffset(m => m + 1);
+                      }}>
+                        →
                       </button>
                     </div>
                   </div>
 
+                  {/* ── WEEK VIEW ── */}
+                  {calendarView === 'week' && (<>
                   <div className="card fp" style={{ padding: 0, overflow: 'hidden' }}>
                     <div style={{ overflowX: 'auto' }}>
                       <div style={{ display: 'grid', gridTemplateColumns: '60px repeat(7, 1fr)', minWidth: 700, position: 'relative' }}>
@@ -5258,6 +5300,17 @@ function FranchisePortal({ user, onLogout }) {
                               });
                               const isToday = d.toDateString() === today.toDateString();
 
+                              // Check if this cell is unavailable
+                              const jsDow = d.getDay(); // 0=Sun, 1=Mon...6=Sat
+                              const availIdx = jsDow === 0 ? 6 : jsDow - 1; // Convert to Mon=0...Sun=6
+                              const dayAvail = availability[availIdx];
+                              const isUnavailableDate = unavailableDates.some(u => u.date === dateStr);
+                              const isDayDisabled = !dayAvail?.enabled;
+                              const startHour = dayAvail?.start ? parseInt(dayAvail.start.split(':')[0], 10) : 9;
+                              const endHour = dayAvail?.end ? parseInt(dayAvail.end.split(':')[0], 10) : 17;
+                              const isOutsideHours = dayAvail?.enabled ? (h < startHour || h >= endHour) : false;
+                              const isUnavailable = isUnavailableDate || isDayDisabled || isOutsideHours;
+
                               // Current time indicator
                               const showTimeIndicator = isCurrentWeek && currentHour === h;
                               const timeIndicatorTop = showTimeIndicator ? (currentMin / 60) * 56 : 0;
@@ -5267,13 +5320,15 @@ function FranchisePortal({ user, onLogout }) {
                                   borderRight: di < 6 ? '1px solid #eef0f2' : 'none',
                                   borderBottom: '1px solid #eef0f2',
                                   padding: 0, minHeight: 56, position: 'relative',
-                                  background: isToday ? 'rgba(109,203,202,0.08)' : 'transparent',
+                                  background: isUnavailable ? 'repeating-linear-gradient(135deg, transparent, transparent 4px, rgba(0,0,0,0.03) 4px, rgba(0,0,0,0.03) 8px)' : isToday ? 'rgba(109,203,202,0.08)' : 'transparent',
                                   borderLeft: isToday ? '2px solid var(--fp-accent)' : 'none',
                                   borderLeftColor: isToday ? 'rgba(109,203,202,0.3)' : undefined,
-                                  cursor: 'pointer',
+                                  cursor: isUnavailable ? 'default' : 'pointer',
                                   overflow: 'visible',
+                                  opacity: isUnavailable ? 0.5 : 1,
                                 }}
                                 onClick={() => {
+                                  if (isUnavailable) return;
                                   const dateStr2 = d.toISOString().split('T')[0];
                                   setSessionModal({ date: dateStr2, hour: h });
                                 }}
@@ -5330,8 +5385,178 @@ function FranchisePortal({ user, onLogout }) {
                       </div>
                     </div>
                   </div>
+                  </>)}
 
-                  {/* Summary stats */}
+                  {/* ── DAY VIEW ── */}
+                  {calendarView === 'day' && (() => {
+                    const viewDay = new Date(today);
+                    viewDay.setDate(viewDay.getDate() + calendarDayOffset);
+                    const dateStr = viewDay.toISOString().split('T')[0];
+                    const dayBookings = bookings.filter(b => b.date === dateStr);
+                    const jsDow = viewDay.getDay();
+                    const availIdx = jsDow === 0 ? 6 : jsDow - 1;
+                    const dayAvail = availability[availIdx];
+                    const isUnavailableDate = unavailableDates.some(u => u.date === dateStr);
+
+                    return (
+                      <div className="card fp" style={{ padding: 0, overflow: 'hidden' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr', position: 'relative' }}>
+                          {/* Header */}
+                          <div style={{ padding: '12px 8px', borderBottom: '2px solid var(--fp-border)', borderRight: '1px solid var(--fp-border)', background: 'var(--fp-bg)' }} />
+                          <div style={{ padding: '10px 8px', textAlign: 'center', borderBottom: '2px solid var(--fp-border)', background: 'rgba(109,203,202,0.08)' }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fp-accent)' }}>
+                              {viewDay.toLocaleDateString('en-AU', { weekday: 'long' })}
+                            </div>
+                            <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--fp-text)', marginTop: 2 }}>
+                              {viewDay.getDate()}
+                            </div>
+                          </div>
+
+                          {/* Hour rows */}
+                          {hours.map(h => {
+                            const startHour = dayAvail?.start ? parseInt(dayAvail.start.split(':')[0], 10) : 9;
+                            const endHour = dayAvail?.end ? parseInt(dayAvail.end.split(':')[0], 10) : 17;
+                            const isUnavailable = isUnavailableDate || !dayAvail?.enabled || h < startHour || h >= endHour;
+                            const cellBookings = dayBookings.filter(b => {
+                              const [bh] = b.time.split(':').map(Number);
+                              return bh === h;
+                            });
+
+                            return (
+                              <React.Fragment key={h}>
+                                <div style={{ padding: '4px 8px', fontSize: 11, fontWeight: 600, color: 'var(--fp-muted)', borderRight: '1px solid var(--fp-border)', borderBottom: '1px solid #eef0f2', display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end', minHeight: 64 }}>
+                                  {fmtTime(`${String(h).padStart(2, '0')}:00`)}
+                                </div>
+                                <div style={{
+                                  borderBottom: '1px solid #eef0f2', padding: 0, minHeight: 64, position: 'relative',
+                                  background: isUnavailable ? 'repeating-linear-gradient(135deg, transparent, transparent 4px, rgba(0,0,0,0.03) 4px, rgba(0,0,0,0.03) 8px)' : 'transparent',
+                                  opacity: isUnavailable ? 0.5 : 1,
+                                  cursor: isUnavailable ? 'default' : 'pointer',
+                                  overflow: 'visible',
+                                }}
+                                onClick={() => { if (!isUnavailable) setSessionModal({ date: dateStr, hour: h }); }}
+                                >
+                                  {cellBookings.map((b, bi) => {
+                                    const [bh, bm] = b.time.split(':').map(Number);
+                                    const timeLabel = fmtTime(b.time);
+                                    const isSession = b.type === 'session';
+                                    const svcMatch = b.serviceId ? locationServices.find(s => s.id === b.serviceId) : null;
+                                    const duration = b.duration ? Number(b.duration) : (svcMatch?.duration ? Number(svcMatch.duration) : 40);
+                                    const topOffset = (bm / 60) * 64;
+                                    const heightPx = Math.max((duration / 60) * 64, 28);
+                                    return (
+                                      <div key={bi} onClick={(e) => { e.stopPropagation(); setSelectedBooking(b); }} style={{
+                                        position: 'absolute', top: topOffset + 2, left: 4, right: 4, height: heightPx - 4,
+                                        background: isSession ? 'linear-gradient(135deg, #3d9695, #6DCBCA)' : 'linear-gradient(135deg, #E25D25, #f0845a)',
+                                        color: '#fff', borderRadius: 8, padding: '6px 12px', fontSize: 13,
+                                        cursor: 'pointer', zIndex: 3, overflow: 'hidden',
+                                      }}>
+                                        <div style={{ fontWeight: 700 }}>{isSession ? (b.serviceName || 'Session') : b.customerName}{b.recurrenceRuleId ? ' ↻' : ''}</div>
+                                        <div style={{ opacity: 0.85, fontSize: 11 }}>{timeLabel}{isSession ? ` · ${b.tutorName || ''}` : ''} · {duration} min</div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </React.Fragment>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* ── MONTH VIEW ── */}
+                  {calendarView === 'month' && (() => {
+                    const monthDate = new Date(today.getFullYear(), today.getMonth() + calendarMonthOffset, 1);
+                    const year = monthDate.getFullYear();
+                    const month = monthDate.getMonth();
+                    const firstDay = new Date(year, month, 1);
+                    const lastDay = new Date(year, month + 1, 0);
+                    // Start grid on Monday
+                    const startDow = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1;
+                    const gridStart = new Date(firstDay);
+                    gridStart.setDate(gridStart.getDate() - startDow);
+                    const cells = [];
+                    const cursor = new Date(gridStart);
+                    while (cells.length < 42) { // 6 weeks
+                      cells.push(new Date(cursor));
+                      cursor.setDate(cursor.getDate() + 1);
+                    }
+
+                    const monthStart = firstDay.toISOString().split('T')[0];
+                    const monthEnd = lastDay.toISOString().split('T')[0];
+                    const monthBookings = bookings.filter(b => b.date >= monthStart && b.date <= monthEnd);
+
+                    // Group by date
+                    const byDate = {};
+                    monthBookings.forEach(b => { byDate[b.date] = (byDate[b.date] || 0) + 1; });
+
+                    return (
+                      <div className="card fp" style={{ padding: 0, overflow: 'hidden' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+                          {/* Day names */}
+                          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
+                            <div key={d} style={{ padding: '10px 8px', textAlign: 'center', fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', borderBottom: '2px solid var(--fp-border)', background: 'var(--fp-bg)' }}>
+                              {d}
+                            </div>
+                          ))}
+
+                          {/* Date cells */}
+                          {cells.map((c, ci) => {
+                            const dateStr = c.toISOString().split('T')[0];
+                            const isCurrentMonth = c.getMonth() === month;
+                            const isToday2 = c.toDateString() === today.toDateString();
+                            const count = byDate[dateStr] || 0;
+                            const jsDow = c.getDay();
+                            const availIdx2 = jsDow === 0 ? 6 : jsDow - 1;
+                            const dayAvail2 = availability[availIdx2];
+                            const isUnavail = !isCurrentMonth || !dayAvail2?.enabled || unavailableDates.some(u => u.date === dateStr);
+
+                            // Get bookings for this day for dots
+                            const dayItems = bookings.filter(b => b.date === dateStr);
+                            const hasSession = dayItems.some(b => b.type === 'session');
+                            const hasBooking = dayItems.some(b => b.type !== 'session');
+
+                            return (
+                              <div key={ci} style={{
+                                padding: '8px', minHeight: 80, borderBottom: '1px solid #eef0f2',
+                                borderRight: (ci + 1) % 7 !== 0 ? '1px solid #eef0f2' : 'none',
+                                background: isToday2 ? 'rgba(109,203,202,0.08)' : isUnavail ? 'rgba(0,0,0,0.02)' : '#fff',
+                                opacity: isCurrentMonth ? 1 : 0.3,
+                                cursor: isUnavail ? 'default' : 'pointer',
+                              }}
+                              onClick={() => {
+                                if (!isUnavail && isCurrentMonth) {
+                                  setCalendarView('day');
+                                  const diff = Math.round((c - today) / (1000 * 60 * 60 * 24));
+                                  setCalendarDayOffset(diff);
+                                }
+                              }}
+                              >
+                                <div style={{
+                                  fontSize: 13, fontWeight: isToday2 ? 800 : 600,
+                                  width: 26, height: 26, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  background: isToday2 ? 'var(--fp-accent)' : 'transparent',
+                                  color: isToday2 ? '#E25D25' : isCurrentMonth ? 'var(--fp-text)' : 'var(--fp-muted)',
+                                }}>
+                                  {c.getDate()}
+                                </div>
+                                {count > 0 && isCurrentMonth && (
+                                  <div style={{ display: 'flex', gap: 3, marginTop: 4, flexWrap: 'wrap' }}>
+                                    {hasBooking && <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#E25D25' }} title="Bookings" />}
+                                    {hasSession && <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#3d9695' }} title="Sessions" />}
+                                    <span style={{ fontSize: 10, color: 'var(--fp-muted)', fontWeight: 600 }}>{count}</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Summary stats — show in all views */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginTop: 20 }}>
                     <div className="card fp" style={{ padding: '20px', textAlign: 'center' }}>
                       <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--fp-accent)' }}>
@@ -5352,43 +5577,6 @@ function FranchisePortal({ user, onLogout }) {
                       <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 4 }}>All Time</div>
                     </div>
                   </div>
-
-                  {/* Upcoming list */}
-                  {weekBookings.length > 0 && (
-                    <div style={{ marginTop: 20 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>This Week's Bookings</div>
-                      {weekBookings.sort((a, b) => a.date === b.date ? a.time.localeCompare(b.time) : a.date.localeCompare(b.date)).map(b => {
-                        const timeLabel = fmtTime(b.time);
-                        const dateObj = new Date(b.date + 'T00:00:00');
-                        const dateLabel = dateObj.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
-                        return (
-                          <div key={b.id} className="card fp" onClick={() => setSelectedBooking(b)} style={{ padding: '14px 18px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer', transition: 'border-color 0.15s', border: '1px solid var(--fp-border)' }}
-                            onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--fp-accent)'}
-                            onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--fp-border)'}
-                          >
-                            <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(226,93,37,0.1)', color: '#E25D25', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                              <div style={{ fontSize: 14, fontWeight: 800, lineHeight: 1 }}>{dateObj.getDate()}</div>
-                              <div style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase' }}>{dateObj.toLocaleDateString('en-AU', { month: 'short' })}</div>
-                            </div>
-                            <div style={{ flex: 1 }}>
-                              <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--fp-text)' }}>{b.customerName}</div>
-                              <div style={{ fontSize: 12, color: 'var(--fp-muted)' }}>{dateLabel} at {timeLabel} · 40 min</div>
-                            </div>
-                            <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                              <a href={`mailto:${b.customerEmail}`} onClick={e => e.stopPropagation()} style={{ fontSize: 12, color: 'var(--fp-accent)', textDecoration: 'none', fontWeight: 600 }}>Email</a>
-                              <a href={`tel:${b.customerPhone?.replace(/\s/g, '')}`} onClick={e => e.stopPropagation()} style={{ fontSize: 12, color: 'var(--fp-accent)', textDecoration: 'none', fontWeight: 600 }}>Call</a>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {weekBookings.length === 0 && (
-                    <div style={{ textAlign: 'center', padding: 32, color: 'var(--fp-muted)', marginTop: 12, fontSize: 14 }}>
-                      No bookings this week. Bookings made via the assessment page will appear here.
-                    </div>
-                  )}
                 </>
               );
             })()}
