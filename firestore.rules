@@ -144,6 +144,12 @@ service cloud.firestore {
 
       // HQ admins can update/delete any booking
       allow update, delete: if isAdmin();
+
+      // Students subcollection (enrolled students + attendance)
+      match /students/{studentId} {
+        allow read: if isAuth();
+        allow create, update, delete: if isAuth();
+      }
     }
 
     // ── Recurrence Rules collection ─────────────────────────────────────────

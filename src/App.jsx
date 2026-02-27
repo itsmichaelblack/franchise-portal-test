@@ -3986,6 +3986,169 @@ function InviteUserModal({ onClose, onInvited }) {
 }
 
 // --- Franchise Partner Portal ---------------------------------------------------
+
+// ── Session Students & Attendance Component ───────────────────────────────────
+function SessionStudents({ bookingId, members }) {
+  const [students, setStudents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showAddDropdown, setShowAddDropdown] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  // Build a flat list of all children from members
+  const allChildren = [];
+  members.forEach(m => {
+    (m.children || []).forEach(c => {
+      allChildren.push({ name: c.name, grade: c.grade || '', parentName: m.name, parentEmail: m.email, parentPhone: m.phone });
+    });
+  });
+
+  // Load students for this booking
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      try {
+        const { collection, getDocs } = await import('firebase/firestore');
+        const { db } = await import('./firebase.js');
+        const snap = await getDocs(collection(db, 'bookings', bookingId, 'students'));
+        setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (e) { console.error('Failed to load students:', e); }
+      setLoading(false);
+    };
+    if (bookingId) load();
+  }, [bookingId]);
+
+  const addStudent = async (child) => {
+    // Check if already added
+    if (students.some(s => s.name.toLowerCase() === child.name.toLowerCase())) return;
+    try {
+      const { addDoc, collection } = await import('firebase/firestore');
+      const { db } = await import('./firebase.js');
+      const data = { name: child.name, grade: child.grade, parentName: child.parentName, parentEmail: child.parentEmail, attendance: '' };
+      const ref = await addDoc(collection(db, 'bookings', bookingId, 'students'), data);
+      setStudents(prev => [...prev, { id: ref.id, ...data }]);
+    } catch (e) { console.error('Failed to add student:', e); }
+    setShowAddDropdown(false);
+    setSearchTerm('');
+  };
+
+  const removeStudent = async (studentId) => {
+    try {
+      const { doc, deleteDoc } = await import('firebase/firestore');
+      const { db } = await import('./firebase.js');
+      await deleteDoc(doc(db, 'bookings', bookingId, 'students', studentId));
+      setStudents(prev => prev.filter(s => s.id !== studentId));
+    } catch (e) { console.error('Failed to remove student:', e); }
+  };
+
+  const updateAttendance = async (studentId, attendance) => {
+    try {
+      const { doc, setDoc } = await import('firebase/firestore');
+      const { db } = await import('./firebase.js');
+      await setDoc(doc(db, 'bookings', bookingId, 'students', studentId), { attendance }, { merge: true });
+      setStudents(prev => prev.map(s => s.id === studentId ? { ...s, attendance } : s));
+    } catch (e) { console.error('Failed to update attendance:', e); }
+  };
+
+  const filteredChildren = allChildren.filter(c => {
+    const term = searchTerm.toLowerCase();
+    const alreadyAdded = students.some(s => s.name.toLowerCase() === c.name.toLowerCase());
+    return !alreadyAdded && (c.name.toLowerCase().includes(term) || c.parentName.toLowerCase().includes(term));
+  });
+
+  const attendanceColors = {
+    attended: { bg: '#ecfdf5', color: '#059669', label: 'Attended' },
+    late: { bg: '#fffbeb', color: '#d97706', label: 'Late' },
+    no_show: { bg: '#fef2f2', color: '#dc2626', label: 'No Show' },
+  };
+
+  return (
+    <div style={{ marginTop: 16, borderTop: '1px solid var(--fp-border)', paddingTop: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fp-text)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          Students ({students.length})
+        </div>
+        <button onClick={() => setShowAddDropdown(!showAddDropdown)} style={{
+          padding: '5px 12px', borderRadius: 8, border: '1px solid var(--fp-accent)', background: 'rgba(109,203,202,0.08)',
+          color: 'var(--fp-accent)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+        }}>
+          + Add
+        </button>
+      </div>
+
+      {/* Add student dropdown */}
+      {showAddDropdown && (
+        <div style={{ marginBottom: 12, border: '1px solid var(--fp-border)', borderRadius: 10, overflow: 'hidden', background: '#fff' }}>
+          <input
+            type="text" placeholder="Search students..." value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)} autoFocus
+            style={{ width: '100%', padding: '10px 12px', border: 'none', borderBottom: '1px solid var(--fp-border)', fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }}
+          />
+          <div style={{ maxHeight: 160, overflowY: 'auto' }}>
+            {filteredChildren.length === 0 ? (
+              <div style={{ padding: '12px', fontSize: 12, color: 'var(--fp-muted)', textAlign: 'center' }}>
+                {allChildren.length === 0 ? 'No students found in Members.' : 'No matching students.'}
+              </div>
+            ) : filteredChildren.slice(0, 10).map((c, i) => (
+              <div key={i} onClick={() => addStudent(c)} style={{
+                padding: '10px 12px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f5f5f5',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--fp-bg)'}
+              onMouseLeave={e => e.currentTarget.style.background = '#fff'}
+              >
+                <div>
+                  <div style={{ fontWeight: 600, color: 'var(--fp-text)' }}>{c.name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--fp-muted)' }}>{c.grade ? `Grade ${c.grade} · ` : ''}{c.parentName}</div>
+                </div>
+                <span style={{ fontSize: 11, color: 'var(--fp-accent)', fontWeight: 700 }}>Add</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Student list with attendance */}
+      {loading ? (
+        <div style={{ fontSize: 12, color: 'var(--fp-muted)', textAlign: 'center', padding: 12 }}>Loading...</div>
+      ) : students.length === 0 ? (
+        <div style={{ fontSize: 12, color: 'var(--fp-muted)', textAlign: 'center', padding: 12, background: 'var(--fp-bg)', borderRadius: 8 }}>
+          No students added yet.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {students.map(s => (
+            <div key={s.id} style={{ padding: '10px 12px', background: 'var(--fp-bg)', borderRadius: 10, border: '1px solid #eef0f2' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--fp-text)' }}>{s.name}</div>
+                  {s.grade && <div style={{ fontSize: 11, color: 'var(--fp-muted)' }}>Grade {s.grade}</div>}
+                </div>
+                <button onClick={() => removeStudent(s.id)} style={{
+                  background: 'none', border: 'none', color: '#dc2626', fontSize: 11, cursor: 'pointer', fontWeight: 600, fontFamily: 'inherit', padding: '2px 6px',
+                }}>Remove</button>
+              </div>
+              {/* Attendance radio buttons */}
+              <div style={{ display: 'flex', gap: 6 }}>
+                {Object.entries(attendanceColors).map(([key, val]) => (
+                  <button key={key} onClick={() => updateAttendance(s.id, key)} style={{
+                    flex: 1, padding: '6px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+                    border: s.attendance === key ? `2px solid ${val.color}` : '1px solid #e5e7eb',
+                    background: s.attendance === key ? val.bg : '#fff',
+                    color: s.attendance === key ? val.color : 'var(--fp-muted)',
+                    transition: 'all 0.15s',
+                  }}>
+                    {val.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── New Session Modal ─────────────────────────────────────────────────────────
 function NewSessionModal({ initialDate, initialHour, editing, services, tutors, saving, onSave, onClose }) {
   const [date, setDate] = useState(editing?.date || initialDate || '');
@@ -4361,6 +4524,7 @@ function FranchisePortal({ user, onLogout }) {
   const [calendarView, setCalendarView] = useState('week'); // 'week' | 'day' | 'month'
   const [calendarDayOffset, setCalendarDayOffset] = useState(0); // for day view
   const [calendarMonthOffset, setCalendarMonthOffset] = useState(0); // for month view
+  const [calendarFilter, setCalendarFilter] = useState(''); // search text for filtering sessions
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [sessionModal, setSessionModal] = useState(null); // null | { date: 'YYYY-MM-DD', hour: number, editing?: booking }
   const [sessionSaving, setSessionSaving] = useState(false);
@@ -5151,6 +5315,17 @@ function FranchisePortal({ user, onLogout }) {
               <div style={{ textAlign: 'center', padding: 48, color: 'var(--fp-muted)' }}>Loading bookings...</div>
             ) : (() => {
               const today = todayInTz;
+
+              // Apply calendar filter to bookings
+              const filterTerm = calendarFilter.toLowerCase().trim();
+              const filteredBookings = filterTerm ? bookings.filter(b => {
+                return (b.serviceName || '').toLowerCase().includes(filterTerm)
+                  || (b.tutorName || '').toLowerCase().includes(filterTerm)
+                  || (b.customerName || '').toLowerCase().includes(filterTerm)
+                  || (b.customerEmail || '').toLowerCase().includes(filterTerm)
+                  || (b.customerPhone || '').toLowerCase().includes(filterTerm);
+              }) : bookings;
+
               const startOfWeek = new Date(today);
               startOfWeek.setDate(today.getDate() - today.getDay() + 1 + calendarWeekOffset * 7);
               const weekDays = [];
@@ -5163,7 +5338,7 @@ function FranchisePortal({ user, onLogout }) {
 
               const weekStart = weekDays[0].toISOString().split('T')[0];
               const weekEnd = weekDays[6].toISOString().split('T')[0];
-              const weekBookings = bookings.filter(b => b.date >= weekStart && b.date <= weekEnd);
+              const weekBookings = filteredBookings.filter(b => b.date >= weekStart && b.date <= weekEnd);
 
               const hours = [];
               for (let h = 8; h <= 21; h++) hours.push(h);
@@ -5225,6 +5400,29 @@ function FranchisePortal({ user, onLogout }) {
                         →
                       </button>
                     </div>
+                  </div>
+
+                  {/* Filter bar */}
+                  <div style={{ marginBottom: 16 }}>
+                    <input
+                      type="text"
+                      placeholder="Filter by service, tutor, student, parent name, email, or phone..."
+                      value={calendarFilter}
+                      onChange={e => setCalendarFilter(e.target.value)}
+                      style={{
+                        width: '100%', padding: '10px 14px', borderRadius: 10,
+                        border: '2px solid var(--fp-border)', background: '#fff',
+                        fontFamily: 'inherit', fontSize: 13, color: 'var(--fp-text)', outline: 'none',
+                        boxSizing: 'border-box',
+                      }}
+                      onFocus={e => e.target.style.borderColor = 'var(--fp-accent)'}
+                      onBlur={e => e.target.style.borderColor = 'var(--fp-border)'}
+                    />
+                    {calendarFilter && (
+                      <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 4 }}>
+                        Showing {filteredBookings.length} of {bookings.length} items
+                      </div>
+                    )}
                   </div>
 
                   {/* ── WEEK VIEW ── */}
@@ -5379,7 +5577,7 @@ function FranchisePortal({ user, onLogout }) {
                     const viewDay = new Date(today);
                     viewDay.setDate(viewDay.getDate() + calendarDayOffset);
                     const dateStr = viewDay.toISOString().split('T')[0];
-                    const dayBookings = bookings.filter(b => b.date === dateStr);
+                    const dayBookings = filteredBookings.filter(b => b.date === dateStr);
                     const jsDow = viewDay.getDay();
                     const availIdx = jsDow === 0 ? 6 : jsDow - 1;
                     const dayAvail = availability[availIdx];
@@ -5472,7 +5670,7 @@ function FranchisePortal({ user, onLogout }) {
 
                     const monthStart = firstDay.toISOString().split('T')[0];
                     const monthEnd = lastDay.toISOString().split('T')[0];
-                    const monthBookings = bookings.filter(b => b.date >= monthStart && b.date <= monthEnd);
+                    const monthBookings = filteredBookings.filter(b => b.date >= monthStart && b.date <= monthEnd);
 
                     // Group by date
                     const byDate = {};
@@ -5500,7 +5698,7 @@ function FranchisePortal({ user, onLogout }) {
                             const isUnavail = !isCurrentMonth || !dayAvail2?.enabled || unavailableDates.some(u => u.date === dateStr);
 
                             // Get bookings for this day for dots
-                            const dayItems = bookings.filter(b => b.date === dateStr);
+                            const dayItems = filteredBookings.filter(b => b.date === dateStr);
                             const hasSession = dayItems.some(b => b.type === 'session');
                             const hasBooking = dayItems.some(b => b.type !== 'session');
 
@@ -6604,6 +6802,11 @@ function FranchisePortal({ user, onLogout }) {
                     </div>
 
                     <div style={{ fontSize: 11, color: 'var(--fp-muted)', textAlign: 'center' }}>Ref: {refCode}</div>
+
+                    {/* Students & Attendance (sessions only) */}
+                    {isSession && (
+                      <SessionStudents bookingId={b.id} members={members} />
+                    )}
 
                     {isSession ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
