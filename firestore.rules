@@ -159,6 +159,22 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // ── Recurrence Rules collection ─────────────────────────────────────────
+    match /recurrence_rules/{ruleId} {
+      // HQ admins can read all rules
+      allow read: if isAdmin();
+
+      // Franchise partners can read rules for their location
+      allow read: if isAuth() && resource.data.locationId == userDoc().locationId;
+
+      // Franchise partners can create, update, and delete rules at their location
+      allow create: if isAuth();
+      allow update, delete: if isAuth() && resource.data.locationId == userDoc().locationId;
+
+      // HQ admins can manage all rules
+      allow update, delete: if isAdmin();
+    }
+
     // ── Invites collection ────────────────────────────────────────────────
     // Stores pending HQ user invites
     match /invites/{inviteId} {

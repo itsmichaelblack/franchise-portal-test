@@ -4023,7 +4023,7 @@ function NewSessionModal({ initialDate, initialHour, editing, services, tutors, 
   const selectedService = services.find(s => s.id === serviceId);
   const selectedTutor = tutors.find(t => t.id === tutorId);
 
-  const handleSubmit = () => {
+  const handleSubmit = (editMode) => {
     if (!date || !time || !serviceId || !tutorId) return;
     onSave({
       date,
@@ -4033,7 +4033,7 @@ function NewSessionModal({ initialDate, initialHour, editing, services, tutors, 
       serviceName: selectedService?.name || '',
       tutorId,
       tutorName: selectedTutor ? `${selectedTutor.firstName} ${selectedTutor.lastName}` : '',
-    }, editing?.id || null);
+    }, editing?.id || null, editMode || null);
   };
 
   const inputStyle = {
@@ -4114,13 +4114,30 @@ function NewSessionModal({ initialDate, initialHour, editing, services, tutors, 
         </div>
 
         {/* Actions */}
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
           <button className="btn btn-ghost fp" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary fp" onClick={handleSubmit}
-            disabled={saving || !date || !time || !serviceId || !tutorId}
-            style={{ opacity: (saving || !date || !time || !serviceId || !tutorId) ? 0.5 : 1 }}>
-            {saving ? 'Saving...' : (editing ? 'Update Session' : 'Create Session')}
-          </button>
+          {editing && editing.recurrenceRuleId ? (
+            <>
+              <button className="btn btn-ghost fp" style={{ border: '2px solid var(--fp-accent)', color: 'var(--fp-accent)' }}
+                onClick={() => handleSubmit('this')}
+                disabled={saving || !date || !time || !serviceId || !tutorId}
+                style={{ opacity: (saving || !date || !time || !serviceId || !tutorId) ? 0.5 : 1 }}>
+                {saving ? 'Saving...' : 'Update This Only'}
+              </button>
+              <button className="btn btn-primary fp"
+                onClick={() => handleSubmit('all')}
+                disabled={saving || !date || !time || !serviceId || !tutorId}
+                style={{ opacity: (saving || !date || !time || !serviceId || !tutorId) ? 0.5 : 1 }}>
+                {saving ? 'Saving...' : 'Update All Future'}
+              </button>
+            </>
+          ) : (
+            <button className="btn btn-primary fp" onClick={() => handleSubmit()}
+              disabled={saving || !date || !time || !serviceId || !tutorId}
+              style={{ opacity: (saving || !date || !time || !serviceId || !tutorId) ? 0.5 : 1 }}>
+              {saving ? 'Saving...' : (editing ? 'Update Session' : 'Create Session')}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -4522,29 +4539,97 @@ function FranchisePortal({ user, onLogout }) {
   };
 
   // Create Session handler
+  // Helper: generate recurring session dates for the next 3 months from a given start date
+  const generateRecurringDates = (startDate, dayOfWeek) => {
+    const dates = [];
+    const start = new Date(startDate + 'T00:00:00');
+    const end = new Date(start);
+    end.setMonth(end.getMonth() + 3);
+    // Find next occurrence of dayOfWeek from start
+    let current = new Date(start);
+    // Move to the correct day of week
+    while (current.getDay() !== dayOfWeek) {
+      current.setDate(current.getDate() + 1);
+    }
+    while (current <= end) {
+      dates.push(current.toISOString().split('T')[0]);
+      current.setDate(current.getDate() + 7);
+    }
+    return dates;
+  };
+
   const handleCreateSession = async (data) => {
     setSessionSaving(true);
     try {
       const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
       const { db } = await import('./firebase.js');
       const selectedSvc = locationServices?.find(s => s.id === data.serviceId);
-      const sessionData = {
-        type: 'session',
-        locationId,
-        date: data.date,
-        time: data.time,
-        duration: selectedSvc?.duration ? Number(selectedSvc.duration) : 40,
-        sessionType: data.sessionType, // 'one_off' or 'recurring'
-        serviceId: data.serviceId,
-        serviceName: data.serviceName,
-        tutorId: data.tutorId,
-        tutorName: data.tutorName,
-        status: 'scheduled',
-        createdAt: serverTimestamp(),
-      };
-      const docRef = await addDoc(collection(db, 'bookings'), sessionData);
-      setBookings(prev => [...prev, { id: docRef.id, ...sessionData, createdAt: new Date() }].sort((a, b) => a.date === b.date ? (a.time || '').localeCompare(b.time || '') : a.date.localeCompare(b.date)));
-      showToast('✓ Session created.');
+      const duration = selectedSvc?.duration ? Number(selectedSvc.duration) : 40;
+
+      if (data.sessionType === 'recurring') {
+        // Create recurrence rule
+        const startDateObj = new Date(data.date + 'T00:00:00');
+        const dayOfWeek = startDateObj.getDay();
+        const ruleData = {
+          locationId,
+          dayOfWeek,
+          time: data.time,
+          duration,
+          serviceId: data.serviceId,
+          serviceName: data.serviceName,
+          tutorId: data.tutorId,
+          tutorName: data.tutorName,
+          status: 'active',
+          startDate: data.date,
+          createdAt: serverTimestamp(),
+        };
+        const ruleRef = await addDoc(collection(db, 'recurrence_rules'), ruleData);
+        const ruleId = ruleRef.id;
+
+        // Generate booking docs for the next 3 months
+        const dates = generateRecurringDates(data.date, dayOfWeek);
+        const newBookings = [];
+        for (const date of dates) {
+          const sessionData = {
+            type: 'session',
+            locationId,
+            date,
+            time: data.time,
+            duration,
+            sessionType: 'recurring',
+            serviceId: data.serviceId,
+            serviceName: data.serviceName,
+            tutorId: data.tutorId,
+            tutorName: data.tutorName,
+            recurrenceRuleId: ruleId,
+            status: 'scheduled',
+            createdAt: serverTimestamp(),
+          };
+          const docRef = await addDoc(collection(db, 'bookings'), sessionData);
+          newBookings.push({ id: docRef.id, ...sessionData, createdAt: new Date() });
+        }
+        setBookings(prev => [...prev, ...newBookings].sort((a, b) => a.date === b.date ? (a.time || '').localeCompare(b.time || '') : a.date.localeCompare(b.date)));
+        showToast(`✓ Recurring session created (${dates.length} occurrences).`);
+      } else {
+        // One-off session (unchanged)
+        const sessionData = {
+          type: 'session',
+          locationId,
+          date: data.date,
+          time: data.time,
+          duration,
+          sessionType: 'one_off',
+          serviceId: data.serviceId,
+          serviceName: data.serviceName,
+          tutorId: data.tutorId,
+          tutorName: data.tutorName,
+          status: 'scheduled',
+          createdAt: serverTimestamp(),
+        };
+        const docRef = await addDoc(collection(db, 'bookings'), sessionData);
+        setBookings(prev => [...prev, { id: docRef.id, ...sessionData, createdAt: new Date() }].sort((a, b) => a.date === b.date ? (a.time || '').localeCompare(b.time || '') : a.date.localeCompare(b.date)));
+        showToast('✓ Session created.');
+      }
     } catch (err) {
       console.error("Failed to create session:", err);
       showToast('✗ Failed to create session.');
@@ -4553,27 +4638,60 @@ function FranchisePortal({ user, onLogout }) {
     setSessionModal(null);
   };
 
-  // Edit Session handler
-  const handleEditSession = async (data, sessionId) => {
+  // Edit Session handler — supports 'this' (single) or 'all' (series) mode
+  const handleEditSession = async (data, sessionId, editMode) => {
     setSessionSaving(true);
     try {
-      const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
+      const { doc, setDoc, collection, getDocs, query, where, serverTimestamp } = await import('firebase/firestore');
       const { db } = await import('./firebase.js');
       const selectedSvc = locationServices?.find(s => s.id === data.serviceId);
+      const duration = selectedSvc?.duration ? Number(selectedSvc.duration) : 40;
       const updateData = {
-        date: data.date,
         time: data.time,
-        duration: selectedSvc?.duration ? Number(selectedSvc.duration) : 40,
-        sessionType: data.sessionType,
+        duration,
         serviceId: data.serviceId,
         serviceName: data.serviceName,
         tutorId: data.tutorId,
         tutorName: data.tutorName,
         updatedAt: serverTimestamp(),
       };
-      await setDoc(doc(db, 'bookings', sessionId), updateData, { merge: true });
-      setBookings(prev => prev.map(b => b.id === sessionId ? { ...b, ...updateData } : b));
-      showToast('✓ Session updated.');
+
+      if (editMode === 'all') {
+        // Find the recurrence rule and update it
+        const session = bookings.find(b => b.id === sessionId);
+        const ruleId = session?.recurrenceRuleId;
+        if (ruleId) {
+          // Update the rule
+          await setDoc(doc(db, 'recurrence_rules', ruleId), {
+            time: data.time,
+            duration,
+            serviceId: data.serviceId,
+            serviceName: data.serviceName,
+            tutorId: data.tutorId,
+            tutorName: data.tutorName,
+            updatedAt: serverTimestamp(),
+          }, { merge: true });
+
+          // Update all future occurrences
+          const today = new Date().toISOString().split('T')[0];
+          const q2 = query(collection(db, 'bookings'), where('recurrenceRuleId', '==', ruleId));
+          const snap = await getDocs(q2);
+          const batch = [];
+          snap.docs.forEach(d => {
+            if (d.data().date >= today) {
+              batch.push(setDoc(doc(db, 'bookings', d.id), updateData, { merge: true }));
+            }
+          });
+          await Promise.all(batch);
+          setBookings(prev => prev.map(b => (b.recurrenceRuleId === ruleId && b.date >= today) ? { ...b, ...updateData } : b));
+          showToast('✓ All future sessions updated.');
+        }
+      } else {
+        // Edit just this one occurrence
+        await setDoc(doc(db, 'bookings', sessionId), { ...updateData, date: data.date }, { merge: true });
+        setBookings(prev => prev.map(b => b.id === sessionId ? { ...b, ...updateData, date: data.date } : b));
+        showToast('✓ Session updated.');
+      }
     } catch (err) {
       console.error("Failed to update session:", err);
       showToast('✗ Failed to update session.');
@@ -4582,14 +4700,41 @@ function FranchisePortal({ user, onLogout }) {
     setSessionModal(null);
   };
 
-  // Delete Session handler
-  const handleDeleteSession = async (sessionId) => {
+  // Delete Session handler — supports 'this' (single) or 'all' (series) mode
+  const handleDeleteSession = async (sessionId, deleteMode) => {
     try {
-      const { doc, deleteDoc } = await import('firebase/firestore');
+      const { doc, deleteDoc, setDoc, collection, getDocs, query, where, serverTimestamp } = await import('firebase/firestore');
       const { db } = await import('./firebase.js');
-      await deleteDoc(doc(db, 'bookings', sessionId));
-      setBookings(prev => prev.filter(b => b.id !== sessionId));
-      showToast('✓ Session deleted.');
+
+      if (deleteMode === 'all') {
+        const session = bookings.find(b => b.id === sessionId);
+        const ruleId = session?.recurrenceRuleId;
+        if (ruleId) {
+          // Cancel the recurrence rule
+          await setDoc(doc(db, 'recurrence_rules', ruleId), { status: 'cancelled', cancelledAt: serverTimestamp() }, { merge: true });
+
+          // Delete all future occurrences
+          const today = new Date().toISOString().split('T')[0];
+          const q2 = query(collection(db, 'bookings'), where('recurrenceRuleId', '==', ruleId));
+          const snap = await getDocs(q2);
+          const deletes = [];
+          const idsToRemove = [];
+          snap.docs.forEach(d => {
+            if (d.data().date >= today) {
+              deletes.push(deleteDoc(doc(db, 'bookings', d.id)));
+              idsToRemove.push(d.id);
+            }
+          });
+          await Promise.all(deletes);
+          setBookings(prev => prev.filter(b => !idsToRemove.includes(b.id)));
+          showToast('✓ Recurring series deleted.');
+        }
+      } else {
+        // Delete just this one occurrence
+        await deleteDoc(doc(db, 'bookings', sessionId));
+        setBookings(prev => prev.filter(b => b.id !== sessionId));
+        showToast('✓ Session deleted.');
+      }
     } catch (err) {
       console.error("Failed to delete session:", err);
       showToast('✗ Failed to delete session.');
@@ -5257,7 +5402,7 @@ function FranchisePortal({ user, onLogout }) {
                 services={locationServices}
                 tutors={tutors}
                 saving={sessionSaving}
-                onSave={(data, editingId) => editingId ? handleEditSession(data, editingId) : handleCreateSession(data)}
+                onSave={(data, editingId, editMode) => editingId ? handleEditSession(data, editingId, editMode) : handleCreateSession(data)}
                 onClose={() => setSessionModal(null)}
               />
             )}
@@ -5270,15 +5415,26 @@ function FranchisePortal({ user, onLogout }) {
                   onClick={e => e.stopPropagation()}>
                   <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--fp-text)', marginBottom: 8 }}>Delete Session</div>
                   <div style={{ fontSize: 14, color: 'var(--fp-muted)', marginBottom: 24, lineHeight: 1.6 }}>
-                    Are you sure you want to delete the <strong>{sessionDeleteConfirm.serviceName || 'session'}</strong> on <strong>{sessionDeleteConfirm.date}</strong>? This action cannot be undone.
+                    {sessionDeleteConfirm.recurrenceRuleId
+                      ? <>This is a <strong>recurring session</strong>. Would you like to delete just this occurrence or the entire series?</>
+                      : <>Are you sure you want to delete the <strong>{sessionDeleteConfirm.serviceName || 'session'}</strong> on <strong>{sessionDeleteConfirm.date}</strong>? This action cannot be undone.</>
+                    }
                   </div>
-                  <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                  <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                     <button className="btn btn-ghost fp" onClick={() => setSessionDeleteConfirm(null)}>Cancel</button>
+                    {sessionDeleteConfirm.recurrenceRuleId && (
+                      <button style={{
+                        padding: '10px 16px', borderRadius: 10, border: '1px solid #fecaca', background: '#fff', color: '#dc2626',
+                        fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
+                      }} onClick={() => handleDeleteSession(sessionDeleteConfirm.id, 'this')}>
+                        Delete This Only
+                      </button>
+                    )}
                     <button style={{
-                      padding: '10px 20px', borderRadius: 10, border: 'none', background: '#dc2626', color: '#fff',
-                      fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit',
-                    }} onClick={() => handleDeleteSession(sessionDeleteConfirm.id)}>
-                      Delete
+                      padding: '10px 16px', borderRadius: 10, border: 'none', background: '#dc2626', color: '#fff',
+                      fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
+                    }} onClick={() => handleDeleteSession(sessionDeleteConfirm.id, sessionDeleteConfirm.recurrenceRuleId ? 'all' : 'this')}>
+                      {sessionDeleteConfirm.recurrenceRuleId ? 'Delete Entire Series' : 'Delete'}
                     </button>
                   </div>
                 </div>

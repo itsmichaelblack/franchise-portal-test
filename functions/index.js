@@ -539,3 +539,76 @@ exports.onEnquiryCreated = functions.firestore
       console.error("Failed to update enquiry:", err);
     }
   });
+
+// ── Scheduled: Generate recurring sessions ────────────────────────────────────
+// Runs every Sunday at midnight UTC. Generates booking documents for active
+// recurrence rules up to 3 months ahead, skipping dates that already have a doc.
+exports.generateRecurringSessions = functions.pubsub
+  .schedule("every sunday 00:00")
+  .timeZone("UTC")
+  .onRun(async () => {
+    const db = getFirestore();
+    const now = new Date();
+    const threeMonthsOut = new Date(now);
+    threeMonthsOut.setMonth(threeMonthsOut.getMonth() + 3);
+
+    // Get all active recurrence rules
+    const rulesSnap = await db
+      .collection("recurrence_rules")
+      .where("status", "==", "active")
+      .get();
+
+    if (rulesSnap.empty) {
+      console.log("No active recurrence rules found.");
+      return null;
+    }
+
+    let totalCreated = 0;
+
+    for (const ruleDoc of rulesSnap.docs) {
+      const rule = ruleDoc.data();
+      const ruleId = ruleDoc.id;
+
+      // Get existing booking dates for this rule
+      const existingSnap = await db
+        .collection("bookings")
+        .where("recurrenceRuleId", "==", ruleId)
+        .get();
+      const existingDates = new Set(existingSnap.docs.map((d) => d.data().date));
+
+      // Generate dates from today to 3 months out
+      const current = new Date(now);
+      // Move to the next occurrence of the rule's dayOfWeek
+      while (current.getDay() !== rule.dayOfWeek) {
+        current.setDate(current.getDate() + 1);
+      }
+
+      while (current <= threeMonthsOut) {
+        const dateStr = current.toISOString().split("T")[0];
+
+        if (!existingDates.has(dateStr)) {
+          await db.collection("bookings").add({
+            type: "session",
+            locationId: rule.locationId,
+            date: dateStr,
+            time: rule.time,
+            duration: rule.duration || 40,
+            sessionType: "recurring",
+            serviceId: rule.serviceId,
+            serviceName: rule.serviceName,
+            tutorId: rule.tutorId,
+            tutorName: rule.tutorName,
+            recurrenceRuleId: ruleId,
+            status: "scheduled",
+            createdAt: new Date(),
+          });
+          totalCreated++;
+        }
+
+        current.setDate(current.getDate() + 7);
+      }
+    }
+
+    console.log(`Generated ${totalCreated} recurring session documents.`);
+    return null;
+  });
