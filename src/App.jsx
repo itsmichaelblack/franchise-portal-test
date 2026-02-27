@@ -5142,24 +5142,27 @@ function FranchisePortal({ user, onLogout }) {
   // Check Stripe Connect status
   useEffect(() => {
     const checkStripe = async () => {
-      const locDoc = locations.find(l => l.id === locationId);
-      if (!locDoc?.stripeAccountId) { setStripeAccountStatus(null); return; }
+      if (!locationId) return;
       try {
+        const { doc, getDoc } = await import('firebase/firestore');
+        const { db } = await import('./firebase.js');
+        const locSnap = await getDoc(doc(db, 'locations', locationId));
+        if (!locSnap.exists()) return;
+        const locData = locSnap.data();
+        if (!locData.stripeAccountId) { setStripeAccountStatus(null); return; }
         const { getFunctions, httpsCallable } = await import('firebase/functions');
-        const functions = getFunctions();
-        const checkStatus = httpsCallable(functions, 'checkStripeAccountStatus');
-        const result = await checkStatus({ stripeAccountId: locDoc.stripeAccountId });
+        const fns = getFunctions();
+        const checkStatus = httpsCallable(fns, 'checkStripeAccountStatus');
+        const result = await checkStatus({ stripeAccountId: locData.stripeAccountId });
         setStripeAccountStatus(result.data);
-        // Update location if status changed
-        if (result.data.chargesEnabled && locDoc.stripeOnboardingStatus !== 'complete') {
-          const { doc, setDoc } = await import('firebase/firestore');
-          const { db } = await import('./firebase.js');
+        if (result.data.chargesEnabled && locData.stripeOnboardingStatus !== 'complete') {
+          const { setDoc } = await import('firebase/firestore');
           await setDoc(doc(db, 'locations', locationId), { stripeOnboardingStatus: 'complete' }, { merge: true });
         }
       } catch (e) { console.error('Failed to check Stripe status:', e); }
     };
-    if (locationId && locations.length) checkStripe();
-  }, [locationId, locations]);
+    if (locationId) checkStripe();
+  }, [locationId]);
 
   // Load sales/memberships
   useEffect(() => {
