@@ -540,6 +540,237 @@ exports.onEnquiryCreated = functions.firestore
     }
   });
 
+// ── Stripe Integration ─────────────────────────────────────────────────────
+const stripe = require("stripe")(functions.config().stripe?.secret_key || "");
+
+// Create a Stripe Connect account for a franchise partner and return onboarding link
+exports.createStripeConnectAccount = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  }
+
+  const { locationId } = data;
+  if (!locationId) {
+    throw new functions.https.HttpsError("invalid-argument", "locationId required.");
+  }
+
+  const db = getFirestore();
+  const locationDoc = await db.doc(`locations/${locationId}`).get();
+  if (!locationDoc.exists) {
+    throw new functions.https.HttpsError("not-found", "Location not found.");
+  }
+
+  const location = locationDoc.data();
+
+  // Check if already has a Stripe account
+  if (location.stripeAccountId) {
+    // Create a new account link for re-onboarding
+    const accountLink = await stripe.accountLinks.create({
+      account: location.stripeAccountId,
+      refresh_url: `${PORTAL_URL}?stripe_refresh=true`,
+      return_url: `${PORTAL_URL}?stripe_connected=true`,
+      type: "account_onboarding",
+    });
+    return { url: accountLink.url, accountId: location.stripeAccountId };
+  }
+
+  // Determine country from location
+  const country = (location.country || "AU").toUpperCase();
+
+  // Create Standard Connect account
+  const account = await stripe.accounts.create({
+    type: "standard",
+    country,
+    email: location.email,
+    metadata: {
+      locationId,
+      locationName: location.name,
+    },
+  });
+
+  // Save Stripe account ID to the location
+  await db.doc(`locations/${locationId}`).update({
+    stripeAccountId: account.id,
+    stripeOnboardingStatus: "pending",
+  });
+
+  // Create account link for onboarding
+  const accountLink = await stripe.accountLinks.create({
+    account: account.id,
+    refresh_url: `${PORTAL_URL}?stripe_refresh=true`,
+    return_url: `${PORTAL_URL}?stripe_connected=true`,
+    type: "account_onboarding",
+  });
+
+  return { url: accountLink.url, accountId: account.id };
+});
+
+// Check Stripe Connect account status
+exports.checkStripeAccountStatus = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  }
+
+  const { stripeAccountId } = data;
+  if (!stripeAccountId) {
+    throw new functions.https.HttpsError("invalid-argument", "stripeAccountId required.");
+  }
+
+  const account = await stripe.accounts.retrieve(stripeAccountId);
+
+  return {
+    chargesEnabled: account.charges_enabled,
+    payoutsEnabled: account.payouts_enabled,
+    detailsSubmitted: account.details_submitted,
+    requirements: account.requirements,
+  };
+});
+
+// Create a Stripe Customer + SetupIntent for collecting a parent's card
+exports.createSetupIntent = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  }
+
+  const { parentEmail, parentName, parentPhone, locationId, saleId } = data;
+  if (!parentEmail || !locationId) {
+    throw new functions.https.HttpsError("invalid-argument", "parentEmail and locationId required.");
+  }
+
+  const db = getFirestore();
+  const locationDoc = await db.doc(`locations/${locationId}`).get();
+  if (!locationDoc.exists) {
+    throw new functions.https.HttpsError("not-found", "Location not found.");
+  }
+
+  const location = locationDoc.data();
+  const stripeAccountId = location.stripeAccountId;
+
+  if (!stripeAccountId) {
+    throw new functions.https.HttpsError("failed-precondition", "Franchise partner has not connected Stripe yet.");
+  }
+
+  // Check if customer already exists for this parent on this connected account
+  const existingCustomers = await stripe.customers.list(
+    { email: parentEmail, limit: 1 },
+    { stripeAccount: stripeAccountId }
+  );
+
+  let customer;
+  if (existingCustomers.data.length > 0) {
+    customer = existingCustomers.data[0];
+  } else {
+    customer = await stripe.customers.create(
+      {
+        email: parentEmail,
+        name: parentName || undefined,
+        phone: parentPhone || undefined,
+        metadata: { locationId, saleId: saleId || "" },
+      },
+      { stripeAccount: stripeAccountId }
+    );
+  }
+
+  // Create SetupIntent on the connected account
+  const setupIntent = await stripe.setupIntents.create(
+    {
+      customer: customer.id,
+      payment_method_types: ["card"],
+      metadata: { saleId: saleId || "", locationId },
+    },
+    { stripeAccount: stripeAccountId }
+  );
+
+  return {
+    clientSecret: setupIntent.client_secret,
+    customerId: customer.id,
+    stripeAccountId,
+  };
+});
+
+// Confirm card was saved — update sale with payment method info
+exports.confirmPaymentMethod = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  }
+
+  const { saleId, customerId, stripeAccountId } = data;
+  if (!saleId || !customerId) {
+    throw new functions.https.HttpsError("invalid-argument", "saleId and customerId required.");
+  }
+
+  const db = getFirestore();
+
+  // Get customer's payment methods from connected account
+  const paymentMethods = await stripe.paymentMethods.list(
+    { customer: customerId, type: "card" },
+    { stripeAccount: stripeAccountId }
+  );
+
+  if (paymentMethods.data.length === 0) {
+    throw new functions.https.HttpsError("not-found", "No payment method found.");
+  }
+
+  const pm = paymentMethods.data[0];
+
+  // Update the sale
+  await db.doc(`sales/${saleId}`).update({
+    stripeCustomerId: customerId,
+    stripeAccountId,
+    paymentMethod: {
+      id: pm.id,
+      brand: pm.card.brand,
+      last4: pm.card.last4,
+      expMonth: pm.card.exp_month,
+      expYear: pm.card.exp_year,
+    },
+    stripeStatus: "connected",
+  });
+
+  return { success: true, last4: pm.card.last4, brand: pm.card.brand };
+});
+
+// Create a payment link for a parent to enter their own card details
+exports.createPaymentLink = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  }
+
+  const { saleId, locationId } = data;
+  if (!saleId || !locationId) {
+    throw new functions.https.HttpsError("invalid-argument", "saleId and locationId required.");
+  }
+
+  const db = getFirestore();
+  const saleDoc = await db.doc(`sales/${saleId}`).get();
+  if (!saleDoc.exists) {
+    throw new functions.https.HttpsError("not-found", "Sale not found.");
+  }
+
+  const sale = saleDoc.data();
+  const locationDoc = await db.doc(`locations/${locationId}`).get();
+  const location = locationDoc.data();
+  const stripeAccountId = location.stripeAccountId;
+
+  if (!stripeAccountId) {
+    throw new functions.https.HttpsError("failed-precondition", "Stripe not connected.");
+  }
+
+  // Create a Checkout Session in setup mode on the connected account
+  const session = await stripe.checkout.sessions.create(
+    {
+      mode: "setup",
+      customer_email: sale.parentEmail,
+      success_url: `${PORTAL_URL}?payment_setup=success&sale_id=${saleId}`,
+      cancel_url: `${PORTAL_URL}?payment_setup=cancelled`,
+      metadata: { saleId, locationId },
+    },
+    { stripeAccount: stripeAccountId }
+  );
+
+  return { url: session.url };
+});
+
 // ── Scheduled: Generate recurring sessions ────────────────────────────────────
 // Runs every Sunday at midnight UTC. Generates booking documents for active
 // recurrence rules up to 3 months ahead, skipping dates that already have a doc.

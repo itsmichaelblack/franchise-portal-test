@@ -4616,6 +4616,9 @@ function FranchisePortal({ user, onLogout }) {
   const [salesLoading, setSalesLoading] = useState(true);
   const [showNewSaleModal, setShowNewSaleModal] = useState(false);
   const [saleSaving, setSaleSaving] = useState(false);
+  const [stripeConnecting, setStripeConnecting] = useState(false);
+  const [stripeAccountStatus, setStripeAccountStatus] = useState(null); // {chargesEnabled, payoutsEnabled, detailsSubmitted}
+  const [cardCollecting, setCardCollecting] = useState(null); // saleId being collected for
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [sessionModal, setSessionModal] = useState(null); // null | { date: 'YYYY-MM-DD', hour: number, editing?: booking }
   const [sessionSaving, setSessionSaving] = useState(false);
@@ -5135,6 +5138,28 @@ function FranchisePortal({ user, onLogout }) {
     };
     if (locationId) loadAvail();
   }, [locationId]);
+
+  // Check Stripe Connect status
+  useEffect(() => {
+    const checkStripe = async () => {
+      const locDoc = locations.find(l => l.id === locationId);
+      if (!locDoc?.stripeAccountId) { setStripeAccountStatus(null); return; }
+      try {
+        const { getFunctions, httpsCallable } = await import('firebase/functions');
+        const functions = getFunctions();
+        const checkStatus = httpsCallable(functions, 'checkStripeAccountStatus');
+        const result = await checkStatus({ stripeAccountId: locDoc.stripeAccountId });
+        setStripeAccountStatus(result.data);
+        // Update location if status changed
+        if (result.data.chargesEnabled && locDoc.stripeOnboardingStatus !== 'complete') {
+          const { doc, setDoc } = await import('firebase/firestore');
+          const { db } = await import('./firebase.js');
+          await setDoc(doc(db, 'locations', locationId), { stripeOnboardingStatus: 'complete' }, { merge: true });
+        }
+      } catch (e) { console.error('Failed to check Stripe status:', e); }
+    };
+    if (locationId && locations.length) checkStripe();
+  }, [locationId, locations]);
 
   // Load sales/memberships
   useEffect(() => {
@@ -6437,6 +6462,103 @@ function FranchisePortal({ user, onLogout }) {
               </button>
             </div>
 
+            {/* Stripe Connect */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 700, marginTop: 32 }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 18, color: 'var(--fp-text)', marginBottom: 4 }}>Stripe Payments</div>
+                <div style={{ fontSize: 13, color: 'var(--fp-muted)' }}>Connect your Stripe account to process payments from parents.</div>
+              </div>
+
+              <div className="card fp" style={{ padding: '24px' }}>
+                {(() => {
+                  const loc = locations.find(l => l.id === locationId);
+                  const hasStripe = loc?.stripeAccountId;
+                  const isConnected = stripeAccountStatus?.chargesEnabled && stripeAccountStatus?.payoutsEnabled;
+
+                  if (isConnected) {
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                        <div style={{ width: 48, height: 48, borderRadius: 12, background: '#ecfdf5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <Icon path={icons.check} size={22} style={{ color: '#059669' }} />
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 700, fontSize: 15, color: '#059669' }}>Stripe Connected</div>
+                          <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 2 }}>
+                            Payments and payouts are enabled. Account: {loc.stripeAccountId}
+                          </div>
+                        </div>
+                        <a href="https://dashboard.stripe.com" target="_blank" rel="noopener noreferrer" className="btn btn-ghost fp" style={{ fontSize: 12, textDecoration: 'none' }}>
+                          Open Stripe Dashboard →
+                        </a>
+                      </div>
+                    );
+                  }
+
+                  if (hasStripe && !isConnected) {
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                        <div style={{ width: 48, height: 48, borderRadius: 12, background: '#fffbeb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <Icon path={icons.alert} size={22} style={{ color: '#d97706' }} />
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 700, fontSize: 15, color: '#d97706' }}>Onboarding Incomplete</div>
+                          <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 2 }}>
+                            Your Stripe account needs additional information before you can accept payments.
+                          </div>
+                        </div>
+                        <button className="btn btn-primary fp" disabled={stripeConnecting} onClick={async () => {
+                          setStripeConnecting(true);
+                          try {
+                            const { getFunctions, httpsCallable } = await import('firebase/functions');
+                            const fns = getFunctions();
+                            const createAccount = httpsCallable(fns, 'createStripeConnectAccount');
+                            const result = await createAccount({ locationId });
+                            window.open(result.data.url, '_blank');
+                          } catch (e) {
+                            console.error('Stripe connect error:', e);
+                            showToast('✗ Failed to open Stripe onboarding.');
+                          }
+                          setStripeConnecting(false);
+                        }}>
+                          {stripeConnecting ? 'Opening...' : 'Complete Onboarding'}
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                      <div style={{ width: 48, height: 48, borderRadius: 12, background: 'var(--fp-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Icon path={icons.creditCard} size={22} style={{ color: 'var(--fp-muted)' }} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)' }}>Connect Stripe</div>
+                        <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 2, lineHeight: 1.5 }}>
+                          Connect your Stripe account to accept card payments from parents. Payments go directly to your account.
+                        </div>
+                      </div>
+                      <button className="btn btn-primary fp" disabled={stripeConnecting} onClick={async () => {
+                        setStripeConnecting(true);
+                        try {
+                          const { getFunctions, httpsCallable } = await import('firebase/functions');
+                          const fns = getFunctions();
+                          const createAccount = httpsCallable(fns, 'createStripeConnectAccount');
+                          const result = await createAccount({ locationId });
+                          window.open(result.data.url, '_blank');
+                        } catch (e) {
+                          console.error('Stripe connect error:', e);
+                          showToast('✗ Failed to start Stripe onboarding.');
+                        }
+                        setStripeConnecting(false);
+                      }}>
+                        {stripeConnecting ? 'Setting up...' : 'Connect Stripe'}
+                      </button>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+
             {/* Pricing Options */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 700, marginTop: 32 }}>
               <div>
@@ -6763,19 +6885,99 @@ function FranchisePortal({ user, onLogout }) {
                           {fmtDate(s.activationDate)}
                         </td>
                         <td style={{ padding: '14px 16px' }}>
-                          <span style={{
-                            padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600,
-                            background: hasPayment ? '#ecfdf5' : '#fef2f2',
-                            color: hasPayment ? '#059669' : '#dc2626',
-                          }}>
-                            {hasPayment ? 'Connected' : 'Required'}
-                          </span>
+                          {hasPayment ? (
+                            <div>
+                              <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600, background: '#ecfdf5', color: '#059669' }}>
+                                {s.paymentMethod?.brand} •••• {s.paymentMethod?.last4}
+                              </span>
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }} onClick={e => e.stopPropagation()}>
+                              <button className="btn btn-ghost fp" style={{ padding: '5px 10px', fontSize: 11, border: '1px solid var(--fp-accent)', color: 'var(--fp-accent)' }}
+                                onClick={async () => {
+                                  setCardCollecting(s.id);
+                                  try {
+                                    const { getFunctions, httpsCallable } = await import('firebase/functions');
+                                    const fns = getFunctions();
+                                    const createSetup = httpsCallable(fns, 'createSetupIntent');
+                                    const result = await createSetup({ parentEmail: s.parentEmail, parentName: s.parentName, parentPhone: s.parentPhone, locationId, saleId: s.id });
+                                    // Store setup intent data for the card form
+                                    setCardCollecting({ saleId: s.id, clientSecret: result.data.clientSecret, customerId: result.data.customerId, stripeAccountId: result.data.stripeAccountId });
+                                  } catch (e) {
+                                    console.error('Setup intent error:', e);
+                                    showToast('✗ ' + (e.message || 'Failed to set up card collection. Is Stripe connected?'));
+                                    setCardCollecting(null);
+                                  }
+                                }}>
+                                Collect Card
+                              </button>
+                              <button className="btn btn-ghost fp" style={{ padding: '5px 10px', fontSize: 11 }}
+                                onClick={async () => {
+                                  try {
+                                    const { getFunctions, httpsCallable } = await import('firebase/functions');
+                                    const fns = getFunctions();
+                                    const createLink = httpsCallable(fns, 'createPaymentLink');
+                                    const result = await createLink({ saleId: s.id, locationId });
+                                    // Copy link to clipboard
+                                    await navigator.clipboard.writeText(result.data.url);
+                                    showToast('✓ Payment link copied to clipboard. Send it to the parent.');
+                                  } catch (e) {
+                                    console.error('Payment link error:', e);
+                                    showToast('✗ ' + (e.message || 'Failed to create payment link.'));
+                                  }
+                                }}>
+                                Send Link
+                              </button>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {/* Card Collection Modal */}
+          {cardCollecting && cardCollecting.clientSecret && (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              onClick={() => setCardCollecting(null)}>
+              <div style={{ background: '#fff', borderRadius: 16, padding: 32, maxWidth: 440, width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}
+                onClick={e => e.stopPropagation()}>
+                <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--fp-text)', marginBottom: 8 }}>Collect Card Details</div>
+                <div style={{ fontSize: 13, color: 'var(--fp-muted)', marginBottom: 20 }}>Enter the parent's card details below. The card will be saved for recurring payments.</div>
+
+                <div style={{ padding: '16px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, marginBottom: 16, fontSize: 12, color: '#92400e' }}>
+                  <strong>Stripe Elements:</strong> To use the inline card form, you'll need to add the Stripe.js library to your HTML.
+                  For now, use the "Send Link" button to send a Stripe-hosted payment page to the parent, or add the Stripe Elements integration after deploying the Cloud Functions.
+                </div>
+
+                <div style={{ padding: '16px', background: 'var(--fp-bg)', borderRadius: 10, marginBottom: 20 }}>
+                  <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginBottom: 8 }}>Setup Intent Client Secret (for Stripe Elements):</div>
+                  <code style={{ fontSize: 11, wordBreak: 'break-all', color: 'var(--fp-text)' }}>{cardCollecting.clientSecret?.slice(0, 30)}...</code>
+                </div>
+
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                  <button className="btn btn-ghost fp" onClick={() => setCardCollecting(null)}>Close</button>
+                  <button className="btn btn-primary fp" onClick={async () => {
+                    try {
+                      const { getFunctions, httpsCallable } = await import('firebase/functions');
+                      const fns = getFunctions();
+                      const confirm = httpsCallable(fns, 'confirmPaymentMethod');
+                      const result = await confirm({ saleId: cardCollecting.saleId, customerId: cardCollecting.customerId, stripeAccountId: cardCollecting.stripeAccountId });
+                      setSales(prev => prev.map(s => s.id === cardCollecting.saleId ? { ...s, paymentMethod: { brand: result.data.brand, last4: result.data.last4 }, stripeStatus: 'connected' } : s));
+                      showToast(`✓ Card saved: ${result.data.brand} •••• ${result.data.last4}`);
+                      setCardCollecting(null);
+                    } catch (e) {
+                      console.error('Confirm error:', e);
+                      showToast('✗ Card not yet saved. Ask the parent to complete via payment link.');
+                    }
+                  }}>
+                    Verify Card
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
