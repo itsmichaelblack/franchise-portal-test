@@ -92,6 +92,7 @@ const icons = {
   alert: "M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z M12 9v4 M12 17h.01",
   eye: "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
   send: "M22 2L11 13 M22 2l-7 20-4-9-9-4 20-7z",
+  creditCard: "M1 4h22v16H1z M1 10h22",
 };
 
 // --- Styles ---------------------------------------------------------------------
@@ -4611,6 +4612,10 @@ function FranchisePortal({ user, onLogout }) {
   const [calendarDayOffset, setCalendarDayOffset] = useState(0); // for day view
   const [calendarMonthOffset, setCalendarMonthOffset] = useState(0); // for month view
   const [calendarFilter, setCalendarFilter] = useState(''); // search text for filtering sessions
+  const [sales, setSales] = useState([]);
+  const [salesLoading, setSalesLoading] = useState(true);
+  const [showNewSaleModal, setShowNewSaleModal] = useState(false);
+  const [saleSaving, setSaleSaving] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [sessionModal, setSessionModal] = useState(null); // null | { date: 'YYYY-MM-DD', hour: number, editing?: booking }
   const [sessionSaving, setSessionSaving] = useState(false);
@@ -5131,6 +5136,22 @@ function FranchisePortal({ user, onLogout }) {
     if (locationId) loadAvail();
   }, [locationId]);
 
+  // Load sales/memberships
+  useEffect(() => {
+    const loadSales = async () => {
+      setSalesLoading(true);
+      try {
+        const { collection, getDocs, query, where } = await import('firebase/firestore');
+        const { db } = await import('./firebase.js');
+        const q = query(collection(db, 'sales'), where('locationId', '==', locationId));
+        const snap = await getDocs(q);
+        setSales(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)));
+      } catch (e) { console.error('Failed to load sales:', e); }
+      setSalesLoading(false);
+    };
+    if (locationId) loadSales();
+  }, [locationId]);
+
   // Load pricing settings
   useEffect(() => {
     const loadPricing = async () => {
@@ -5227,6 +5248,9 @@ function FranchisePortal({ user, onLogout }) {
           </button>
           <button className={`nav-item ${page === 'tutors' ? 'active' : ''}`} onClick={() => { setPagePersist('tutors'); setSelectedTutor(null); }}>
             <Icon path={icons.users} size={16} /> Tutors
+          </button>
+          <button className={`nav-item ${page === 'payments' ? 'active' : ''}`} onClick={() => setPagePersist('payments')}>
+            <Icon path={icons.creditCard} size={16} /> Payments
           </button>
           <button className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => setPagePersist('settings')}>
             <Icon path={icons.clock} size={16} /> Settings
@@ -6848,6 +6872,325 @@ function FranchisePortal({ user, onLogout }) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* === PAYMENTS PAGE === */}
+      {page === 'payments' && (
+        <>
+          <div className="page-header">
+            <div className="page-header-left">
+              <div className="page-title" style={{ color: 'var(--fp-text)' }}>Payments</div>
+              <div className="page-desc" style={{ color: 'var(--fp-muted)' }}>Manage memberships and sales for your centre.</div>
+            </div>
+            <button className="btn btn-primary fp" onClick={() => setShowNewSaleModal(true)}>
+              <Icon path={icons.plus} size={14} /> New Sale
+            </button>
+          </div>
+
+          {salesLoading ? (
+            <div style={{ textAlign: 'center', padding: 48, color: 'var(--fp-muted)' }}>Loading sales...</div>
+          ) : sales.length === 0 ? (
+            <div className="card fp" style={{ textAlign: 'center', padding: 48 }}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>💳</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--fp-text)', marginBottom: 4 }}>No sales yet</div>
+              <div style={{ fontSize: 13, color: 'var(--fp-muted)', marginBottom: 16 }}>Create your first membership sale to get started.</div>
+              <button className="btn btn-primary fp" onClick={() => setShowNewSaleModal(true)}>
+                <Icon path={icons.plus} size={14} /> New Sale
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* Summary cards */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 20 }}>
+                <div className="card fp" style={{ padding: '20px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--fp-accent)' }}>{sales.filter(s => s.status === 'active').length}</div>
+                  <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 4 }}>Active</div>
+                </div>
+                <div className="card fp" style={{ padding: '20px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--fp-accent)' }}>
+                    ${sales.filter(s => s.status === 'active').reduce((sum, s) => sum + (Number(s.weeklyAmount) || 0), 0).toFixed(0)}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 4 }}>Weekly Revenue</div>
+                </div>
+                <div className="card fp" style={{ padding: '20px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--fp-accent)' }}>{sales.length}</div>
+                  <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 4 }}>Total Sales</div>
+                </div>
+              </div>
+
+              {/* Sales table */}
+              <div className="card fp" style={{ padding: 0, overflow: 'hidden' }}>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ background: 'var(--fp-bg)', borderBottom: '2px solid var(--fp-border)' }}>
+                        <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 700, color: 'var(--fp-muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Children</th>
+                        <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 700, color: 'var(--fp-muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Membership</th>
+                        <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 700, color: 'var(--fp-muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Amount</th>
+                        <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 700, color: 'var(--fp-muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Activation</th>
+                        <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 700, color: 'var(--fp-muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>First Payment</th>
+                        <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 700, color: 'var(--fp-muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sales.map(s => (
+                        <tr key={s.id} style={{ borderBottom: '1px solid var(--fp-border)' }}>
+                          <td style={{ padding: '12px 16px', fontWeight: 600, color: 'var(--fp-text)' }}>
+                            {(s.children || []).map(c => c.name).join(', ') || '—'}
+                            {s.parentName && <div style={{ fontSize: 11, color: 'var(--fp-muted)', fontWeight: 400 }}>{s.parentName}</div>}
+                          </td>
+                          <td style={{ padding: '12px 16px', color: 'var(--fp-text)' }}>{s.membershipName || '—'}</td>
+                          <td style={{ padding: '12px 16px', fontWeight: 700, color: 'var(--fp-text)' }}>
+                            ${Number(s.weeklyAmount || 0).toFixed(2)}/wk
+                            {s.setupFee > 0 && <div style={{ fontSize: 11, color: 'var(--fp-muted)', fontWeight: 400 }}>+ ${Number(s.setupFee).toFixed(2)} setup</div>}
+                          </td>
+                          <td style={{ padding: '12px 16px', color: 'var(--fp-muted)' }}>{s.activationDate || '—'}</td>
+                          <td style={{ padding: '12px 16px', color: 'var(--fp-muted)' }}>{s.firstPaymentDate || '—'}</td>
+                          <td style={{ padding: '12px 16px' }}>
+                            <span style={{
+                              padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, textTransform: 'capitalize',
+                              background: s.status === 'active' ? '#ecfdf5' : '#f5f5f5',
+                              color: s.status === 'active' ? '#059669' : 'var(--fp-muted)',
+                            }}>{s.status || 'active'}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* New Sale Modal */}
+          {showNewSaleModal && (() => {
+            const enabledPricing = Object.entries(PRICING_OPTIONS).flatMap(([catKey, cat]) =>
+              cat.items.filter(item => pricing[item.id]?.enabled).map(item => ({
+                ...item,
+                category: cat.label,
+                price: pricing[item.id]?.price || '',
+              }))
+            );
+
+            const NewSaleForm = () => {
+              const [saleChildren, setSaleChildren] = useState([]);
+              const [childSearch, setChildSearch] = useState('');
+              const [showChildDrop, setShowChildDrop] = useState(false);
+              const [selectedMembership, setSelectedMembership] = useState('');
+              const [activationDate, setActivationDate] = useState(new Date().toISOString().split('T')[0]);
+              const [firstPaymentDate, setFirstPaymentDate] = useState(new Date().toISOString().split('T')[0]);
+              const [setupFee, setSetupFee] = useState('99');
+              const [discountType, setDiscountType] = useState('none'); // 'none', 'fixed', 'percent'
+              const [discountValue, setDiscountValue] = useState('');
+
+              const allKids = [];
+              members.forEach(m => {
+                (m.children || []).forEach(c => {
+                  allKids.push({ name: c.name, grade: c.grade || '', parentName: m.name, parentEmail: m.email, parentPhone: m.phone });
+                });
+              });
+
+              const chosenMembership = enabledPricing.find(p => p.id === selectedMembership);
+              const basePrice = chosenMembership ? Number(chosenMembership.price) || 0 : 0;
+              let finalPrice = basePrice;
+              if (discountType === 'fixed') finalPrice = Math.max(0, basePrice - (Number(discountValue) || 0));
+              if (discountType === 'percent') finalPrice = Math.max(0, basePrice * (1 - (Number(discountValue) || 0) / 100));
+
+              const inputStyle2 = { width: '100%', padding: '11px 14px', borderRadius: 10, border: '2px solid var(--fp-border)', background: '#fff', fontFamily: 'inherit', fontSize: 14, color: 'var(--fp-text)', outline: 'none', boxSizing: 'border-box' };
+              const selectStyle2 = { ...inputStyle2, cursor: 'pointer', appearance: 'none', backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '16px', paddingRight: 36 };
+              const lblStyle = { fontSize: 13, fontWeight: 700, color: 'var(--fp-text)', marginBottom: 6, display: 'block' };
+
+              const handleProcessSale = async () => {
+                if (!saleChildren.length || !selectedMembership || !activationDate || !firstPaymentDate) return;
+                setSaleSaving(true);
+                try {
+                  const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
+                  const { db } = await import('./firebase.js');
+                  const saleData = {
+                    locationId,
+                    children: saleChildren,
+                    parentName: saleChildren[0]?.parentName || '',
+                    parentEmail: saleChildren[0]?.parentEmail || '',
+                    parentPhone: saleChildren[0]?.parentPhone || '',
+                    membershipId: selectedMembership,
+                    membershipName: chosenMembership?.name || '',
+                    membershipCategory: chosenMembership?.category || '',
+                    basePrice,
+                    discountType,
+                    discountValue: Number(discountValue) || 0,
+                    weeklyAmount: finalPrice,
+                    setupFee: Number(setupFee) || 0,
+                    activationDate,
+                    firstPaymentDate,
+                    billingFrequency: 'weekly',
+                    status: 'active',
+                    stripeStatus: 'pending', // placeholder for future Stripe integration
+                    createdAt: serverTimestamp(),
+                  };
+                  const ref = await addDoc(collection(db, 'sales'), saleData);
+                  setSales(prev => [{ id: ref.id, ...saleData, createdAt: new Date() }, ...prev]);
+                  showToast('✓ Sale processed successfully.');
+                  setShowNewSaleModal(false);
+                } catch (e) {
+                  console.error('Failed to process sale:', e);
+                  showToast('✗ Failed to process sale.');
+                }
+                setSaleSaving(false);
+              };
+
+              return (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto' }}
+                  onClick={() => setShowNewSaleModal(false)}>
+                  <div style={{ background: '#fff', borderRadius: 16, padding: 32, maxWidth: 520, width: '90%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}
+                    onClick={e => e.stopPropagation()}>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--fp-text)', marginBottom: 24 }}>New Sale</div>
+
+                    {/* Step 1: Select Children */}
+                    <div style={{ marginBottom: 16 }}>
+                      <label style={lblStyle}>Children *</label>
+                      <div style={{ position: 'relative' }}>
+                        <input type="text" placeholder="Search children..." value={childSearch}
+                          onChange={e => { setChildSearch(e.target.value); setShowChildDrop(true); }}
+                          onFocus={() => { if (childSearch) setShowChildDrop(true); }}
+                          style={inputStyle2} />
+                        {showChildDrop && childSearch && (
+                          <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid var(--fp-border)', borderRadius: 10, marginTop: 4, zIndex: 10, maxHeight: 150, overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}>
+                            {(() => {
+                              const term = childSearch.toLowerCase();
+                              const filtered = allKids.filter(c =>
+                                !saleChildren.some(sc => sc.name.toLowerCase() === c.name.toLowerCase() && sc.parentEmail === c.parentEmail) &&
+                                (c.name.toLowerCase().includes(term) || c.parentName.toLowerCase().includes(term))
+                              );
+                              if (!filtered.length) return <div style={{ padding: 12, fontSize: 12, color: 'var(--fp-muted)', textAlign: 'center' }}>No matching children.</div>;
+                              return filtered.slice(0, 8).map((c, i) => (
+                                <div key={i} onClick={() => {
+                                  setSaleChildren(prev => [...prev, c]);
+                                  setChildSearch(''); setShowChildDrop(false);
+                                }} style={{ padding: '10px 12px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f5f5f5' }}
+                                onMouseEnter={e => e.currentTarget.style.background = 'var(--fp-bg)'}
+                                onMouseLeave={e => e.currentTarget.style.background = '#fff'}>
+                                  <div style={{ fontWeight: 600 }}>{c.name}</div>
+                                  <div style={{ fontSize: 11, color: 'var(--fp-muted)' }}>{c.grade ? `${c.grade} · ` : ''}{c.parentName}</div>
+                                </div>
+                              ));
+                            })()}
+                          </div>
+                        )}
+                      </div>
+                      {saleChildren.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                          {saleChildren.map((c, i) => (
+                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', background: 'rgba(109,203,202,0.1)', borderRadius: 8, fontSize: 12, fontWeight: 600 }}>
+                              {c.name}
+                              <button onClick={() => setSaleChildren(prev => prev.filter((_, j) => j !== i))} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, padding: 0, fontFamily: 'inherit' }}>×</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Step 2: Select Membership */}
+                    <div style={{ marginBottom: 16 }}>
+                      <label style={lblStyle}>Membership *</label>
+                      {enabledPricing.length === 0 ? (
+                        <div style={{ fontSize: 12, color: '#E25D25', padding: '10px 14px', background: '#fef2f2', borderRadius: 8 }}>No pricing options enabled. Go to Settings to enable memberships.</div>
+                      ) : (
+                        <select value={selectedMembership} onChange={e => setSelectedMembership(e.target.value)} style={selectStyle2}>
+                          <option value="">Select membership...</option>
+                          {enabledPricing.map(p => (
+                            <option key={p.id} value={p.id}>{p.name} — ${Number(p.price).toFixed(2)}/wk</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+
+                    {/* Step 3 & 4: Dates */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+                      <div>
+                        <label style={lblStyle}>Activation Date *</label>
+                        <input type="date" value={activationDate} onChange={e => setActivationDate(e.target.value)} style={inputStyle2} />
+                      </div>
+                      <div>
+                        <label style={lblStyle}>First Payment Date *</label>
+                        <input type="date" value={firstPaymentDate} onChange={e => setFirstPaymentDate(e.target.value)} style={inputStyle2} />
+                      </div>
+                    </div>
+
+                    {/* Step 5: Setup Fee */}
+                    <div style={{ marginBottom: 16 }}>
+                      <label style={lblStyle}>One-Time Setup Fee</label>
+                      <div style={{ display: 'flex', alignItems: 'center', border: '2px solid var(--fp-border)', borderRadius: 10, overflow: 'hidden', background: '#fff' }}>
+                        <span style={{ padding: '11px 10px', color: 'var(--fp-muted)', fontWeight: 700, fontSize: 14 }}>$</span>
+                        <input type="number" min="0" step="0.01" value={setupFee} onChange={e => setSetupFee(e.target.value)}
+                          style={{ flex: 1, padding: '11px 14px 11px 0', border: 'none', outline: 'none', fontFamily: 'inherit', fontSize: 14, color: 'var(--fp-text)', background: 'transparent' }} />
+                      </div>
+                    </div>
+
+                    {/* Step 6: Discount */}
+                    <div style={{ marginBottom: 20 }}>
+                      <label style={lblStyle}>Discount</label>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        {[{ val: 'none', label: 'None' }, { val: 'fixed', label: '$ Fixed' }, { val: 'percent', label: '% Off' }].map(opt => (
+                          <button key={opt.val} onClick={() => { setDiscountType(opt.val); setDiscountValue(''); }} style={{
+                            flex: 1, padding: '8px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+                            border: discountType === opt.val ? '2px solid var(--fp-accent)' : '1px solid var(--fp-border)',
+                            background: discountType === opt.val ? 'rgba(109,203,202,0.08)' : '#fff',
+                            color: discountType === opt.val ? 'var(--fp-accent)' : 'var(--fp-muted)',
+                          }}>{opt.label}</button>
+                        ))}
+                      </div>
+                      {discountType !== 'none' && (
+                        <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', border: '2px solid var(--fp-border)', borderRadius: 10, overflow: 'hidden', background: '#fff' }}>
+                          <span style={{ padding: '11px 10px', color: 'var(--fp-muted)', fontWeight: 700, fontSize: 14 }}>{discountType === 'fixed' ? '$' : '%'}</span>
+                          <input type="number" min="0" step="0.01" value={discountValue} onChange={e => setDiscountValue(e.target.value)}
+                            placeholder={discountType === 'fixed' ? 'Amount off' : 'Percentage off'}
+                            style={{ flex: 1, padding: '11px 14px 11px 0', border: 'none', outline: 'none', fontFamily: 'inherit', fontSize: 14, color: 'var(--fp-text)', background: 'transparent' }} />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Price summary */}
+                    {selectedMembership && (
+                      <div style={{ padding: '16px', background: 'var(--fp-bg)', borderRadius: 10, marginBottom: 20 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: 13, color: 'var(--fp-muted)' }}>
+                          <span>Base price</span>
+                          <span>${basePrice.toFixed(2)}/wk</span>
+                        </div>
+                        {discountType !== 'none' && discountValue && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: 13, color: '#dc2626' }}>
+                            <span>Discount ({discountType === 'fixed' ? `$${discountValue}` : `${discountValue}%`})</span>
+                            <span>-${(basePrice - finalPrice).toFixed(2)}/wk</span>
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 16, fontWeight: 800, color: 'var(--fp-text)', borderTop: '1px solid var(--fp-border)', paddingTop: 8 }}>
+                          <span>Weekly total</span>
+                          <span>${finalPrice.toFixed(2)}/wk</span>
+                        </div>
+                        {Number(setupFee) > 0 && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 12, color: 'var(--fp-muted)' }}>
+                            <span>Setup fee (one-time)</span>
+                            <span>${Number(setupFee).toFixed(2)}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Actions */}
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                      <button className="btn btn-ghost fp" onClick={() => setShowNewSaleModal(false)}>Cancel</button>
+                      <button className="btn btn-primary fp" onClick={handleProcessSale}
+                        disabled={saleSaving || !saleChildren.length || !selectedMembership || !activationDate || !firstPaymentDate}
+                        style={{ opacity: (saleSaving || !saleChildren.length || !selectedMembership) ? 0.5 : 1 }}>
+                        {saleSaving ? 'Processing...' : 'Process Sale'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            };
+            return <NewSaleForm />;
+          })()}
+        </>
       )}
 
       {/* Booking Detail Modal */}

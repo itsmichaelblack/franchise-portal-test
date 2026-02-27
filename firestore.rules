@@ -152,6 +152,14 @@ service cloud.firestore {
       }
     }
 
+    // ── Sales/Memberships collection ──────────────────────────────────────
+    match /sales/{saleId} {
+      allow read: if isAdmin();
+      allow read: if isAuth() && resource.data.locationId == userDoc().locationId;
+      allow create, update, delete: if isAuth();
+      allow create, update, delete: if isAdmin();
+    }
+
     // ── Recurrence Rules collection ─────────────────────────────────────────
     // Stores recurring session templates
     match /recurrence_rules/{ruleId} {
