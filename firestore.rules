@@ -118,12 +118,11 @@ service cloud.firestore {
       allow read: if isAdmin();
 
       // Franchise partners can read and write their own availability
-      allow read, write: if isFranchisePartner(locationId)
-        && request.resource.data.keys().hasAll(['schedule', 'timezone', 'bufferMinutes'])
-        && request.resource.data.bufferMinutes is int
-        && request.resource.data.bufferMinutes >= 0
-        && request.resource.data.bufferMinutes <= 120
-        && request.resource.data.timezone is string;
+      allow read: if isFranchisePartner(locationId);
+      allow write: if isFranchisePartner(locationId);
+
+      // HQ admins can write any availability
+      allow write: if isAdmin();
     }
 
     // ── Bookings collection ──────────────────────────────────────────────
