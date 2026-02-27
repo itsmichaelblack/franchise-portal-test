@@ -541,11 +541,21 @@ exports.onEnquiryCreated = functions.firestore
   });
 
 // ── Stripe Integration ─────────────────────────────────────────────────────
-const stripe = require("stripe")(
-  process.env.STRIPE_SECRET_KEY ||
-  functions.config().stripe?.secret_key ||
-  ""
-);
+const stripeKey = process.env.STRIPE_SECRET_KEY ||
+  (functions.config().stripe && functions.config().stripe.secret_key) ||
+  "";
+const stripe = stripeKey ? require("stripe")(stripeKey) : null;
+
+// Helper to check Stripe is configured
+function requireStripe() {
+  if (!stripe) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Stripe is not configured. Set STRIPE_SECRET_KEY environment variable in Google Cloud Console."
+    );
+  }
+  return stripe;
+}
 
 // Create a Stripe Connect account for a franchise partner and return onboarding link
 exports.createStripeConnectAccount = functions.https.onCall(async (data, context) => {
@@ -569,7 +579,7 @@ exports.createStripeConnectAccount = functions.https.onCall(async (data, context
   // Check if already has a Stripe account
   if (location.stripeAccountId) {
     // Create a new account link for re-onboarding
-    const accountLink = await stripe.accountLinks.create({
+    const accountLink = await requireStripe().accountLinks.create({
       account: location.stripeAccountId,
       refresh_url: `${PORTAL_URL}?stripe_refresh=true`,
       return_url: `${PORTAL_URL}?stripe_connected=true`,
@@ -582,7 +592,7 @@ exports.createStripeConnectAccount = functions.https.onCall(async (data, context
   const country = (location.country || "AU").toUpperCase();
 
   // Create Standard Connect account
-  const account = await stripe.accounts.create({
+  const account = await requireStripe().accounts.create({
     type: "standard",
     country,
     email: location.email,
@@ -599,7 +609,7 @@ exports.createStripeConnectAccount = functions.https.onCall(async (data, context
   });
 
   // Create account link for onboarding
-  const accountLink = await stripe.accountLinks.create({
+  const accountLink = await requireStripe().accountLinks.create({
     account: account.id,
     refresh_url: `${PORTAL_URL}?stripe_refresh=true`,
     return_url: `${PORTAL_URL}?stripe_connected=true`,
@@ -620,7 +630,7 @@ exports.checkStripeAccountStatus = functions.https.onCall(async (data, context) 
     throw new functions.https.HttpsError("invalid-argument", "stripeAccountId required.");
   }
 
-  const account = await stripe.accounts.retrieve(stripeAccountId);
+  const account = await requireStripe().accounts.retrieve(stripeAccountId);
 
   return {
     chargesEnabled: account.charges_enabled,
@@ -655,7 +665,7 @@ exports.createSetupIntent = functions.https.onCall(async (data, context) => {
   }
 
   // Check if customer already exists for this parent on this connected account
-  const existingCustomers = await stripe.customers.list(
+  const existingCustomers = await requireStripe().customers.list(
     { email: parentEmail, limit: 1 },
     { stripeAccount: stripeAccountId }
   );
@@ -664,7 +674,7 @@ exports.createSetupIntent = functions.https.onCall(async (data, context) => {
   if (existingCustomers.data.length > 0) {
     customer = existingCustomers.data[0];
   } else {
-    customer = await stripe.customers.create(
+    customer = await requireStripe().customers.create(
       {
         email: parentEmail,
         name: parentName || undefined,
@@ -676,7 +686,7 @@ exports.createSetupIntent = functions.https.onCall(async (data, context) => {
   }
 
   // Create SetupIntent on the connected account
-  const setupIntent = await stripe.setupIntents.create(
+  const setupIntent = await requireStripe().setupIntents.create(
     {
       customer: customer.id,
       payment_method_types: ["card"],
@@ -706,7 +716,7 @@ exports.confirmPaymentMethod = functions.https.onCall(async (data, context) => {
   const db = getFirestore();
 
   // Get customer's payment methods from connected account
-  const paymentMethods = await stripe.paymentMethods.list(
+  const paymentMethods = await requireStripe().paymentMethods.list(
     { customer: customerId, type: "card" },
     { stripeAccount: stripeAccountId }
   );
@@ -761,7 +771,7 @@ exports.createPaymentLink = functions.https.onCall(async (data, context) => {
   }
 
   // Create a Checkout Session in setup mode on the connected account
-  const session = await stripe.checkout.sessions.create(
+  const session = await requireStripe().checkout.sessions.create(
     {
       mode: "setup",
       customer_email: sale.parentEmail,
