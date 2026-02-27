@@ -541,7 +541,11 @@ exports.onEnquiryCreated = functions.firestore
   });
 
 // ── Stripe Integration ─────────────────────────────────────────────────────
-const stripe = require("stripe")(functions.config().stripe?.secret_key || "");
+const stripe = require("stripe")(
+  process.env.STRIPE_SECRET_KEY ||
+  functions.config().stripe?.secret_key ||
+  ""
+);
 
 // Create a Stripe Connect account for a franchise partner and return onboarding link
 exports.createStripeConnectAccount = functions.https.onCall(async (data, context) => {
