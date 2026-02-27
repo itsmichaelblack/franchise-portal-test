@@ -750,19 +750,16 @@ exports.createPaymentLink = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
   }
 
-  const { saleId, locationId } = data;
-  if (!saleId || !locationId) {
-    throw new functions.https.HttpsError("invalid-argument", "saleId and locationId required.");
+  const { saleId, locationId, parentEmail: directEmail } = data;
+  if (!locationId) {
+    throw new functions.https.HttpsError("invalid-argument", "locationId required.");
   }
 
   const db = getFirestore();
-  const saleDoc = await db.doc(`sales/${saleId}`).get();
-  if (!saleDoc.exists) {
-    throw new functions.https.HttpsError("not-found", "Sale not found.");
-  }
-
-  const sale = saleDoc.data();
   const locationDoc = await db.doc(`locations/${locationId}`).get();
+  if (!locationDoc.exists) {
+    throw new functions.https.HttpsError("not-found", "Location not found.");
+  }
   const location = locationDoc.data();
   const stripeAccountId = location.stripeAccountId;
 
@@ -770,14 +767,23 @@ exports.createPaymentLink = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError("failed-precondition", "Stripe not connected.");
   }
 
+  // Get customer email from sale or direct param
+  let customerEmail = directEmail;
+  if (saleId && saleId !== "none") {
+    const saleDoc = await db.doc(`sales/${saleId}`).get();
+    if (saleDoc.exists) {
+      customerEmail = saleDoc.data().parentEmail || customerEmail;
+    }
+  }
+
   // Create a Checkout Session in setup mode on the connected account
   const session = await requireStripe().checkout.sessions.create(
     {
       mode: "setup",
-      customer_email: sale.parentEmail,
-      success_url: `${PORTAL_URL}?payment_setup=success&sale_id=${saleId}`,
+      customer_email: customerEmail || undefined,
+      success_url: `${PORTAL_URL}?payment_setup=success&sale_id=${saleId || ""}`,
       cancel_url: `${PORTAL_URL}?payment_setup=cancelled`,
-      metadata: { saleId, locationId },
+      metadata: { saleId: saleId || "", locationId },
     },
     { stripeAccount: stripeAccountId }
   );

@@ -7487,10 +7487,104 @@ function FranchisePortal({ user, onLogout }) {
 
               {/* Payments Tab */}
               {memberTab === 'payments' && (
-                <div style={{ textAlign: 'center', padding: 32, color: 'var(--fp-muted)' }}>
-                  <div style={{ fontSize: 32, marginBottom: 12 }}>💳</div>
-                  <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Payment options coming soon</div>
-                  <div style={{ fontSize: 13 }}>Stripe integration for credit card and direct debit payments will be available here.</div>
+                <div style={{ padding: '8px 0' }}>
+                  {(() => {
+                    const memberPayment = selectedMember?.paymentMethod;
+                    const memberStripeCustomerId = selectedMember?.stripeCustomerId;
+
+                    return (
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)', marginBottom: 4 }}>Payment Method</div>
+                        <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginBottom: 20 }}>
+                          {memberPayment ? 'Card on file for this parent. Used for all memberships.' : 'No payment method on file for this parent.'}
+                        </div>
+
+                        {memberPayment ? (
+                          <div>
+                            {/* Card display */}
+                            <div style={{ padding: '20px', background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)', borderRadius: 14, color: '#fff', marginBottom: 16 }}>
+                              <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Card on file</div>
+                              <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: '0.15em', marginBottom: 16 }}>
+                                •••• •••• •••• {memberPayment.last4}
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+                                <div>
+                                  <div style={{ fontSize: 10, opacity: 0.5, textTransform: 'uppercase' }}>Expires</div>
+                                  <div style={{ fontSize: 14, fontWeight: 600 }}>{String(memberPayment.expMonth).padStart(2, '0')}/{memberPayment.expYear}</div>
+                                </div>
+                                <div style={{ fontSize: 16, fontWeight: 800, textTransform: 'uppercase' }}>{memberPayment.brand}</div>
+                              </div>
+                            </div>
+
+                            {/* Replace card button */}
+                            <button className="btn btn-ghost fp" style={{ fontSize: 12, width: '100%', justifyContent: 'center' }}
+                              onClick={async () => {
+                                try {
+                                  const { getFunctions, httpsCallable } = await import('firebase/functions');
+                                  const fns = getFunctions();
+                                  const createLink = httpsCallable(fns, 'createPaymentLink');
+                                  // Find a sale for this parent to associate the checkout session
+                                  const parentSale = sales.find(s => s.parentEmail?.toLowerCase() === selectedMember.email?.toLowerCase());
+                                  const result = await createLink({ saleId: parentSale?.id || 'none', locationId });
+                                  window.open(result.data.url, '_blank');
+                                  showToast('Stripe checkout opened. The parent can enter new card details.');
+                                } catch (e) {
+                                  console.error('Payment link error:', e);
+                                  showToast('✗ Failed to open payment form. Is Stripe connected?');
+                                }
+                              }}>
+                              <Icon path={icons.edit} size={13} /> Replace Card
+                            </button>
+                          </div>
+                        ) : (
+                          <div>
+                            {/* No card — collect */}
+                            <div style={{ padding: '32px', textAlign: 'center', background: 'var(--fp-bg)', borderRadius: 12, border: '1px dashed var(--fp-border)' }}>
+                              <div style={{ fontSize: 32, marginBottom: 8 }}>💳</div>
+                              <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--fp-text)', marginBottom: 4 }}>No card on file</div>
+                              <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginBottom: 16 }}>Collect a payment method to enable recurring billing.</div>
+                              <button className="btn btn-primary fp" onClick={async () => {
+                                try {
+                                  const { getFunctions, httpsCallable } = await import('firebase/functions');
+                                  const fns = getFunctions();
+                                  const createLink = httpsCallable(fns, 'createPaymentLink');
+                                  const parentSale = sales.find(s => s.parentEmail?.toLowerCase() === selectedMember.email?.toLowerCase());
+                                  const result = await createLink({ saleId: parentSale?.id || 'none', locationId, parentEmail: selectedMember.email });
+                                  window.open(result.data.url, '_blank');
+                                  showToast('Stripe checkout opened in a new tab. Ask the parent to enter their card details.');
+                                } catch (e) {
+                                  console.error('Collect card error:', e);
+                                  showToast('✗ Failed to open payment form. Is Stripe connected in Settings?');
+                                }
+                              }}>
+                                <Icon path={icons.creditCard} size={14} /> Collect Card Details
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Active memberships for this parent */}
+                        {(() => {
+                          const parentSales = sales.filter(s => s.parentEmail?.toLowerCase() === selectedMember?.email?.toLowerCase());
+                          if (!parentSales.length) return null;
+                          return (
+                            <div style={{ marginTop: 20 }}>
+                              <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>Active Memberships</div>
+                              {parentSales.map(s => (
+                                <div key={s.id} style={{ padding: '12px 14px', background: 'var(--fp-bg)', borderRadius: 10, marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <div>
+                                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fp-text)' }}>{s.membershipName}</div>
+                                    <div style={{ fontSize: 11, color: 'var(--fp-muted)' }}>{(s.children || []).map(c => c.name).join(', ')}</div>
+                                  </div>
+                                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--fp-text)' }}>${Number(s.weeklyAmount || 0).toFixed(2)}<span style={{ fontSize: 11, fontWeight: 400, color: 'var(--fp-muted)' }}>/wk</span></div>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>
