@@ -3986,6 +3986,147 @@ function InviteUserModal({ onClose, onInvited }) {
 }
 
 // --- Franchise Partner Portal ---------------------------------------------------
+// ── New Session Modal ─────────────────────────────────────────────────────────
+function NewSessionModal({ initialDate, initialHour, services, tutors, saving, onSave, onClose }) {
+  const [date, setDate] = useState(initialDate || '');
+  const [time, setTime] = useState(initialHour != null ? `${String(initialHour).padStart(2, '0')}:00` : '');
+  const [sessionType, setSessionType] = useState('one_off');
+  const [serviceId, setServiceId] = useState('');
+  const [tutorId, setTutorId] = useState('');
+
+  // Generate 15-minute increment time options
+  const timeOptions = [];
+  for (let h = 6; h <= 21; h++) {
+    for (let m = 0; m < 60; m += 15) {
+      const val = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      const label = `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`;
+      timeOptions.push({ val, label });
+    }
+  }
+
+  // Filter tutors by selected service
+  const filteredTutors = serviceId
+    ? tutors.filter(t => (t.services || []).includes(serviceId))
+    : tutors;
+
+  // Reset tutor when service changes and current tutor can't do the new service
+  useEffect(() => {
+    if (tutorId && serviceId) {
+      const tutor = tutors.find(t => t.id === tutorId);
+      if (tutor && !(tutor.services || []).includes(serviceId)) {
+        setTutorId('');
+      }
+    }
+  }, [serviceId]);
+
+  const selectedService = services.find(s => s.id === serviceId);
+  const selectedTutor = tutors.find(t => t.id === tutorId);
+
+  const handleSubmit = () => {
+    if (!date || !time || !serviceId || !tutorId) return;
+    onSave({
+      date,
+      time,
+      sessionType,
+      serviceId,
+      serviceName: selectedService?.name || '',
+      tutorId,
+      tutorName: selectedTutor ? `${selectedTutor.firstName} ${selectedTutor.lastName}` : '',
+    });
+  };
+
+  const inputStyle = {
+    width: '100%', padding: '11px 14px', borderRadius: 10,
+    border: '2px solid var(--fp-border)', background: '#fff',
+    fontFamily: 'inherit', fontSize: 14, color: 'var(--fp-text)', outline: 'none',
+  };
+
+  const selectStyle = {
+    ...inputStyle, cursor: 'pointer', appearance: 'none',
+    backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+    backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '16px',
+    paddingRight: 36,
+  };
+
+  const labelStyle = {
+    fontSize: 13, fontWeight: 700, color: 'var(--fp-text)', marginBottom: 6, display: 'block',
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto' }}
+      onClick={onClose}>
+      <div style={{ background: '#fff', borderRadius: 16, padding: 32, maxWidth: 480, width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)', maxHeight: '90vh', overflow: 'auto' }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--fp-text)', marginBottom: 24 }}>
+          New Session
+        </div>
+
+        {/* Date */}
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>Date *</label>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} style={inputStyle} />
+        </div>
+
+        {/* Time */}
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>Time *</label>
+          <select value={time} onChange={e => setTime(e.target.value)} style={selectStyle}>
+            <option value="">Select time...</option>
+            {timeOptions.map(t => <option key={t.val} value={t.val}>{t.label}</option>)}
+          </select>
+        </div>
+
+        {/* Session Type */}
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>Session *</label>
+          <select value={sessionType} onChange={e => setSessionType(e.target.value)} style={selectStyle}>
+            <option value="one_off">One Off</option>
+            <option value="recurring">Recurring</option>
+          </select>
+        </div>
+
+        {/* Service */}
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>Service *</label>
+          <select value={serviceId} onChange={e => setServiceId(e.target.value)} style={selectStyle}>
+            <option value="">Select service...</option>
+            {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          {services.length === 0 && (
+            <div style={{ fontSize: 11, color: 'var(--fp-muted)', marginTop: 4 }}>No services available. Services are managed in the HQ portal.</div>
+          )}
+        </div>
+
+        {/* Tutor */}
+        <div style={{ marginBottom: 24 }}>
+          <label style={labelStyle}>Tutor *</label>
+          <select value={tutorId} onChange={e => setTutorId(e.target.value)} style={selectStyle}>
+            <option value="">Select tutor...</option>
+            {filteredTutors.map(t => <option key={t.id} value={t.id}>{t.firstName} {t.lastName}</option>)}
+          </select>
+          {serviceId && filteredTutors.length === 0 && (
+            <div style={{ fontSize: 11, color: '#E25D25', marginTop: 4 }}>No tutors available for this service. Assign tutors to this service in the Tutors section.</div>
+          )}
+          {!serviceId && (
+            <div style={{ fontSize: 11, color: 'var(--fp-muted)', marginTop: 4 }}>Select a service first to see available tutors.</div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button className="btn btn-ghost fp" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary fp" onClick={handleSubmit}
+            disabled={saving || !date || !time || !serviceId || !tutorId}
+            style={{ opacity: (saving || !date || !time || !serviceId || !tutorId) ? 0.5 : 1 }}>
+            {saving ? 'Creating...' : 'Create Session'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Tutor Add/Edit Modal ──────────────────────────────────────────────────────
 function TutorModal({ editing, services, saving, onSave, onClose }) {
   const [firstName, setFirstName] = useState(editing?.firstName || '');
@@ -4201,6 +4342,8 @@ function FranchisePortal({ user, onLogout }) {
   const [bookingsLoading, setBookingsLoading] = useState(false);
   const [calendarWeekOffset, setCalendarWeekOffset] = useState(0);
   const [selectedBooking, setSelectedBooking] = useState(null);
+  const [sessionModal, setSessionModal] = useState(null); // null | { date: 'YYYY-MM-DD', hour: number }
+  const [sessionSaving, setSessionSaving] = useState(false);
 
   // Members state
   const [members, setMembers] = useState([]);
@@ -4376,6 +4519,37 @@ function FranchisePortal({ user, onLogout }) {
     }
     setTutorModal(null);
   };
+
+  // Create Session handler
+  const handleCreateSession = async (data) => {
+    setSessionSaving(true);
+    try {
+      const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
+      const { db } = await import('./firebase.js');
+      const sessionData = {
+        type: 'session',
+        locationId,
+        date: data.date,
+        time: data.time,
+        sessionType: data.sessionType, // 'one_off' or 'recurring'
+        serviceId: data.serviceId,
+        serviceName: data.serviceName,
+        tutorId: data.tutorId,
+        tutorName: data.tutorName,
+        status: 'scheduled',
+        createdAt: serverTimestamp(),
+      };
+      const docRef = await addDoc(collection(db, 'bookings'), sessionData);
+      setBookings(prev => [...prev, { id: docRef.id, ...sessionData, createdAt: new Date() }].sort((a, b) => a.date === b.date ? (a.time || '').localeCompare(b.time || '') : a.date.localeCompare(b.date)));
+      showToast('✓ Session created.');
+    } catch (err) {
+      console.error("Failed to create session:", err);
+      showToast('✗ Failed to create session.');
+    }
+    setSessionSaving(false);
+    setSessionModal(null);
+  };
+
   useEffect(() => {
     if (!bookings.length) { setMembers([]); return; }
     // Group bookings by email to create member profiles
@@ -4904,7 +5078,13 @@ function FranchisePortal({ user, onLogout }) {
                                   background: isToday ? 'rgba(109,203,202,0.08)' : 'transparent',
                                   borderLeft: isToday ? '2px solid var(--fp-accent)' : 'none',
                                   borderLeftColor: isToday ? 'rgba(109,203,202,0.3)' : undefined,
-                                }}>
+                                  cursor: 'pointer',
+                                }}
+                                onClick={() => {
+                                  const dateStr = d.toISOString().split('T')[0];
+                                  setSessionModal({ date: dateStr, hour: h });
+                                }}
+                                >
                                   {/* Current time line */}
                                   {showTimeIndicator && (
                                     <div style={{
@@ -4920,19 +5100,20 @@ function FranchisePortal({ user, onLogout }) {
                                   {cellBookings.map((b, bi) => {
                                     const [bh, bm] = b.time.split(':').map(Number);
                                     const timeLabel = fmtTime(b.time);
+                                    const isSession = b.type === 'session';
                                     return (
-                                      <div key={bi} onClick={() => setSelectedBooking(b)} style={{
-                                        background: 'linear-gradient(135deg, #E25D25, #f0845a)',
+                                      <div key={bi} onClick={(e) => { e.stopPropagation(); setSelectedBooking(b); }} style={{
+                                        background: isSession ? 'linear-gradient(135deg, #3d9695, #6DCBCA)' : 'linear-gradient(135deg, #E25D25, #f0845a)',
                                         color: '#fff', borderRadius: 6, padding: '6px 8px', fontSize: 11,
                                         marginBottom: 2, cursor: 'pointer',
                                         lineHeight: 1.3, position: 'relative', zIndex: 2,
                                         transition: 'transform 0.1s, box-shadow 0.1s',
                                       }}
-                                      onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(226,93,37,0.3)'; }}
+                                      onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.boxShadow = isSession ? '0 4px 12px rgba(109,203,202,0.4)' : '0 4px 12px rgba(226,93,37,0.3)'; }}
                                       onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = 'none'; }}
                                       >
-                                        <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.customerName}</div>
-                                        <div style={{ opacity: 0.85, fontSize: 10 }}>{timeLabel}</div>
+                                        <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{isSession ? (b.serviceName || 'Session') : b.customerName}</div>
+                                        <div style={{ opacity: 0.85, fontSize: 10 }}>{timeLabel}{isSession ? ` · ${b.tutorName || ''}` : ''}</div>
                                       </div>
                                     );
                                   })}
@@ -5006,6 +5187,19 @@ function FranchisePortal({ user, onLogout }) {
                 </>
               );
             })()}
+
+            {/* New Session Modal */}
+            {sessionModal && (
+              <NewSessionModal
+                initialDate={sessionModal.date}
+                initialHour={sessionModal.hour}
+                services={locationServices}
+                tutors={tutors}
+                saving={sessionSaving}
+                onSave={handleCreateSession}
+                onClose={() => setSessionModal(null)}
+              />
+            )}
           </>
         )}
 
