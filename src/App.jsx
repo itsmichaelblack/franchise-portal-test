@@ -4581,7 +4581,7 @@ function FranchisePortal({ user, onLogout }) {
                                 fontSize: 18, fontWeight: 800, marginTop: 2,
                                 width: 34, height: 34, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                                 background: isToday ? 'var(--fp-accent)' : 'transparent',
-                                color: isToday ? '#fff' : 'var(--fp-text)',
+                                color: isToday ? '#E25D25' : 'var(--fp-text)',
                                 boxShadow: isToday ? '0 2px 8px rgba(109,203,202,0.4)' : 'none',
                               }}>
                                 {d.getDate()}
