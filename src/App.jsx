@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import { createLocation, updateLocation, deleteLocation, saveAvailability, getLocations, resendConfirmationEmail, resendInviteEmail, updateHqUser, logUserAction, getActivityLogs, getHqUserLogs } from "./services/firestore";
 
 // --- Simulated Data -------------------------------------------------------------
@@ -5423,7 +5423,7 @@ function FranchisePortal({ user, onLogout }) {
                             });
 
                             return (
-                              <React.Fragment key={h}>
+                              <Fragment key={h}>
                                 <div style={{ padding: '4px 8px', fontSize: 11, fontWeight: 600, color: 'var(--fp-muted)', borderRight: '1px solid var(--fp-border)', borderBottom: '1px solid #eef0f2', display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end', minHeight: 64 }}>
                                   {fmtTime(`${String(h).padStart(2, '0')}:00`)}
                                 </div>
@@ -5457,7 +5457,7 @@ function FranchisePortal({ user, onLogout }) {
                                     );
                                   })}
                                 </div>
-                              </React.Fragment>
+                              </Fragment>
                             );
                           })}
                         </div>
@@ -5527,9 +5527,11 @@ function FranchisePortal({ user, onLogout }) {
                               }}
                               onClick={() => {
                                 if (!isUnavail && isCurrentMonth) {
-                                  setCalendarView('day');
+                                  // Switch to week view containing this date
                                   const diff = Math.round((c - today) / (1000 * 60 * 60 * 24));
-                                  setCalendarDayOffset(diff);
+                                  const weekOffset = Math.floor(diff / 7);
+                                  setCalendarWeekOffset(weekOffset);
+                                  setCalendarView('week');
                                 }
                               }}
                               >
