@@ -4675,16 +4675,10 @@ function FranchisePortal({ user, onLogout }) {
             updatedAt: serverTimestamp(),
           }, { merge: true });
 
-          // Update all future occurrences
+          // Update all future occurrences using local state
           const today = new Date().toISOString().split('T')[0];
-          const q2 = query(collection(db, 'bookings'), where('recurrenceRuleId', '==', ruleId));
-          const snap = await getDocs(q2);
-          const batch = [];
-          snap.docs.forEach(d => {
-            if (d.data().date >= today) {
-              batch.push(setDoc(doc(db, 'bookings', d.id), updateData, { merge: true }));
-            }
-          });
+          const toUpdate = bookings.filter(b => b.recurrenceRuleId === ruleId && b.date >= today);
+          const batch = toUpdate.map(b => setDoc(doc(db, 'bookings', b.id), updateData, { merge: true }));
           await Promise.all(batch);
           setBookings(prev => prev.map(b => (b.recurrenceRuleId === ruleId && b.date >= today) ? { ...b, ...updateData } : b));
           showToast('✓ All future sessions updated.');
@@ -4716,18 +4710,11 @@ function FranchisePortal({ user, onLogout }) {
           // Cancel the recurrence rule
           await setDoc(doc(db, 'recurrence_rules', ruleId), { status: 'cancelled', cancelledAt: serverTimestamp() }, { merge: true });
 
-          // Delete all future occurrences
+          // Delete all future occurrences using local state (avoids Firestore query/index issues)
           const today = new Date().toISOString().split('T')[0];
-          const q2 = query(collection(db, 'bookings'), where('recurrenceRuleId', '==', ruleId));
-          const snap = await getDocs(q2);
-          const deletes = [];
-          const idsToRemove = [];
-          snap.docs.forEach(d => {
-            if (d.data().date >= today) {
-              deletes.push(deleteDoc(doc(db, 'bookings', d.id)));
-              idsToRemove.push(d.id);
-            }
-          });
+          const toDelete = bookings.filter(b => b.recurrenceRuleId === ruleId && b.date >= today);
+          const deletes = toDelete.map(b => deleteDoc(doc(db, 'bookings', b.id)));
+          const idsToRemove = toDelete.map(b => b.id);
           await Promise.all(deletes);
           setBookings(prev => prev.filter(b => !idsToRemove.includes(b.id)));
           showToast('✓ Recurring series deleted.');
