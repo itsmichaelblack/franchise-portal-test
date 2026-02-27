@@ -5273,7 +5273,7 @@ function FranchisePortal({ user, onLogout }) {
                             <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Role</th>
                             <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Contact</th>
                             <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Services</th>
-                            <th style={{ padding: '12px 16px', width: 100 }}></th>
+                            <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -5328,13 +5328,18 @@ function FranchisePortal({ user, onLogout }) {
                                   )}
                                 </div>
                               </td>
-                              <td style={{ padding: '14px 16px', textAlign: 'right' }} onClick={e => e.stopPropagation()}>
-                                <button className="btn btn-ghost fp" style={{ fontSize: 12, padding: '5px 10px', marginRight: 4 }} onClick={() => setTutorModal({ type: 'edit', tutor: t })}>
-                                  <Icon path={icons.edit} size={13} />
-                                </button>
-                                <button className="btn btn-ghost fp" style={{ fontSize: 12, padding: '5px 10px', color: '#dc2626' }} onClick={() => setTutorModal({ type: 'delete', tutor: t })}>
-                                  <Icon path={icons.trash} size={13} />
-                                </button>
+                              <td style={{ padding: '14px 16px' }} onClick={e => e.stopPropagation()}>
+                                <div className="actions">
+                                  <button className="btn btn-ghost fp" style={{ padding: '7px 12px' }} onClick={() => setSelectedTutor(t)}>
+                                    <Icon path={icons.building} size={13} /> View
+                                  </button>
+                                  <button className="btn btn-ghost fp" style={{ padding: '7px 12px' }} onClick={() => setTutorModal({ type: 'edit', tutor: t })}>
+                                    <Icon path={icons.edit} size={13} /> Edit
+                                  </button>
+                                  <button className="btn btn-danger" style={{ padding: '7px 12px' }} onClick={() => setTutorModal({ type: 'delete', tutor: t })}>
+                                    <Icon path={icons.trash} size={13} /> Delete
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           ))}
