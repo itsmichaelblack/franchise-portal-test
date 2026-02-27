@@ -7496,27 +7496,36 @@ function FranchisePortal({ user, onLogout }) {
                       <div>
                         <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)', marginBottom: 4 }}>Payment Method</div>
                         <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginBottom: 20 }}>
-                          {memberPayment ? 'Card on file for this parent. Used for all memberships.' : 'No payment method on file for this parent.'}
+                          {memberPayment ? 'Payment method on file for this parent. Used for all memberships.' : 'No payment method on file for this parent.'}
                         </div>
 
                         {memberPayment ? (
                           <div>
-                            {/* Card display */}
-                            <div style={{ padding: '20px', background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)', borderRadius: 14, color: '#fff', marginBottom: 16 }}>
-                              <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Card on file</div>
+                            {/* Payment method display */}
+                            <div style={{ padding: '20px', background: memberPayment.type === 'au_becs_debit' ? 'linear-gradient(135deg, #0f3443 0%, #34e89e 100%)' : 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)', borderRadius: 14, color: '#fff', marginBottom: 16 }}>
+                              <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                                {memberPayment.type === 'au_becs_debit' ? 'Bank account on file' : 'Card on file'}
+                              </div>
                               <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: '0.15em', marginBottom: 16 }}>
                                 •••• •••• •••• {memberPayment.last4}
                               </div>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-                                <div>
-                                  <div style={{ fontSize: 10, opacity: 0.5, textTransform: 'uppercase' }}>Expires</div>
-                                  <div style={{ fontSize: 14, fontWeight: 600 }}>{String(memberPayment.expMonth).padStart(2, '0')}/{memberPayment.expYear}</div>
-                                </div>
+                                {memberPayment.type === 'au_becs_debit' ? (
+                                  <div>
+                                    <div style={{ fontSize: 10, opacity: 0.5, textTransform: 'uppercase' }}>Type</div>
+                                    <div style={{ fontSize: 14, fontWeight: 600 }}>Direct Debit</div>
+                                  </div>
+                                ) : (
+                                  <div>
+                                    <div style={{ fontSize: 10, opacity: 0.5, textTransform: 'uppercase' }}>Expires</div>
+                                    <div style={{ fontSize: 14, fontWeight: 600 }}>{String(memberPayment.expMonth || '').padStart(2, '0')}/{memberPayment.expYear || ''}</div>
+                                  </div>
+                                )}
                                 <div style={{ fontSize: 16, fontWeight: 800, textTransform: 'uppercase' }}>{memberPayment.brand}</div>
                               </div>
                             </div>
 
-                            {/* Replace card button */}
+                            {/* Replace payment method button */}
                             <button className="btn btn-ghost fp" style={{ fontSize: 12, width: '100%', justifyContent: 'center' }}
                               onClick={async () => {
                                 try {
@@ -7533,7 +7542,7 @@ function FranchisePortal({ user, onLogout }) {
                                   showToast('✗ Failed to open payment form. Is Stripe connected?');
                                 }
                               }}>
-                              <Icon path={icons.edit} size={13} /> Replace Card
+                              <Icon path={icons.edit} size={13} /> Replace Payment Method
                             </button>
                           </div>
                         ) : (

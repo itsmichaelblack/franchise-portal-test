@@ -689,7 +689,7 @@ exports.createSetupIntent = functions.https.onCall(async (data, context) => {
   const setupIntent = await requireStripe().setupIntents.create(
     {
       customer: customer.id,
-      payment_method_types: ["card"],
+      payment_method_types: ["card", "au_becs_debit"],
       metadata: { saleId: saleId || "", locationId },
     },
     { stripeAccount: stripeAccountId }
@@ -715,33 +715,58 @@ exports.confirmPaymentMethod = functions.https.onCall(async (data, context) => {
 
   const db = getFirestore();
 
-  // Get customer's payment methods from connected account
-  const paymentMethods = await requireStripe().paymentMethods.list(
+  // Get customer's payment methods from connected account (try card first, then BECS)
+  let pm = null;
+  const cardMethods = await requireStripe().paymentMethods.list(
     { customer: customerId, type: "card" },
     { stripeAccount: stripeAccountId }
   );
+  if (cardMethods.data.length > 0) {
+    pm = cardMethods.data[0];
+  } else {
+    const becsMethods = await requireStripe().paymentMethods.list(
+      { customer: customerId, type: "au_becs_debit" },
+      { stripeAccount: stripeAccountId }
+    );
+    if (becsMethods.data.length > 0) {
+      pm = becsMethods.data[0];
+    }
+  }
 
-  if (paymentMethods.data.length === 0) {
+  if (!pm) {
     throw new functions.https.HttpsError("not-found", "No payment method found.");
   }
 
-  const pm = paymentMethods.data[0];
+  // Build payment method info based on type
+  let paymentMethodInfo;
+  if (pm.type === "au_becs_debit") {
+    paymentMethodInfo = {
+      id: pm.id,
+      type: "au_becs_debit",
+      brand: "BECS Direct Debit",
+      last4: pm.au_becs_debit.last4,
+      bsbNumber: pm.au_becs_debit.fingerprint ? "••••" : "",
+    };
+  } else {
+    paymentMethodInfo = {
+      id: pm.id,
+      type: "card",
+      brand: pm.card.brand,
+      last4: pm.card.last4,
+      expMonth: pm.card.exp_month,
+      expYear: pm.card.exp_year,
+    };
+  }
 
   // Update the sale
   await db.doc(`sales/${saleId}`).update({
     stripeCustomerId: customerId,
     stripeAccountId,
-    paymentMethod: {
-      id: pm.id,
-      brand: pm.card.brand,
-      last4: pm.card.last4,
-      expMonth: pm.card.exp_month,
-      expYear: pm.card.exp_year,
-    },
+    paymentMethod: paymentMethodInfo,
     stripeStatus: "connected",
   });
 
-  return { success: true, last4: pm.card.last4, brand: pm.card.brand };
+  return { success: true, last4: paymentMethodInfo.last4, brand: paymentMethodInfo.brand, type: paymentMethodInfo.type };
 });
 
 // Create a payment link for a parent to enter their own card details
@@ -786,6 +811,7 @@ exports.createPaymentLink = functions.https.onCall(async (data, context) => {
       mode: "setup",
       currency,
       customer_email: customerEmail || undefined,
+      payment_method_types: ["card", "au_becs_debit"],
       success_url: `${PORTAL_URL}?payment_setup=success&sale_id=${saleId || ""}`,
       cancel_url: `${PORTAL_URL}?payment_setup=cancelled`,
       metadata: { saleId: saleId || "", locationId },
