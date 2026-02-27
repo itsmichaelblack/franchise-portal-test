@@ -5320,12 +5320,12 @@ function FranchisePortal({ user, onLogout }) {
                                   borderRight: di < 6 ? '1px solid #eef0f2' : 'none',
                                   borderBottom: '1px solid #eef0f2',
                                   padding: 0, minHeight: 56, position: 'relative',
-                                  background: isUnavailable ? 'repeating-linear-gradient(135deg, transparent, transparent 4px, rgba(0,0,0,0.03) 4px, rgba(0,0,0,0.03) 8px)' : isToday ? 'rgba(109,203,202,0.08)' : 'transparent',
+                                  background: isUnavailable ? '#f0f0f0' : isToday ? 'rgba(109,203,202,0.08)' : 'transparent',
                                   borderLeft: isToday ? '2px solid var(--fp-accent)' : 'none',
                                   borderLeftColor: isToday ? 'rgba(109,203,202,0.3)' : undefined,
                                   cursor: isUnavailable ? 'default' : 'pointer',
                                   overflow: 'visible',
-                                  opacity: isUnavailable ? 0.5 : 1,
+                                  opacity: isUnavailable ? 0.6 : 1,
                                 }}
                                 onClick={() => {
                                   if (isUnavailable) return;
@@ -5429,8 +5429,8 @@ function FranchisePortal({ user, onLogout }) {
                                 </div>
                                 <div style={{
                                   borderBottom: '1px solid #eef0f2', padding: 0, minHeight: 64, position: 'relative',
-                                  background: isUnavailable ? 'repeating-linear-gradient(135deg, transparent, transparent 4px, rgba(0,0,0,0.03) 4px, rgba(0,0,0,0.03) 8px)' : 'transparent',
-                                  opacity: isUnavailable ? 0.5 : 1,
+                                  background: isUnavailable ? '#f0f0f0' : 'transparent',
+                                  opacity: isUnavailable ? 0.6 : 1,
                                   cursor: isUnavailable ? 'default' : 'pointer',
                                   overflow: 'visible',
                                 }}
@@ -5521,7 +5521,7 @@ function FranchisePortal({ user, onLogout }) {
                               <div key={ci} style={{
                                 padding: '8px', minHeight: 80, borderBottom: '1px solid #eef0f2',
                                 borderRight: (ci + 1) % 7 !== 0 ? '1px solid #eef0f2' : 'none',
-                                background: isToday2 ? 'rgba(109,203,202,0.08)' : isUnavail ? 'rgba(0,0,0,0.02)' : '#fff',
+                                background: isToday2 ? 'rgba(109,203,202,0.08)' : isUnavail ? '#f0f0f0' : '#fff',
                                 opacity: isCurrentMonth ? 1 : 0.3,
                                 cursor: isUnavail ? 'default' : 'pointer',
                               }}
