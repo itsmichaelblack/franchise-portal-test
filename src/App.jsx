@@ -4559,7 +4559,7 @@ function TutorModal({ editing, services, saving, onSave, onClose }) {
 function FranchisePortal({ user, onLogout }) {
   const [page, setPage] = useState(() => {
     const saved = localStorage.getItem('fp_portal_page');
-    return saved && ['timetable', 'bookings', 'members', 'enquiries', 'tutors', 'settings'].includes(saved) ? saved : 'timetable';
+    return saved && ['timetable', 'bookings', 'members', 'enquiries', 'tutors', 'payments', 'settings'].includes(saved) ? saved : 'timetable';
   });
 
   const setPagePersist = (p) => {
@@ -4619,6 +4619,7 @@ function FranchisePortal({ user, onLogout }) {
   const [stripeConnecting, setStripeConnecting] = useState(false);
   const [stripeAccountStatus, setStripeAccountStatus] = useState(null); // {chargesEnabled, payoutsEnabled, detailsSubmitted}
   const [cardCollecting, setCardCollecting] = useState(null); // saleId being collected for
+  const [locationStripeId, setLocationStripeId] = useState(null); // stripeAccountId from location doc
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [sessionModal, setSessionModal] = useState(null); // null | { date: 'YYYY-MM-DD', hour: number, editing?: booking }
   const [sessionSaving, setSessionSaving] = useState(false);
@@ -5149,6 +5150,7 @@ function FranchisePortal({ user, onLogout }) {
         const locSnap = await getDoc(doc(db, 'locations', locationId));
         if (!locSnap.exists()) return;
         const locData = locSnap.data();
+        setLocationStripeId(locData.stripeAccountId || null);
         if (!locData.stripeAccountId) { setStripeAccountStatus(null); return; }
         const { getFunctions, httpsCallable } = await import('firebase/functions');
         const fns = getFunctions();
@@ -6474,8 +6476,7 @@ function FranchisePortal({ user, onLogout }) {
 
               <div className="card fp" style={{ padding: '24px' }}>
                 {(() => {
-                  const loc = locations.find(l => l.id === locationId);
-                  const hasStripe = loc?.stripeAccountId;
+                  const hasStripe = !!locationStripeId;
                   const isConnected = stripeAccountStatus?.chargesEnabled && stripeAccountStatus?.payoutsEnabled;
 
                   if (isConnected) {
@@ -6487,7 +6488,7 @@ function FranchisePortal({ user, onLogout }) {
                         <div style={{ flex: 1 }}>
                           <div style={{ fontWeight: 700, fontSize: 15, color: '#059669' }}>Stripe Connected</div>
                           <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 2 }}>
-                            Payments and payouts are enabled. Account: {loc.stripeAccountId}
+                            Payments and payouts are enabled. Account: {locationStripeId}
                           </div>
                         </div>
                         <a href="https://dashboard.stripe.com" target="_blank" rel="noopener noreferrer" className="btn btn-ghost fp" style={{ fontSize: 12, textDecoration: 'none' }}>
