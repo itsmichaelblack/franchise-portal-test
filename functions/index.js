@@ -776,10 +776,15 @@ exports.createPaymentLink = functions.https.onCall(async (data, context) => {
     }
   }
 
+  // Determine currency from location
+  const countryToCurrency = { AU: "aud", NZ: "nzd", US: "usd", GB: "gbp", CA: "cad", SG: "sgd" };
+  const currency = (location.currency || countryToCurrency[(location.country || "AU").toUpperCase()] || "aud").toLowerCase();
+
   // Create a Checkout Session in setup mode on the connected account
   const session = await requireStripe().checkout.sessions.create(
     {
       mode: "setup",
+      currency,
       customer_email: customerEmail || undefined,
       success_url: `${PORTAL_URL}?payment_setup=success&sale_id=${saleId || ""}`,
       cancel_url: `${PORTAL_URL}?payment_setup=cancelled`,
