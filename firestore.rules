@@ -94,6 +94,21 @@ service cloud.firestore {
         // Franchise partners can update enquiries for their location (e.g. mark as read)
         allow update: if isFranchisePartner(locationId);
       }
+
+      // ── Tutors sub-collection ────────────────────────────────────────────
+      match /tutors/{tutorId} {
+        // HQ admins can read all tutors
+        allow read: if isAdmin();
+
+        // Franchise partners can read tutors for their location
+        allow read: if isFranchisePartner(locationId);
+
+        // Franchise partners can create, update, and delete tutors at their location
+        allow create, update, delete: if isFranchisePartner(locationId);
+
+        // HQ admins can manage all tutors
+        allow create, update, delete: if isAdmin();
+      }
     }
 
     // ── Availability collection ─────────────────────────────────────────────
