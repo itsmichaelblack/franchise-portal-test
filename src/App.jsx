@@ -4121,7 +4121,7 @@ function SessionStudents({ bookingId, members }) {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--fp-text)' }}>{s.name}</div>
-                  {s.grade && <div style={{ fontSize: 11, color: 'var(--fp-muted)' }}>Grade {s.grade}</div>}
+                  {s.grade && <div style={{ fontSize: 11, color: 'var(--fp-muted)' }}>{s.grade.toString().toLowerCase().startsWith('grade') ? s.grade : `Grade ${s.grade}`}</div>}
                 </div>
                 <button onClick={() => removeStudent(s.id)} style={{
                   background: 'none', border: 'none', color: '#dc2626', fontSize: 11, cursor: 'pointer', fontWeight: 600, fontFamily: 'inherit', padding: '2px 6px',
@@ -4150,12 +4150,40 @@ function SessionStudents({ bookingId, members }) {
 }
 
 // ── New Session Modal ─────────────────────────────────────────────────────────
-function NewSessionModal({ initialDate, initialHour, editing, services, tutors, saving, onSave, onClose }) {
+function NewSessionModal({ initialDate, initialHour, editing, services, tutors, members, saving, onSave, onClose }) {
   const [date, setDate] = useState(editing?.date || initialDate || '');
   const [time, setTime] = useState(editing?.time || (initialHour != null ? `${String(initialHour).padStart(2, '0')}:00` : ''));
   const [sessionType, setSessionType] = useState(editing?.sessionType || 'one_off');
   const [serviceId, setServiceId] = useState(editing?.serviceId || '');
   const [tutorId, setTutorId] = useState(editing?.tutorId || '');
+  const [selectedStudents, setSelectedStudents] = useState([]); // [{name, grade, parentName, parentEmail}]
+  const [studentSearchTerm, setStudentSearchTerm] = useState('');
+  const [showStudentDropdown, setShowStudentDropdown] = useState(false);
+  const [studentsLoading, setStudentsLoading] = useState(false);
+
+  // Build flat list of all children from members
+  const allChildren = [];
+  (members || []).forEach(m => {
+    (m.children || []).forEach(c => {
+      allChildren.push({ name: c.name, grade: c.grade || '', parentName: m.name, parentEmail: m.email });
+    });
+  });
+
+  // Load existing students when editing
+  useEffect(() => {
+    const loadStudents = async () => {
+      if (!editing?.id) return;
+      setStudentsLoading(true);
+      try {
+        const { collection, getDocs } = await import('firebase/firestore');
+        const { db } = await import('./firebase.js');
+        const snap = await getDocs(collection(db, 'bookings', editing.id, 'students'));
+        setSelectedStudents(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (e) { console.error('Failed to load students:', e); }
+      setStudentsLoading(false);
+    };
+    loadStudents();
+  }, [editing?.id]);
 
   // Generate 15-minute increment time options
   const timeOptions = [];
@@ -4196,6 +4224,7 @@ function NewSessionModal({ initialDate, initialHour, editing, services, tutors, 
       serviceName: selectedService?.name || '',
       tutorId,
       tutorName: selectedTutor ? `${selectedTutor.firstName} ${selectedTutor.lastName}` : '',
+      students: selectedStudents,
     }, editing?.id || null, editMode || null);
   };
 
@@ -4273,6 +4302,63 @@ function NewSessionModal({ initialDate, initialHour, editing, services, tutors, 
           )}
           {!serviceId && (
             <div style={{ fontSize: 11, color: 'var(--fp-muted)', marginTop: 4 }}>Select a service first to see available tutors.</div>
+          )}
+        </div>
+
+        {/* Students */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={labelStyle}>Students</label>
+          <div style={{ position: 'relative', marginBottom: 8 }}>
+            <input
+              type="text" placeholder="Search and add students..."
+              value={studentSearchTerm}
+              onChange={e => { setStudentSearchTerm(e.target.value); setShowStudentDropdown(true); }}
+              onFocus={() => { if (studentSearchTerm) setShowStudentDropdown(true); }}
+              style={inputStyle}
+            />
+            {showStudentDropdown && studentSearchTerm && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid var(--fp-border)', borderRadius: 10, marginTop: 4, zIndex: 10, maxHeight: 160, overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}>
+                {(() => {
+                  const term = studentSearchTerm.toLowerCase();
+                  const filtered = allChildren.filter(c =>
+                    !selectedStudents.some(s => s.name.toLowerCase() === c.name.toLowerCase()) &&
+                    (c.name.toLowerCase().includes(term) || c.parentName.toLowerCase().includes(term))
+                  );
+                  if (filtered.length === 0) return <div style={{ padding: 12, fontSize: 12, color: 'var(--fp-muted)', textAlign: 'center' }}>No matching students.</div>;
+                  return filtered.slice(0, 8).map((c, i) => (
+                    <div key={i} onClick={() => {
+                      setSelectedStudents(prev => [...prev, { name: c.name, grade: c.grade, parentName: c.parentName, parentEmail: c.parentEmail }]);
+                      setStudentSearchTerm('');
+                      setShowStudentDropdown(false);
+                    }} style={{
+                      padding: '10px 12px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f5f5f5',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--fp-bg)'}
+                    onMouseLeave={e => e.currentTarget.style.background = '#fff'}
+                    >
+                      <div style={{ fontWeight: 600, color: 'var(--fp-text)' }}>{c.name}</div>
+                      <div style={{ fontSize: 11, color: 'var(--fp-muted)' }}>{c.grade ? `${c.grade} · ` : ''}{c.parentName}</div>
+                    </div>
+                  ));
+                })()}
+              </div>
+            )}
+          </div>
+          {studentsLoading && <div style={{ fontSize: 12, color: 'var(--fp-muted)' }}>Loading students...</div>}
+          {selectedStudents.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {selectedStudents.map((s, i) => (
+                <div key={i} style={{
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', background: 'rgba(109,203,202,0.1)',
+                  borderRadius: 8, fontSize: 12, fontWeight: 600, color: 'var(--fp-text)',
+                }}>
+                  {s.name}{s.grade ? ` (${s.grade})` : ''}
+                  <button onClick={() => setSelectedStudents(prev => prev.filter((_, j) => j !== i))} style={{
+                    background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 0, fontFamily: 'inherit',
+                  }}>×</button>
+                </div>
+              ))}
+            </div>
           )}
         </div>
 
@@ -4705,6 +4791,29 @@ function FranchisePortal({ user, onLogout }) {
     setTutorModal(null);
   };
 
+  // Helper: sync students to a booking's subcollection
+  const syncStudentsToBooking = async (bookingId, students) => {
+    const { collection, getDocs, addDoc, deleteDoc, doc } = await import('firebase/firestore');
+    const { db } = await import('./firebase.js');
+    // Get existing students
+    const existingSnap = await getDocs(collection(db, 'bookings', bookingId, 'students'));
+    const existing = existingSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // Remove students no longer in list
+    for (const ex of existing) {
+      if (!students.some(s => s.name.toLowerCase() === ex.name.toLowerCase())) {
+        await deleteDoc(doc(db, 'bookings', bookingId, 'students', ex.id));
+      }
+    }
+    // Add new students
+    for (const s of students) {
+      if (!existing.some(ex => ex.name.toLowerCase() === s.name.toLowerCase())) {
+        await addDoc(collection(db, 'bookings', bookingId, 'students'), {
+          name: s.name, grade: s.grade || '', parentName: s.parentName || '', parentEmail: s.parentEmail || '', attendance: '',
+        });
+      }
+    }
+  };
+
   // Create Session handler
   // Helper: generate recurring session dates for the next 3 months from a given start date
   const generateRecurringDates = (startDate, dayOfWeek) => {
@@ -4774,6 +4883,10 @@ function FranchisePortal({ user, onLogout }) {
           };
           const docRef = await addDoc(collection(db, 'bookings'), sessionData);
           newBookings.push({ id: docRef.id, ...sessionData, createdAt: new Date() });
+          // Sync students to each occurrence
+          if (data.students && data.students.length > 0) {
+            await syncStudentsToBooking(docRef.id, data.students);
+          }
         }
         setBookings(prev => [...prev, ...newBookings].sort((a, b) => a.date === b.date ? (a.time || '').localeCompare(b.time || '') : a.date.localeCompare(b.date)));
         showToast(`✓ Recurring session created (${dates.length} occurrences).`);
@@ -4794,6 +4907,9 @@ function FranchisePortal({ user, onLogout }) {
           createdAt: serverTimestamp(),
         };
         const docRef = await addDoc(collection(db, 'bookings'), sessionData);
+        if (data.students && data.students.length > 0) {
+          await syncStudentsToBooking(docRef.id, data.students);
+        }
         setBookings(prev => [...prev, { id: docRef.id, ...sessionData, createdAt: new Date() }].sort((a, b) => a.date === b.date ? (a.time || '').localeCompare(b.time || '') : a.date.localeCompare(b.date)));
         showToast('✓ Session created.');
       }
@@ -4844,12 +4960,21 @@ function FranchisePortal({ user, onLogout }) {
           const toUpdate = bookings.filter(b => b.recurrenceRuleId === ruleId && b.date >= today);
           const batch = toUpdate.map(b => setDoc(doc(db, 'bookings', b.id), updateData, { merge: true }));
           await Promise.all(batch);
+          // Sync students to all future occurrences
+          if (data.students) {
+            for (const b of toUpdate) {
+              await syncStudentsToBooking(b.id, data.students);
+            }
+          }
           setBookings(prev => prev.map(b => (b.recurrenceRuleId === ruleId && b.date >= today) ? { ...b, ...updateData } : b));
           showToast('✓ All future sessions updated.');
         }
       } else {
         // Edit just this one occurrence
         await setDoc(doc(db, 'bookings', sessionId), { ...updateData, date: data.date }, { merge: true });
+        if (data.students) {
+          await syncStudentsToBooking(sessionId, data.students);
+        }
         setBookings(prev => prev.map(b => b.id === sessionId ? { ...b, ...updateData, date: data.date } : b));
         showToast('✓ Session updated.');
       }
@@ -5776,6 +5901,7 @@ function FranchisePortal({ user, onLogout }) {
                 editing={sessionModal.editing || null}
                 services={locationServices}
                 tutors={tutors}
+                members={members}
                 saving={sessionSaving}
                 onSave={(data, editingId, editMode) => editingId ? handleEditSession(data, editingId, editMode) : handleCreateSession(data)}
                 onClose={() => setSessionModal(null)}
