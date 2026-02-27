@@ -3986,10 +3986,172 @@ function InviteUserModal({ onClose, onInvited }) {
 }
 
 // --- Franchise Partner Portal ---------------------------------------------------
+// ── Tutor Add/Edit Modal ──────────────────────────────────────────────────────
+function TutorModal({ editing, services, saving, onSave, onClose }) {
+  const [firstName, setFirstName] = useState(editing?.firstName || '');
+  const [lastName, setLastName] = useState(editing?.lastName || '');
+  const [email, setEmail] = useState(editing?.email || '');
+  const [phone, setPhone] = useState(editing?.phone || '');
+  const [role, setRole] = useState(editing?.role || 'Tutor');
+  const [selectedServices, setSelectedServices] = useState(editing?.services || []);
+  const [profilePictureFile, setProfilePictureFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(editing?.profilePictureUrl || '');
+  const fileInputRef = useRef(null);
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setProfilePictureFile(file);
+      setPreviewUrl(URL.createObjectURL(file));
+    }
+  };
+
+  const toggleService = (svcId) => {
+    setSelectedServices(prev =>
+      prev.includes(svcId) ? prev.filter(id => id !== svcId) : [...prev, svcId]
+    );
+  };
+
+  const handleSubmit = () => {
+    if (!firstName.trim() || !lastName.trim()) return;
+    onSave({
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      email: email.trim(),
+      phone: phone.trim(),
+      role,
+      services: selectedServices,
+      profilePictureFile,
+      profilePictureUrl: editing?.profilePictureUrl || '',
+    }, editing?.id || null);
+  };
+
+  const inputStyle = {
+    width: '100%', padding: '11px 14px', borderRadius: 10,
+    border: '2px solid var(--fp-border)', background: '#fff',
+    fontFamily: 'inherit', fontSize: 14, color: 'var(--fp-text)', outline: 'none',
+  };
+
+  const labelStyle = {
+    fontSize: 13, fontWeight: 700, color: 'var(--fp-text)', marginBottom: 6, display: 'block',
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto' }}
+      onClick={onClose}>
+      <div style={{ background: '#fff', borderRadius: 16, padding: 32, maxWidth: 540, width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)', maxHeight: '90vh', overflow: 'auto' }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--fp-text)', marginBottom: 24 }}>
+          {editing ? 'Edit Tutor' : 'Add Tutor'}
+        </div>
+
+        {/* Profile Picture */}
+        <div style={{ marginBottom: 20, display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{
+            width: 72, height: 72, borderRadius: '50%', overflow: 'hidden',
+            background: 'rgba(109,203,202,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            border: '2px dashed var(--fp-border)', cursor: 'pointer', flexShrink: 0,
+          }} onClick={() => fileInputRef.current?.click()}>
+            {previewUrl ? (
+              <img src={previewUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              <span style={{ fontSize: 24, color: 'var(--fp-muted)' }}>+</span>
+            )}
+          </div>
+          <div>
+            <button type="button" onClick={() => fileInputRef.current?.click()} style={{
+              padding: '7px 14px', borderRadius: 8, border: '2px solid var(--fp-border)', background: '#fff',
+              fontFamily: 'inherit', fontSize: 13, fontWeight: 600, color: 'var(--fp-text)', cursor: 'pointer',
+            }}>
+              {previewUrl ? 'Change Photo' : 'Upload Photo'}
+            </button>
+            <div style={{ fontSize: 11, color: 'var(--fp-muted)', marginTop: 4 }}>JPG, PNG. Max 5MB.</div>
+          </div>
+          <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={handleFileChange} style={{ display: 'none' }} />
+        </div>
+
+        {/* Name fields */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+          <div>
+            <label style={labelStyle}>First Name *</label>
+            <input value={firstName} onChange={e => setFirstName(e.target.value)} style={inputStyle} placeholder="First name" />
+          </div>
+          <div>
+            <label style={labelStyle}>Last Name *</label>
+            <input value={lastName} onChange={e => setLastName(e.target.value)} style={inputStyle} placeholder="Last name" />
+          </div>
+        </div>
+
+        {/* Contact */}
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>Email</label>
+          <input type="email" value={email} onChange={e => setEmail(e.target.value)} style={inputStyle} placeholder="tutor@example.com" />
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>Contact Number</label>
+          <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} style={inputStyle} placeholder="+61 400 000 000" />
+        </div>
+
+        {/* Role */}
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>Role</label>
+          <select value={role} onChange={e => setRole(e.target.value)} style={{
+            ...inputStyle, cursor: 'pointer', appearance: 'none',
+            backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+            backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '16px',
+            paddingRight: 36,
+          }}>
+            <option value="Tutor">Tutor</option>
+            <option value="Manager">Manager</option>
+          </select>
+        </div>
+
+        {/* Services multi-select */}
+        <div style={{ marginBottom: 24 }}>
+          <label style={labelStyle}>Services</label>
+          <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginBottom: 8 }}>Select the services this tutor can deliver.</div>
+          {services.length === 0 ? (
+            <div style={{ padding: 16, borderRadius: 10, background: 'var(--fp-bg)', color: 'var(--fp-muted)', fontSize: 13, textAlign: 'center' }}>
+              No services available. Services are managed in the HQ portal.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {services.map(svc => {
+                const isSelected = selectedServices.includes(svc.id);
+                return (
+                  <button key={svc.id} type="button" onClick={() => toggleService(svc.id)} style={{
+                    padding: '7px 14px', borderRadius: 20, border: '2px solid',
+                    borderColor: isSelected ? 'var(--fp-accent)' : 'var(--fp-border)',
+                    background: isSelected ? 'rgba(109,203,202,0.12)' : '#fff',
+                    color: isSelected ? 'var(--fp-accent)' : 'var(--fp-muted)',
+                    fontFamily: 'inherit', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                    transition: 'all 0.15s',
+                  }}>
+                    {isSelected ? '✓ ' : ''}{svc.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button className="btn btn-ghost fp" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary fp" onClick={handleSubmit} disabled={saving || !firstName.trim() || !lastName.trim()}
+            style={{ opacity: (saving || !firstName.trim() || !lastName.trim()) ? 0.5 : 1 }}>
+            {saving ? 'Saving...' : (editing ? 'Update Tutor' : 'Add Tutor')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FranchisePortal({ user, onLogout }) {
   const [page, setPage] = useState(() => {
     const saved = localStorage.getItem('fp_portal_page');
-    return saved && ['timetable', 'bookings', 'members', 'enquiries', 'settings'].includes(saved) ? saved : 'timetable';
+    return saved && ['timetable', 'bookings', 'members', 'enquiries', 'tutors', 'settings'].includes(saved) ? saved : 'timetable';
   });
 
   const setPagePersist = (p) => {
@@ -4062,6 +4224,16 @@ function FranchisePortal({ user, onLogout }) {
   const [enquirySearch, setEnquirySearch] = useState('');
   const [enquiryFilter, setEnquiryFilter] = useState('all');
 
+  // Tutors state
+  const [tutors, setTutors] = useState([]);
+  const [tutorsLoading, setTutorsLoading] = useState(false);
+  const [tutorSearch, setTutorSearch] = useState('');
+  const [tutorFilter, setTutorFilter] = useState('all');
+  const [selectedTutor, setSelectedTutor] = useState(null);
+  const [tutorModal, setTutorModal] = useState(null); // null | 'add' | { type: 'edit', tutor } | { type: 'delete', tutor }
+  const [tutorSaving, setTutorSaving] = useState(false);
+  const [locationServices, setLocationServices] = useState([]);
+
   const locationId = user.locationId?.toString() || user.uid?.toString();
 
   // Load bookings for this location
@@ -4104,7 +4276,106 @@ function FranchisePortal({ user, onLogout }) {
     if (locationId) loadEnquiries();
   }, [locationId]);
 
-  // Load members (derived from bookings for this location)
+  // Load tutors for this location (subcollection under location)
+  useEffect(() => {
+    const loadTutors = async () => {
+      setTutorsLoading(true);
+      try {
+        const { collection, getDocs, orderBy, query } = await import('firebase/firestore');
+        const { db } = await import('./firebase.js');
+        const q = query(
+          collection(db, 'locations', locationId, 'tutors'),
+          orderBy('createdAt', 'desc')
+        );
+        const snap = await getDocs(q);
+        setTutors(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (e) { console.error("Failed to load tutors:", e); }
+      setTutorsLoading(false);
+    };
+    if (locationId) loadTutors();
+  }, [locationId]);
+
+  // Load services available for this location (filtered by country/state)
+  useEffect(() => {
+    const loadLocationServices = async () => {
+      try {
+        const { collection, getDocs } = await import('firebase/firestore');
+        const { db } = await import('./firebase.js');
+        const snap = await getDocs(collection(db, 'services'));
+        const allServices = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setLocationServices(allServices);
+      } catch (e) { console.error("Failed to load services for tutors:", e); }
+    };
+    loadLocationServices();
+  }, []);
+
+  // Tutor CRUD
+  const handleSaveTutor = async (data, editingId) => {
+    setTutorSaving(true);
+    try {
+      const { doc, setDoc, addDoc, collection, serverTimestamp } = await import('firebase/firestore');
+      const { db } = await import('./firebase.js');
+
+      // Handle image upload if a file is provided
+      let profilePictureUrl = data.profilePictureUrl || '';
+      if (data.profilePictureFile) {
+        try {
+          const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+          const { storage } = await import('./firebase.js');
+          const fileName = `tutors/${locationId}/${Date.now()}_${data.profilePictureFile.name}`;
+          const storageRef = ref(storage, fileName);
+          await uploadBytes(storageRef, data.profilePictureFile);
+          profilePictureUrl = await getDownloadURL(storageRef);
+        } catch (uploadErr) {
+          console.error("Failed to upload image:", uploadErr);
+          showToast('✗ Failed to upload profile picture.');
+          setTutorSaving(false);
+          return;
+        }
+      }
+
+      const tutorData = {
+        firstName: data.firstName,
+        lastName: data.lastName,
+        email: data.email,
+        phone: data.phone,
+        role: data.role,
+        services: data.services || [],
+        profilePictureUrl,
+      };
+
+      if (editingId) {
+        await setDoc(doc(db, 'locations', locationId, 'tutors', editingId), { ...tutorData, updatedAt: serverTimestamp() }, { merge: true });
+        setTutors(prev => prev.map(t => t.id === editingId ? { ...t, ...tutorData } : t));
+        if (selectedTutor?.id === editingId) setSelectedTutor(prev => ({ ...prev, ...tutorData }));
+        showToast('✓ Tutor updated.');
+      } else {
+        const docRef = await addDoc(collection(db, 'locations', locationId, 'tutors'), { ...tutorData, createdAt: serverTimestamp() });
+        setTutors(prev => [{ id: docRef.id, ...tutorData, createdAt: new Date() }, ...prev]);
+        showToast('✓ Tutor added.');
+      }
+    } catch (err) {
+      console.error("Failed to save tutor:", err);
+      showToast('✗ Failed to save tutor.');
+    }
+    setTutorSaving(false);
+    setTutorModal(null);
+  };
+
+  const handleDeleteTutor = async (id) => {
+    try {
+      const { doc, deleteDoc } = await import('firebase/firestore');
+      const { db } = await import('./firebase.js');
+      await deleteDoc(doc(db, 'locations', locationId, 'tutors', id));
+      setTutors(prev => prev.filter(t => t.id !== id));
+      if (selectedTutor?.id === id) setSelectedTutor(null);
+      showToast('✓ Tutor deleted.');
+    } catch (err) {
+      console.error("Failed to delete tutor:", err);
+      showToast('✗ Failed to delete tutor.');
+    }
+    setTutorModal(null);
+  };
   useEffect(() => {
     if (!bookings.length) { setMembers([]); return; }
     // Group bookings by email to create member profiles
@@ -4308,6 +4579,9 @@ function FranchisePortal({ user, onLogout }) {
           </button>
           <button className={`nav-item ${page === 'enquiries' ? 'active' : ''}`} onClick={() => setPagePersist('enquiries')}>
             <Icon path={icons.mail} size={16} /> Enquiries
+          </button>
+          <button className={`nav-item ${page === 'tutors' ? 'active' : ''}`} onClick={() => { setPagePersist('tutors'); setSelectedTutor(null); }}>
+            <Icon path={icons.users} size={16} /> Tutors
           </button>
           <button className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => setPagePersist('settings')}>
             <Icon path={icons.clock} size={16} /> Settings
@@ -4831,6 +5105,280 @@ function FranchisePortal({ user, onLogout }) {
                 </div>
               );
             })()}
+          </>
+        )}
+
+        {/* === TUTORS PAGE === */}
+        {page === 'tutors' && (
+          <>
+            {selectedTutor ? (
+              /* ── Tutor Detail View ── */
+              <div>
+                <button onClick={() => setSelectedTutor(null)} style={{
+                  background: 'none', border: 'none', color: 'var(--fp-accent)', cursor: 'pointer',
+                  fontFamily: 'inherit', fontSize: 14, fontWeight: 600, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6,
+                }}>
+                  ← Back to Tutors
+                </button>
+                <div className="card fp" style={{ padding: 28 }}>
+                  <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                    {/* Profile Picture */}
+                    <div style={{
+                      width: 100, height: 100, borderRadius: '50%', overflow: 'hidden',
+                      background: 'rgba(109,203,202,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      flexShrink: 0, border: '3px solid rgba(109,203,202,0.3)',
+                    }}>
+                      {selectedTutor.profilePictureUrl ? (
+                        <img src={selectedTutor.profilePictureUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        <span style={{ fontSize: 36, fontWeight: 800, color: 'var(--fp-accent)' }}>
+                          {(selectedTutor.firstName?.[0] || '')}{(selectedTutor.lastName?.[0] || '')}
+                        </span>
+                      )}
+                    </div>
+                    {/* Info */}
+                    <div style={{ flex: 1, minWidth: 200 }}>
+                      <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--fp-text)', marginBottom: 4 }}>
+                        {selectedTutor.firstName} {selectedTutor.lastName}
+                      </div>
+                      <div style={{
+                        display: 'inline-block', padding: '3px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700, marginBottom: 16,
+                        background: selectedTutor.role === 'Manager' ? 'rgba(226,93,37,0.1)' : 'rgba(109,203,202,0.15)',
+                        color: selectedTutor.role === 'Manager' ? '#E25D25' : 'var(--fp-accent)',
+                      }}>
+                        {selectedTutor.role || 'Tutor'}
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: 'var(--fp-text)' }}>
+                          <Icon path={icons.mail} size={15} /> {selectedTutor.email || '—'}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: 'var(--fp-text)' }}>
+                          <Icon path={icons.phone} size={15} /> {selectedTutor.phone || '—'}
+                        </div>
+                      </div>
+                      {selectedTutor.services && selectedTutor.services.length > 0 && (
+                        <div style={{ marginTop: 16 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Services</div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                            {selectedTutor.services.map((s, i) => (
+                              <span key={i} style={{ padding: '4px 12px', borderRadius: 20, background: 'rgba(109,203,202,0.12)', color: 'var(--fp-accent)', fontSize: 12, fontWeight: 600 }}>
+                                {typeof s === 'string' ? (locationServices.find(ls => ls.id === s)?.name || s) : s.name || s}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+                        <button className="btn btn-primary fp" style={{ fontSize: 13, padding: '8px 18px' }} onClick={() => setTutorModal({ type: 'edit', tutor: selectedTutor })}>
+                          <Icon path={icons.edit} size={13} /> Edit
+                        </button>
+                        <button className="btn btn-ghost fp" style={{ fontSize: 13, padding: '8px 18px', color: '#dc2626' }} onClick={() => setTutorModal({ type: 'delete', tutor: selectedTutor })}>
+                          <Icon path={icons.trash} size={13} /> Delete
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* ── Tutors List View ── */
+              <>
+                <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <div className="page-title" style={{ color: 'var(--fp-text)' }}>Tutors</div>
+                    <div className="page-desc" style={{ color: 'var(--fp-muted)' }}>Manage tutors and managers at your centre.</div>
+                  </div>
+                  <button className="btn btn-primary fp" onClick={() => setTutorModal('add')}>
+                    <Icon path={icons.plus} size={14} /> Add Tutor
+                  </button>
+                </div>
+
+                {/* Search & Filter */}
+                <div style={{ display: 'flex', gap: 10, marginBottom: 20, alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    placeholder="Search by name, email, or phone..."
+                    value={tutorSearch}
+                    onChange={e => setTutorSearch(e.target.value)}
+                    style={{
+                      width: 360, padding: '12px 16px 12px 40px', borderRadius: 10,
+                      border: '2px solid var(--fp-border)', background: '#fff',
+                      fontFamily: 'inherit', fontSize: 14, color: 'var(--fp-text)',
+                      outline: 'none',
+                      backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%239ca3af%27 stroke-width=%272%27 stroke-linecap=%27round%27%3e%3ccircle cx=%2711%27 cy=%2711%27 r=%278%27/%3e%3cline x1=%2721%27 y1=%2721%27 x2=%2716.65%27 y2=%2716.65%27/%3e%3c/svg%3e")',
+                      backgroundRepeat: 'no-repeat',
+                      backgroundPosition: '12px center',
+                      backgroundSize: '18px',
+                    }}
+                  />
+                  <select
+                    value={tutorFilter}
+                    onChange={e => setTutorFilter(e.target.value)}
+                    style={{
+                      padding: '12px 36px 12px 14px', borderRadius: 10,
+                      border: '2px solid var(--fp-border)', background: '#fff',
+                      fontFamily: 'inherit', fontSize: 14, color: 'var(--fp-text)',
+                      outline: 'none', cursor: 'pointer', fontWeight: 600,
+                      appearance: 'none',
+                      backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")',
+                      backgroundRepeat: 'no-repeat',
+                      backgroundPosition: 'right 10px center',
+                      backgroundSize: '16px',
+                    }}
+                  >
+                    <option value="all">All Roles</option>
+                    <option value="Tutor">Tutor</option>
+                    <option value="Manager">Manager</option>
+                  </select>
+                </div>
+
+                {/* Tutors Table */}
+                {tutorsLoading ? (
+                  <div style={{ textAlign: 'center', padding: 48, color: 'var(--fp-muted)' }}>Loading tutors...</div>
+                ) : (() => {
+                  const q = tutorSearch.toLowerCase().trim();
+                  let filtered = tutors;
+                  if (tutorFilter !== 'all') {
+                    filtered = filtered.filter(t => t.role === tutorFilter);
+                  }
+                  if (q) {
+                    filtered = filtered.filter(t =>
+                      `${t.firstName} ${t.lastName}`.toLowerCase().includes(q) ||
+                      (t.email || '').toLowerCase().includes(q) ||
+                      (t.phone || '').includes(q)
+                    );
+                  }
+
+                  if (!filtered.length) {
+                    return (
+                      <div className="card fp" style={{ padding: 40, textAlign: 'center', color: 'var(--fp-muted)' }}>
+                        <div style={{ fontSize: 32, marginBottom: 12 }}>👩‍🏫</div>
+                        <div style={{ fontWeight: 700, fontSize: 15 }}>{q || tutorFilter !== 'all' ? 'No tutors match your search' : 'No tutors yet'}</div>
+                        <div style={{ fontSize: 13, marginTop: 4 }}>Add your first tutor to get started.</div>
+                        {!q && tutorFilter === 'all' && (
+                          <button className="btn btn-primary fp" style={{ marginTop: 16 }} onClick={() => setTutorModal('add')}>
+                            <Icon path={icons.plus} size={14} /> Add Tutor
+                          </button>
+                        )}
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="card fp" style={{ padding: 0, overflow: 'hidden' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                        <thead>
+                          <tr style={{ borderBottom: '2px solid var(--fp-border)', textAlign: 'left' }}>
+                            <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Tutor</th>
+                            <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Role</th>
+                            <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Contact</th>
+                            <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Services</th>
+                            <th style={{ padding: '12px 16px', width: 100 }}></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filtered.map(t => (
+                            <tr key={t.id} style={{ borderBottom: '1px solid var(--fp-border)', cursor: 'pointer', transition: 'background 0.1s' }}
+                              onMouseEnter={e => e.currentTarget.style.background = 'var(--fp-bg)'}
+                              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                              onClick={() => setSelectedTutor(t)}
+                            >
+                              <td style={{ padding: '14px 16px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                  <div style={{
+                                    width: 38, height: 38, borderRadius: '50%', overflow: 'hidden',
+                                    background: 'rgba(109,203,202,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    flexShrink: 0,
+                                  }}>
+                                    {t.profilePictureUrl ? (
+                                      <img src={t.profilePictureUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                    ) : (
+                                      <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--fp-accent)' }}>
+                                        {(t.firstName?.[0] || '')}{(t.lastName?.[0] || '')}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div style={{ fontWeight: 700, color: 'var(--fp-text)' }}>{t.firstName} {t.lastName}</div>
+                                </div>
+                              </td>
+                              <td style={{ padding: '14px 16px' }}>
+                                <span style={{
+                                  padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600,
+                                  background: t.role === 'Manager' ? 'rgba(226,93,37,0.1)' : 'rgba(109,203,202,0.15)',
+                                  color: t.role === 'Manager' ? '#E25D25' : 'var(--fp-accent)',
+                                }}>
+                                  {t.role || 'Tutor'}
+                                </span>
+                              </td>
+                              <td style={{ padding: '14px 16px', color: 'var(--fp-muted)', fontSize: 13 }}>
+                                <div>{t.email}</div>
+                                {t.phone && <div style={{ marginTop: 2 }}>{t.phone}</div>}
+                              </td>
+                              <td style={{ padding: '14px 16px' }}>
+                                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                  {(t.services || []).slice(0, 3).map((s, i) => (
+                                    <span key={i} style={{ padding: '2px 8px', borderRadius: 20, background: 'rgba(109,203,202,0.12)', color: 'var(--fp-accent)', fontSize: 11, fontWeight: 600 }}>
+                                      {typeof s === 'string' ? (locationServices.find(ls => ls.id === s)?.name || s) : s.name || s}
+                                    </span>
+                                  ))}
+                                  {(t.services || []).length > 3 && (
+                                    <span style={{ padding: '2px 8px', borderRadius: 20, background: 'var(--fp-bg)', color: 'var(--fp-muted)', fontSize: 11, fontWeight: 600 }}>
+                                      +{t.services.length - 3}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td style={{ padding: '14px 16px', textAlign: 'right' }} onClick={e => e.stopPropagation()}>
+                                <button className="btn btn-ghost fp" style={{ fontSize: 12, padding: '5px 10px', marginRight: 4 }} onClick={() => setTutorModal({ type: 'edit', tutor: t })}>
+                                  <Icon path={icons.edit} size={13} />
+                                </button>
+                                <button className="btn btn-ghost fp" style={{ fontSize: 12, padding: '5px 10px', color: '#dc2626' }} onClick={() => setTutorModal({ type: 'delete', tutor: t })}>
+                                  <Icon path={icons.trash} size={13} />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+              </>
+            )}
+
+            {/* Add/Edit Tutor Modal */}
+            {(tutorModal === 'add' || tutorModal?.type === 'edit') && (
+              <TutorModal
+                editing={tutorModal?.tutor || null}
+                services={locationServices}
+                saving={tutorSaving}
+                onSave={(data, editingId) => handleSaveTutor(data, editingId)}
+                onClose={() => setTutorModal(null)}
+              />
+            )}
+
+            {/* Delete Tutor Confirmation */}
+            {tutorModal?.type === 'delete' && (
+              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                onClick={() => setTutorModal(null)}>
+                <div style={{ background: '#fff', borderRadius: 16, padding: 32, maxWidth: 420, width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}
+                  onClick={e => e.stopPropagation()}>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--fp-text)', marginBottom: 8 }}>Delete Tutor</div>
+                  <div style={{ fontSize: 14, color: 'var(--fp-muted)', marginBottom: 24, lineHeight: 1.6 }}>
+                    Are you sure you want to delete <strong>{tutorModal.tutor.firstName} {tutorModal.tutor.lastName}</strong>? This action cannot be undone.
+                  </div>
+                  <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                    <button className="btn btn-ghost fp" onClick={() => setTutorModal(null)}>Cancel</button>
+                    <button style={{
+                      padding: '10px 20px', borderRadius: 10, border: 'none', background: '#dc2626', color: '#fff',
+                      fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit',
+                    }} onClick={() => handleDeleteTutor(tutorModal.tutor.id)}>
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         )}
 
