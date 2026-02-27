@@ -6877,8 +6877,8 @@ function FranchisePortal({ user, onLogout }) {
       {/* === PAYMENTS PAGE === */}
       {page === 'payments' && (
         <>
-          <div className="page-header">
-            <div className="page-header-left">
+          <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
               <div className="page-title" style={{ color: 'var(--fp-text)' }}>Payments</div>
               <div className="page-desc" style={{ color: 'var(--fp-muted)' }}>Manage memberships and sales for your centre.</div>
             </div>
@@ -6887,81 +6887,103 @@ function FranchisePortal({ user, onLogout }) {
             </button>
           </div>
 
+          {/* Summary cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 20 }}>
+            <div className="card fp" style={{ padding: '20px', textAlign: 'center' }}>
+              <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--fp-accent)' }}>{sales.filter(s => s.status === 'active').length}</div>
+              <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 4 }}>Active Memberships</div>
+            </div>
+            <div className="card fp" style={{ padding: '20px', textAlign: 'center' }}>
+              <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--fp-accent)' }}>
+                ${sales.filter(s => s.status === 'active').reduce((sum, s) => sum + (Number(s.weeklyAmount) || 0), 0).toFixed(0)}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 4 }}>Weekly Revenue</div>
+            </div>
+            <div className="card fp" style={{ padding: '20px', textAlign: 'center' }}>
+              <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--fp-accent)' }}>{sales.length}</div>
+              <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 4 }}>Total Sales</div>
+            </div>
+          </div>
+
+          {/* Sales Table */}
           {salesLoading ? (
             <div style={{ textAlign: 'center', padding: 48, color: 'var(--fp-muted)' }}>Loading sales...</div>
           ) : sales.length === 0 ? (
-            <div className="card fp" style={{ textAlign: 'center', padding: 48 }}>
-              <div style={{ fontSize: 40, marginBottom: 12 }}>💳</div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--fp-text)', marginBottom: 4 }}>No sales yet</div>
-              <div style={{ fontSize: 13, color: 'var(--fp-muted)', marginBottom: 16 }}>Create your first membership sale to get started.</div>
-              <button className="btn btn-primary fp" onClick={() => setShowNewSaleModal(true)}>
+            <div className="card fp" style={{ padding: 40, textAlign: 'center', color: 'var(--fp-muted)' }}>
+              <div style={{ fontSize: 32, marginBottom: 12 }}>💳</div>
+              <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)' }}>No sales yet</div>
+              <div style={{ fontSize: 13, marginTop: 4 }}>Create your first membership sale to get started.</div>
+              <button className="btn btn-primary fp" style={{ marginTop: 16 }} onClick={() => setShowNewSaleModal(true)}>
                 <Icon path={icons.plus} size={14} /> New Sale
               </button>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-              {/* Summary cards */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
-                <div className="card fp" style={{ padding: '20px', textAlign: 'center' }}>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--fp-accent)' }}>{sales.filter(s => s.status === 'active').length}</div>
-                  <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 4 }}>Active Memberships</div>
-                </div>
-                <div className="card fp" style={{ padding: '20px', textAlign: 'center' }}>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--fp-accent)' }}>
-                    ${sales.filter(s => s.status === 'active').reduce((sum, s) => sum + (Number(s.weeklyAmount) || 0), 0).toFixed(0)}
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 4 }}>Weekly Revenue</div>
-                </div>
-                <div className="card fp" style={{ padding: '20px', textAlign: 'center' }}>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--fp-accent)' }}>{sales.length}</div>
-                  <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 4 }}>Total Sales</div>
-                </div>
-              </div>
-
-              {/* Sales list as cards */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>All Memberships</div>
-                {sales.map(s => {
-                  const fmtDate = (d) => { if (!d) return '—'; const dt = new Date(d + 'T00:00:00'); return dt.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }); };
-                  const hasPayment = s.stripeStatus === 'connected' || s.paymentMethod;
-                  return (
-                    <div key={s.id} className="card fp" style={{ padding: '18px 20px' }}>
-                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
-                        {/* Avatar */}
-                        <div style={{ width: 44, height: 44, borderRadius: 10, background: 'linear-gradient(135deg, #3d9695, #6DCBCA)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 16, flexShrink: 0 }}>
-                          {(s.children?.[0]?.name || '?')[0]}
-                        </div>
-                        {/* Main info */}
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                            <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)' }}>
+            <div className="card fp" style={{ padding: 0, overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                <thead>
+                  <tr style={{ borderBottom: '2px solid var(--fp-border)', textAlign: 'left' }}>
+                    <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Child</th>
+                    <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Parent</th>
+                    <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Membership</th>
+                    <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Amount</th>
+                    <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Start Date</th>
+                    <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Payment</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sales.map(s => {
+                    const fmtDate = (d) => { if (!d) return '—'; const dt = new Date(d + 'T00:00:00'); return dt.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }); };
+                    const hasPayment = s.stripeStatus === 'connected' || s.paymentMethod;
+                    return (
+                      <tr key={s.id} style={{ borderBottom: '1px solid var(--fp-border)', transition: 'background 0.1s' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'var(--fp-bg)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      >
+                        <td style={{ padding: '14px 16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            <div style={{
+                              width: 38, height: 38, borderRadius: '50%', overflow: 'hidden',
+                              background: 'rgba(109,203,202,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              flexShrink: 0,
+                            }}>
+                              <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--fp-accent)' }}>
+                                {(s.children?.[0]?.name || '?')[0]}
+                              </span>
+                            </div>
+                            <div style={{ fontWeight: 700, color: 'var(--fp-text)' }}>
                               {(s.children || []).map(c => c.name).join(', ') || '—'}
                             </div>
-                            <span style={{
-                              padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700, textTransform: 'capitalize',
-                              background: s.status === 'active' ? '#ecfdf5' : '#f5f5f5',
-                              color: s.status === 'active' ? '#059669' : 'var(--fp-muted)',
-                            }}>{s.status || 'active'}</span>
-                            {!hasPayment && (
-                              <span style={{ padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700, background: '#fef2f2', color: '#dc2626' }}>
-                                No payment method
-                              </span>
-                            )}
                           </div>
-                          {s.parentName && <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 2 }}>Parent: {s.parentName}</div>}
-                          <div style={{ fontSize: 13, color: 'var(--fp-muted)', marginTop: 4 }}>{s.membershipName || '—'}</div>
-                          <div style={{ display: 'flex', gap: 16, marginTop: 8, flexWrap: 'wrap', fontSize: 12, color: 'var(--fp-muted)' }}>
-                            <span><strong style={{ color: 'var(--fp-text)' }}>${Number(s.weeklyAmount || 0).toFixed(2)}</strong>/wk</span>
-                            {s.setupFee > 0 && <span>Setup: ${Number(s.setupFee).toFixed(2)}</span>}
-                            <span>Started: {fmtDate(s.activationDate)}</span>
-                            <span>First payment: {fmtDate(s.firstPaymentDate)}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                        </td>
+                        <td style={{ padding: '14px 16px', color: 'var(--fp-muted)', fontSize: 13 }}>
+                          <div>{s.parentName || '—'}</div>
+                          {s.parentEmail && <div style={{ marginTop: 2 }}>{s.parentEmail}</div>}
+                        </td>
+                        <td style={{ padding: '14px 16px' }}>
+                          <span style={{ padding: '2px 8px', borderRadius: 20, background: 'rgba(109,203,202,0.12)', color: 'var(--fp-accent)', fontSize: 12, fontWeight: 600 }}>
+                            {s.membershipName || '—'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '14px 16px', fontWeight: 700, color: 'var(--fp-text)', fontSize: 14 }}>
+                          ${Number(s.weeklyAmount || 0).toFixed(2)}<span style={{ fontWeight: 400, color: 'var(--fp-muted)', fontSize: 12 }}>/wk</span>
+                        </td>
+                        <td style={{ padding: '14px 16px', color: 'var(--fp-muted)', fontSize: 13 }}>
+                          {fmtDate(s.activationDate)}
+                        </td>
+                        <td style={{ padding: '14px 16px' }}>
+                          <span style={{
+                            padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600,
+                            background: hasPayment ? '#ecfdf5' : '#fef2f2',
+                            color: hasPayment ? '#059669' : '#dc2626',
+                          }}>
+                            {hasPayment ? 'Connected' : 'Required'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
 
