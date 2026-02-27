@@ -7522,8 +7522,10 @@ function FranchisePortal({ user, onLogout }) {
               {memberTab === 'payments' && (
                 <div style={{ padding: '8px 0' }}>
                   {(() => {
-                    const memberPayment = selectedMember?.paymentMethod;
-                    const memberStripeCustomerId = selectedMember?.stripeCustomerId;
+                    const memberPayment = selectedMember?.paymentMethod || 
+                      sales.find(s => s.parentEmail?.toLowerCase() === selectedMember?.email?.toLowerCase() && s.paymentMethod)?.paymentMethod || null;
+                    const memberStripeCustomerId = selectedMember?.stripeCustomerId ||
+                      sales.find(s => s.parentEmail?.toLowerCase() === selectedMember?.email?.toLowerCase() && s.stripeCustomerId)?.stripeCustomerId || null;
 
                     return (
                       <div>
