@@ -5177,6 +5177,20 @@ function FranchisePortal({ user, onLogout }) {
     if (locationId) loadLocationData();
   }, [locationId]);
 
+  // Detect Stripe return URL params
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('stripe_connected') === 'true' || params.get('stripe_refresh') === 'true') {
+      setPagePersist('settings');
+      setSettingsTab('payments');
+      // Clean URL
+      window.history.replaceState({}, '', window.location.pathname);
+      if (params.get('stripe_connected') === 'true') {
+        showToast('✓ Stripe onboarding completed! Checking account status...');
+      }
+    }
+  }, []);
+
   // Load sales/memberships
   useEffect(() => {
     const loadSales = async () => {
