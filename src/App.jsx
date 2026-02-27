@@ -5183,11 +5183,44 @@ function FranchisePortal({ user, onLogout }) {
     if (params.get('stripe_connected') === 'true' || params.get('stripe_refresh') === 'true') {
       setPagePersist('settings');
       setSettingsTab('payments');
-      // Clean URL
       window.history.replaceState({}, '', window.location.pathname);
       if (params.get('stripe_connected') === 'true') {
         showToast('✓ Stripe onboarding completed! Checking account status...');
       }
+    }
+    if (params.get('payment_setup') === 'success') {
+      window.history.replaceState({}, '', window.location.pathname);
+      showToast('✓ Payment method saved! Syncing...');
+      // Find the parent email from the sale or from members and call savePaymentFromCheckout
+      const syncPayment = async () => {
+        try {
+          const saleId = params.get('sale_id');
+          let parentEmail = null;
+          if (saleId && saleId !== 'none' && saleId !== '') {
+            const { doc, getDoc } = await import('firebase/firestore');
+            const { db } = await import('./firebase.js');
+            const saleDoc = await getDoc(doc(db, 'sales', saleId));
+            if (saleDoc.exists()) parentEmail = saleDoc.data().parentEmail;
+          }
+          if (!parentEmail && selectedMember?.email) parentEmail = selectedMember.email;
+          if (!parentEmail) { showToast('✓ Payment saved on Stripe. Reopen the member to see updated status.'); return; }
+          const { getFunctions, httpsCallable } = await import('firebase/functions');
+          const fns = getFunctions();
+          const savePayment = httpsCallable(fns, 'savePaymentFromCheckout');
+          const result = await savePayment({ parentEmail, locationId });
+          showToast(`✓ ${result.data.brand} •••• ${result.data.last4} saved successfully!`);
+          // Refresh sales
+          const { collection, getDocs, query, where } = await import('firebase/firestore');
+          const { db } = await import('./firebase.js');
+          const q = query(collection(db, 'sales'), where('locationId', '==', locationId));
+          const snap = await getDocs(q);
+          setSales(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        } catch (e) {
+          console.error('Sync payment error:', e);
+          showToast('✓ Payment saved on Stripe. Reopen the member to verify.');
+        }
+      };
+      syncPayment();
     }
   }, []);
 

@@ -822,6 +822,121 @@ exports.createPaymentLink = functions.https.onCall(async (data, context) => {
   return { url: session.url };
 });
 
+// Save payment method after Stripe Checkout Session completes
+exports.savePaymentFromCheckout = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  }
+
+  const { parentEmail, locationId } = data;
+  if (!parentEmail || !locationId) {
+    throw new functions.https.HttpsError("invalid-argument", "parentEmail and locationId required.");
+  }
+
+  const db = getFirestore();
+  const locationDoc = await db.doc(`locations/${locationId}`).get();
+  if (!locationDoc.exists) {
+    throw new functions.https.HttpsError("not-found", "Location not found.");
+  }
+  const location = locationDoc.data();
+  const stripeAccountId = location.stripeAccountId;
+  if (!stripeAccountId) {
+    throw new functions.https.HttpsError("failed-precondition", "Stripe not connected.");
+  }
+
+  // Find the customer on the connected account
+  const customers = await requireStripe().customers.list(
+    { email: parentEmail, limit: 1 },
+    { stripeAccount: stripeAccountId }
+  );
+
+  if (customers.data.length === 0) {
+    throw new functions.https.HttpsError("not-found", "No Stripe customer found for this email.");
+  }
+
+  const customer = customers.data[0];
+
+  // Get payment methods (try card first, then BECS)
+  let pm = null;
+  const cardMethods = await requireStripe().paymentMethods.list(
+    { customer: customer.id, type: "card" },
+    { stripeAccount: stripeAccountId }
+  );
+  if (cardMethods.data.length > 0) {
+    pm = cardMethods.data[0];
+  } else {
+    const becsMethods = await requireStripe().paymentMethods.list(
+      { customer: customer.id, type: "au_becs_debit" },
+      { stripeAccount: stripeAccountId }
+    );
+    if (becsMethods.data.length > 0) {
+      pm = becsMethods.data[0];
+    }
+  }
+
+  if (!pm) {
+    throw new functions.https.HttpsError("not-found", "No payment method found for this customer.");
+  }
+
+  // Build payment method info
+  let paymentMethodInfo;
+  if (pm.type === "au_becs_debit") {
+    paymentMethodInfo = {
+      id: pm.id,
+      type: "au_becs_debit",
+      brand: "BECS Direct Debit",
+      last4: pm.au_becs_debit.last4,
+    };
+  } else {
+    paymentMethodInfo = {
+      id: pm.id,
+      type: "card",
+      brand: pm.card.brand,
+      last4: pm.card.last4,
+      expMonth: pm.card.exp_month,
+      expYear: pm.card.exp_year,
+    };
+  }
+
+  // Update all bookings for this parent at this location with payment info
+  const bookingsSnap = await db.collection("bookings")
+    .where("locationId", "==", locationId)
+    .where("customerEmail", "==", parentEmail)
+    .get();
+
+  const batch = db.batch();
+  bookingsSnap.docs.forEach((doc) => {
+    batch.update(doc.ref, {
+      paymentMethod: paymentMethodInfo,
+      stripeCustomerId: customer.id,
+    });
+  });
+
+  // Also update any sales for this parent
+  const salesSnap = await db.collection("sales")
+    .where("locationId", "==", locationId)
+    .where("parentEmail", "==", parentEmail)
+    .get();
+
+  salesSnap.docs.forEach((doc) => {
+    batch.update(doc.ref, {
+      paymentMethod: paymentMethodInfo,
+      stripeCustomerId: customer.id,
+      stripeStatus: "connected",
+    });
+  });
+
+  await batch.commit();
+
+  return {
+    success: true,
+    last4: paymentMethodInfo.last4,
+    brand: paymentMethodInfo.brand,
+    type: paymentMethodInfo.type || "card",
+    customerId: customer.id,
+  };
+});
+
 // ── Scheduled: Generate recurring sessions ────────────────────────────────────
 // Runs every Sunday at midnight UTC. Generates booking documents for active
 // recurrence rules up to 3 months ahead, skipping dates that already have a doc.
