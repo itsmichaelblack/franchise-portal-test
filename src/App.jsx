@@ -6665,214 +6665,6 @@ function FranchisePortal({ user, onLogout }) {
             })()}
           </>
         )}
-      </main>
-
-      {/* Member Detail Modal */}
-      {selectedMember && (
-        <div className="modal-overlay" onClick={() => { setSelectedMember(null); setEditingMember(null); }}>
-          <div className="modal fp" onClick={e => e.stopPropagation()} style={{ maxWidth: 560 }}>
-            <div className="modal-header fp" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div className="modal-title fp">{selectedMember.name}</div>
-              <button className="modal-close" onClick={() => { setSelectedMember(null); setEditingMember(null); }} style={{ marginLeft: 'auto' }}>✕</button>
-            </div>
-            <div style={{ display: 'flex', borderBottom: '1px solid var(--fp-border)' }}>
-              {[
-                { key: 'profile', icon: icons.users, label: 'Profile' },
-                { key: 'timetable', icon: icons.calendar, label: 'Timetable' },
-                { key: 'payments', icon: icons.settings, label: 'Payments' },
-              ].map(t => (
-                <button key={t.key} onClick={() => setMemberTab(t.key)} title={t.label}
-                  style={{
-                    flex: 1, padding: '12px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                    background: 'none', border: 'none', borderBottom: memberTab === t.key ? '2px solid var(--fp-accent)' : '2px solid transparent',
-                    color: memberTab === t.key ? 'var(--fp-accent)' : 'var(--fp-muted)',
-                    fontFamily: 'inherit', fontSize: 13, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s',
-                  }}
-                >
-                  <Icon path={t.icon} size={15} /> {t.label}
-                </button>
-              ))}
-            </div>
-            <div className="modal-body" style={{ padding: '24px' }}>
-              {/* Profile Tab */}
-              {memberTab === 'profile' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {/* Edit / View toggle */}
-                  {!editingMember ? (
-                    <>
-                      {/* View mode */}
-                      {[
-                        { icon: icons.mail, label: 'Email', value: selectedMember.email, href: `mailto:${selectedMember.email}` },
-                        { icon: icons.phone, label: 'Phone', value: selectedMember.phone || '—', href: selectedMember.phone ? `tel:${selectedMember.phone.replace(/\s/g, '')}` : null },
-                      ].map((row, ri) => (
-                        <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'var(--fp-bg)', borderRadius: 8 }}>
-                          <Icon path={row.icon} size={15} style={{ color: 'var(--fp-accent)', flexShrink: 0 }} />
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 11, color: 'var(--fp-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{row.label}</div>
-                            {row.href ? (
-                              <a href={row.href} style={{ fontSize: 14, color: 'var(--fp-text)', textDecoration: 'none', fontWeight: 600 }}>{row.value}</a>
-                            ) : (
-                              <div style={{ fontSize: 14, color: 'var(--fp-text)', fontWeight: 600 }}>{row.value}</div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                      {selectedMember.children.length > 0 && (
-                        <div style={{ marginTop: 8 }}>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Children</div>
-                          {selectedMember.children.map((c, i) => (
-                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'var(--fp-bg)', borderRadius: 8, marginBottom: 6 }}>
-                              <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(109,203,202,0.15)', color: 'var(--fp-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 14 }}>{c.name?.[0] || '?'}</div>
-                              <div>
-                                <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--fp-text)' }}>{c.name}</div>
-                                {c.grade && <div style={{ fontSize: 12, color: 'var(--fp-muted)' }}>{c.grade}</div>}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      <button
-                        onClick={() => setEditingMember({
-                          parentFirstName: selectedMember.parentFirstName || selectedMember.name?.split(' ')[0] || '',
-                          parentLastName: selectedMember.parentLastName || selectedMember.name?.split(' ').slice(1).join(' ') || '',
-                          email: selectedMember.email,
-                          phone: selectedMember.phone || '',
-                          children: selectedMember.children.length > 0 ? [...selectedMember.children] : [{ name: '', grade: '' }],
-                        })}
-                        className="btn btn-ghost fp"
-                        style={{ alignSelf: 'flex-start', border: '1px solid var(--fp-border)', marginTop: 4 }}
-                      >
-                        <Icon path={icons.edit} size={14} /> Edit Profile
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      {/* Edit mode */}
-                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Parent / Guardian</div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                        <div>
-                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>First Name</label>
-                          <input value={editingMember.parentFirstName} onChange={e => setEditingMember({ ...editingMember, parentFirstName: e.target.value })}
-                            style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
-                        </div>
-                        <div>
-                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Last Name</label>
-                          <input value={editingMember.parentLastName} onChange={e => setEditingMember({ ...editingMember, parentLastName: e.target.value })}
-                            style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
-                        </div>
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                        <div>
-                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Email</label>
-                          <input type="email" value={editingMember.email} onChange={e => setEditingMember({ ...editingMember, email: e.target.value })}
-                            style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
-                        </div>
-                        <div>
-                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Phone</label>
-                          <input type="tel" value={editingMember.phone} onChange={e => setEditingMember({ ...editingMember, phone: e.target.value })}
-                            style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
-                        </div>
-                      </div>
-
-                      <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Children</div>
-                      {editingMember.children.map((c, i) => (
-                        <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-                          <div style={{ flex: 1 }}>
-                            {i === 0 && <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Name</label>}
-                            <input value={c.name} onChange={e => {
-                              const updated = [...editingMember.children];
-                              updated[i] = { ...updated[i], name: e.target.value };
-                              setEditingMember({ ...editingMember, children: updated });
-                            }} placeholder="Child's name"
-                              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
-                          </div>
-                          <div style={{ flex: 1 }}>
-                            {i === 0 && <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Grade</label>}
-                            <select value={c.grade || ''} onChange={e => {
-                              const updated = [...editingMember.children];
-                              updated[i] = { ...updated[i], grade: e.target.value };
-                              setEditingMember({ ...editingMember, children: updated });
-                            }}
-                              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none', appearance: 'auto', cursor: 'pointer' }}>
-                              <option value="">Select grade...</option>
-                              {["Kindergarten","Grade 1","Grade 2","Grade 3","Grade 4","Grade 5","Grade 6","Grade 7","Grade 8","Grade 9","Grade 10","Grade 11","Grade 12","Grade 13"].map(g => <option key={g} value={g}>{g}</option>)}
-                            </select>
-                          </div>
-                          {editingMember.children.length > 1 && (
-                            <button onClick={() => {
-                              setEditingMember({ ...editingMember, children: editingMember.children.filter((_, idx) => idx !== i) });
-                            }} style={{ padding: '10px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', flexShrink: 0 }}>Remove</button>
-                          )}
-                        </div>
-                      ))}
-                      <button onClick={() => setEditingMember({ ...editingMember, children: [...editingMember.children, { name: '', grade: '' }] })}
-                        style={{ alignSelf: 'flex-start', background: 'none', border: '1px dashed var(--fp-border)', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 600, color: 'var(--fp-accent)', cursor: 'pointer', fontFamily: 'inherit' }}>
-                        + Add Child
-                      </button>
-
-                      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                        <button onClick={() => setEditingMember(null)} className="btn btn-ghost fp" style={{ border: '1px solid var(--fp-border)' }}>Cancel</button>
-                        <button onClick={() => saveMemberProfile(editingMember)} className="btn btn-primary fp" disabled={memberSaving || !editingMember.parentFirstName || !editingMember.email}>
-                          <Icon path={icons.check} size={14} /> {memberSaving ? 'Saving...' : 'Save Changes'}
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-
-              {/* Timetable Tab */}
-              {memberTab === 'timetable' && (
-                <div>
-                  {selectedMember.bookings.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: 24, color: 'var(--fp-muted)' }}>No bookings found</div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      {selectedMember.bookings
-                        .sort((a, b) => new Date(b.date) - new Date(a.date))
-                        .map((b, i) => {
-                          const dateObj = new Date(b.date + 'T00:00:00');
-                          const [h, m] = (b.time || '00:00').split(':').map(Number);
-                          const isPast = new Date(b.date) < new Date(new Date().toISOString().split('T')[0]);
-                          return (
-                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: 'var(--fp-bg)', borderRadius: 8, opacity: isPast ? 0.6 : 1 }}>
-                              <div style={{ width: 40, height: 40, borderRadius: 10, background: isPast ? 'rgba(156,163,175,0.1)' : 'rgba(109,203,202,0.12)', color: isPast ? 'var(--fp-muted)' : 'var(--fp-accent)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                <div style={{ fontSize: 14, fontWeight: 800, lineHeight: 1 }}>{dateObj.getDate()}</div>
-                                <div style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase' }}>{dateObj.toLocaleDateString('en-AU', { month: 'short' })}</div>
-                              </div>
-                              <div style={{ flex: 1 }}>
-                                <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--fp-text)' }}>
-                                  {dateObj.toLocaleDateString('en-AU', { weekday: 'long' })}
-                                  {isPast && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--fp-muted)', fontWeight: 600 }}>Past</span>}
-                                </div>
-                                <div style={{ fontSize: 12, color: 'var(--fp-muted)' }}>
-                                  {h > 12 ? h - 12 : h}:{String(m).padStart(2, '0')} {h >= 12 ? 'PM' : 'AM'} — {b.duration || 40} min
-                                </div>
-                              </div>
-                              <div style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700, background: b.status === 'confirmed' ? 'rgba(5,150,105,0.1)' : 'rgba(226,93,37,0.1)', color: b.status === 'confirmed' ? '#059669' : '#E25D25' }}>
-                                {b.status || 'confirmed'}
-                              </div>
-                            </div>
-                          );
-                        })
-                      }
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Payments Tab */}
-              {memberTab === 'payments' && (
-                <div style={{ textAlign: 'center', padding: 32, color: 'var(--fp-muted)' }}>
-                  <div style={{ fontSize: 32, marginBottom: 12 }}>💳</div>
-                  <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Payment options coming soon</div>
-                  <div style={{ fontSize: 13 }}>Stripe integration for credit card and direct debit payments will be available here.</div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* === PAYMENTS PAGE === */}
       {page === 'payments' && (
@@ -7284,6 +7076,216 @@ function FranchisePortal({ user, onLogout }) {
           })()}
         </>
       )}
+
+      </main>
+
+      {/* Member Detail Modal */}
+      {selectedMember && (
+        <div className="modal-overlay" onClick={() => { setSelectedMember(null); setEditingMember(null); }}>
+          <div className="modal fp" onClick={e => e.stopPropagation()} style={{ maxWidth: 560 }}>
+            <div className="modal-header fp" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div className="modal-title fp">{selectedMember.name}</div>
+              <button className="modal-close" onClick={() => { setSelectedMember(null); setEditingMember(null); }} style={{ marginLeft: 'auto' }}>✕</button>
+            </div>
+            <div style={{ display: 'flex', borderBottom: '1px solid var(--fp-border)' }}>
+              {[
+                { key: 'profile', icon: icons.users, label: 'Profile' },
+                { key: 'timetable', icon: icons.calendar, label: 'Timetable' },
+                { key: 'payments', icon: icons.settings, label: 'Payments' },
+              ].map(t => (
+                <button key={t.key} onClick={() => setMemberTab(t.key)} title={t.label}
+                  style={{
+                    flex: 1, padding: '12px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    background: 'none', border: 'none', borderBottom: memberTab === t.key ? '2px solid var(--fp-accent)' : '2px solid transparent',
+                    color: memberTab === t.key ? 'var(--fp-accent)' : 'var(--fp-muted)',
+                    fontFamily: 'inherit', fontSize: 13, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s',
+                  }}
+                >
+                  <Icon path={t.icon} size={15} /> {t.label}
+                </button>
+              ))}
+            </div>
+            <div className="modal-body" style={{ padding: '24px' }}>
+              {/* Profile Tab */}
+              {memberTab === 'profile' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {/* Edit / View toggle */}
+                  {!editingMember ? (
+                    <>
+                      {/* View mode */}
+                      {[
+                        { icon: icons.mail, label: 'Email', value: selectedMember.email, href: `mailto:${selectedMember.email}` },
+                        { icon: icons.phone, label: 'Phone', value: selectedMember.phone || '—', href: selectedMember.phone ? `tel:${selectedMember.phone.replace(/\s/g, '')}` : null },
+                      ].map((row, ri) => (
+                        <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'var(--fp-bg)', borderRadius: 8 }}>
+                          <Icon path={row.icon} size={15} style={{ color: 'var(--fp-accent)', flexShrink: 0 }} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 11, color: 'var(--fp-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{row.label}</div>
+                            {row.href ? (
+                              <a href={row.href} style={{ fontSize: 14, color: 'var(--fp-text)', textDecoration: 'none', fontWeight: 600 }}>{row.value}</a>
+                            ) : (
+                              <div style={{ fontSize: 14, color: 'var(--fp-text)', fontWeight: 600 }}>{row.value}</div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                      {selectedMember.children.length > 0 && (
+                        <div style={{ marginTop: 8 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Children</div>
+                          {selectedMember.children.map((c, i) => (
+                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'var(--fp-bg)', borderRadius: 8, marginBottom: 6 }}>
+                              <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(109,203,202,0.15)', color: 'var(--fp-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 14 }}>{c.name?.[0] || '?'}</div>
+                              <div>
+                                <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--fp-text)' }}>{c.name}</div>
+                                {c.grade && <div style={{ fontSize: 12, color: 'var(--fp-muted)' }}>{c.grade}</div>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <button
+                        onClick={() => setEditingMember({
+                          parentFirstName: selectedMember.parentFirstName || selectedMember.name?.split(' ')[0] || '',
+                          parentLastName: selectedMember.parentLastName || selectedMember.name?.split(' ').slice(1).join(' ') || '',
+                          email: selectedMember.email,
+                          phone: selectedMember.phone || '',
+                          children: selectedMember.children.length > 0 ? [...selectedMember.children] : [{ name: '', grade: '' }],
+                        })}
+                        className="btn btn-ghost fp"
+                        style={{ alignSelf: 'flex-start', border: '1px solid var(--fp-border)', marginTop: 4 }}
+                      >
+                        <Icon path={icons.edit} size={14} /> Edit Profile
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      {/* Edit mode */}
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Parent / Guardian</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>First Name</label>
+                          <input value={editingMember.parentFirstName} onChange={e => setEditingMember({ ...editingMember, parentFirstName: e.target.value })}
+                            style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Last Name</label>
+                          <input value={editingMember.parentLastName} onChange={e => setEditingMember({ ...editingMember, parentLastName: e.target.value })}
+                            style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
+                        </div>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Email</label>
+                          <input type="email" value={editingMember.email} onChange={e => setEditingMember({ ...editingMember, email: e.target.value })}
+                            style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Phone</label>
+                          <input type="tel" value={editingMember.phone} onChange={e => setEditingMember({ ...editingMember, phone: e.target.value })}
+                            style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
+                        </div>
+                      </div>
+
+                      <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Children</div>
+                      {editingMember.children.map((c, i) => (
+                        <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                          <div style={{ flex: 1 }}>
+                            {i === 0 && <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Name</label>}
+                            <input value={c.name} onChange={e => {
+                              const updated = [...editingMember.children];
+                              updated[i] = { ...updated[i], name: e.target.value };
+                              setEditingMember({ ...editingMember, children: updated });
+                            }} placeholder="Child's name"
+                              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            {i === 0 && <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Grade</label>}
+                            <select value={c.grade || ''} onChange={e => {
+                              const updated = [...editingMember.children];
+                              updated[i] = { ...updated[i], grade: e.target.value };
+                              setEditingMember({ ...editingMember, children: updated });
+                            }}
+                              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none', appearance: 'auto', cursor: 'pointer' }}>
+                              <option value="">Select grade...</option>
+                              {["Kindergarten","Grade 1","Grade 2","Grade 3","Grade 4","Grade 5","Grade 6","Grade 7","Grade 8","Grade 9","Grade 10","Grade 11","Grade 12","Grade 13"].map(g => <option key={g} value={g}>{g}</option>)}
+                            </select>
+                          </div>
+                          {editingMember.children.length > 1 && (
+                            <button onClick={() => {
+                              setEditingMember({ ...editingMember, children: editingMember.children.filter((_, idx) => idx !== i) });
+                            }} style={{ padding: '10px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', flexShrink: 0 }}>Remove</button>
+                          )}
+                        </div>
+                      ))}
+                      <button onClick={() => setEditingMember({ ...editingMember, children: [...editingMember.children, { name: '', grade: '' }] })}
+                        style={{ alignSelf: 'flex-start', background: 'none', border: '1px dashed var(--fp-border)', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 600, color: 'var(--fp-accent)', cursor: 'pointer', fontFamily: 'inherit' }}>
+                        + Add Child
+                      </button>
+
+                      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                        <button onClick={() => setEditingMember(null)} className="btn btn-ghost fp" style={{ border: '1px solid var(--fp-border)' }}>Cancel</button>
+                        <button onClick={() => saveMemberProfile(editingMember)} className="btn btn-primary fp" disabled={memberSaving || !editingMember.parentFirstName || !editingMember.email}>
+                          <Icon path={icons.check} size={14} /> {memberSaving ? 'Saving...' : 'Save Changes'}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Timetable Tab */}
+              {memberTab === 'timetable' && (
+                <div>
+                  {selectedMember.bookings.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: 24, color: 'var(--fp-muted)' }}>No bookings found</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {selectedMember.bookings
+                        .sort((a, b) => new Date(b.date) - new Date(a.date))
+                        .map((b, i) => {
+                          const dateObj = new Date(b.date + 'T00:00:00');
+                          const [h, m] = (b.time || '00:00').split(':').map(Number);
+                          const isPast = new Date(b.date) < new Date(new Date().toISOString().split('T')[0]);
+                          return (
+                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: 'var(--fp-bg)', borderRadius: 8, opacity: isPast ? 0.6 : 1 }}>
+                              <div style={{ width: 40, height: 40, borderRadius: 10, background: isPast ? 'rgba(156,163,175,0.1)' : 'rgba(109,203,202,0.12)', color: isPast ? 'var(--fp-muted)' : 'var(--fp-accent)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                <div style={{ fontSize: 14, fontWeight: 800, lineHeight: 1 }}>{dateObj.getDate()}</div>
+                                <div style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase' }}>{dateObj.toLocaleDateString('en-AU', { month: 'short' })}</div>
+                              </div>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--fp-text)' }}>
+                                  {dateObj.toLocaleDateString('en-AU', { weekday: 'long' })}
+                                  {isPast && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--fp-muted)', fontWeight: 600 }}>Past</span>}
+                                </div>
+                                <div style={{ fontSize: 12, color: 'var(--fp-muted)' }}>
+                                  {h > 12 ? h - 12 : h}:{String(m).padStart(2, '0')} {h >= 12 ? 'PM' : 'AM'} — {b.duration || 40} min
+                                </div>
+                              </div>
+                              <div style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700, background: b.status === 'confirmed' ? 'rgba(5,150,105,0.1)' : 'rgba(226,93,37,0.1)', color: b.status === 'confirmed' ? '#059669' : '#E25D25' }}>
+                                {b.status || 'confirmed'}
+                              </div>
+                            </div>
+                          );
+                        })
+                      }
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Payments Tab */}
+              {memberTab === 'payments' && (
+                <div style={{ textAlign: 'center', padding: 32, color: 'var(--fp-muted)' }}>
+                  <div style={{ fontSize: 32, marginBottom: 12 }}>💳</div>
+                  <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Payment options coming soon</div>
+                  <div style={{ fontSize: 13 }}>Stripe integration for credit card and direct debit payments will be available here.</div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
 
       {/* Booking Detail Modal */}
       {selectedBooking && (
