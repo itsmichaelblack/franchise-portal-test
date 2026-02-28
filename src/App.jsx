@@ -3991,7 +3991,15 @@ function InviteUserModal({ onClose, onInvited }) {
 // --- Franchise Partner Portal ---------------------------------------------------
 
 // ── Session Students & Attendance Component ───────────────────────────────────
-function SessionStudents({ bookingId, members }) {
+// Credits per week for each membership type
+const CREDITS_MAP = {
+  foundation_phase_1: 2, foundation_phase_2: 2, foundation_phase_3: 2,
+  membership_1_session: 1, membership_2_sessions: 2, membership_unlimited: 999,
+  one_on_one_primary: 1, one_on_one_secondary: 1,
+  camp_coding: 1, camp_public_speaking: 1, camp_creative_writing: 1, camp_learn_ai: 1, camp_speed_typing: 1,
+};
+
+function SessionStudents({ bookingId, members, sales = [], sessionDate, allBookings = [] }) {
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAddDropdown, setShowAddDropdown] = useState(false);
@@ -4004,6 +4012,66 @@ function SessionStudents({ bookingId, members }) {
       allChildren.push({ name: c.name, grade: c.grade || '', parentName: m.name, parentEmail: m.email, parentPhone: m.phone });
     });
   });
+
+  // Credit check: determine if a child can be added
+  const getChildCreditStatus = (child) => {
+    // Find active sale for this child's parent
+    const parentEmail = child.parentEmail?.toLowerCase();
+    const childSales = sales.filter(s =>
+      s.parentEmail?.toLowerCase() === parentEmail &&
+      (s.status === 'active' || !s.status) &&
+      s.activationDate
+    );
+
+    if (childSales.length === 0) {
+      return { allowed: false, reason: 'No active membership' };
+    }
+
+    // Get the best sale (most credits)
+    let bestSale = null;
+    let maxCredits = 0;
+    childSales.forEach(s => {
+      // Check if this child is on this sale
+      const saleChildren = (s.children || []).map(c => c.name.toLowerCase());
+      if (saleChildren.length > 0 && !saleChildren.includes(child.name.toLowerCase())) return;
+      const credits = CREDITS_MAP[s.membershipId] || 0;
+      if (credits > maxCredits) { maxCredits = credits; bestSale = s; }
+    });
+
+    if (!bestSale) {
+      return { allowed: false, reason: 'No active membership for this child' };
+    }
+
+    // Check if unlimited
+    if (maxCredits >= 999) {
+      return { allowed: true, remaining: '∞', sale: bestSale };
+    }
+
+    // Calculate rolling week from activation date
+    const activation = new Date(bestSale.activationDate + 'T00:00:00');
+    const sessionDt = new Date((sessionDate || new Date().toISOString().split('T')[0]) + 'T00:00:00');
+    const daysSinceActivation = Math.floor((sessionDt - activation) / 86400000);
+    const currentWeekNum = Math.floor(daysSinceActivation / 7);
+    const weekStart = new Date(activation);
+    weekStart.setDate(weekStart.getDate() + (currentWeekNum * 7));
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    const weekStartStr = weekStart.toISOString().split('T')[0];
+    const weekEndStr = weekEnd.toISOString().split('T')[0];
+
+    // Count sessions this child is booked into this week
+    // We need to check session_students subcollections, but that's expensive
+    // Instead, use creditsUsed on the sale record keyed by week
+    const weekKey = `week_${weekStartStr}`;
+    const creditsUsed = bestSale.creditsUsed?.[weekKey]?.[child.name.toLowerCase()] || 0;
+    const remaining = maxCredits - creditsUsed;
+
+    if (remaining <= 0) {
+      return { allowed: false, reason: `No credits remaining (${maxCredits}/${maxCredits} used this week)`, sale: bestSale };
+    }
+
+    return { allowed: true, remaining, total: maxCredits, sale: bestSale, weekKey };
+  };
 
   // Load students for this booking
   useEffect(() => {
@@ -4023,23 +4091,70 @@ function SessionStudents({ bookingId, members }) {
   const addStudent = async (child) => {
     // Check if already added
     if (students.some(s => s.name.toLowerCase() === child.name.toLowerCase())) return;
+
+    // Credit check
+    const creditStatus = getChildCreditStatus(child);
+    if (!creditStatus.allowed) return; // Blocked by UI already, but double-check
+
     try {
-      const { addDoc, collection } = await import('firebase/firestore');
+      const { addDoc, collection, doc, updateDoc } = await import('firebase/firestore');
       const { db } = await import('./firebase.js');
       const data = { name: child.name, grade: child.grade, parentName: child.parentName, parentEmail: child.parentEmail, attendance: '' };
       const ref = await addDoc(collection(db, 'bookings', bookingId, 'students'), data);
       setStudents(prev => [...prev, { id: ref.id, ...data }]);
+
+      // Increment credits used on the sale
+      if (creditStatus.sale && creditStatus.weekKey) {
+        const sale = creditStatus.sale;
+        const creditsUsed = { ...(sale.creditsUsed || {}) };
+        const weekData = { ...(creditsUsed[creditStatus.weekKey] || {}) };
+        weekData[child.name.toLowerCase()] = (weekData[child.name.toLowerCase()] || 0) + 1;
+        creditsUsed[creditStatus.weekKey] = weekData;
+        await updateDoc(doc(db, 'sales', sale.id), { creditsUsed });
+        // Update local sales reference
+        sale.creditsUsed = creditsUsed;
+      }
     } catch (e) { console.error('Failed to add student:', e); }
     setShowAddDropdown(false);
     setSearchTerm('');
   };
 
   const removeStudent = async (studentId) => {
+    const student = students.find(s => s.id === studentId);
     try {
-      const { doc, deleteDoc } = await import('firebase/firestore');
+      const { doc, deleteDoc, updateDoc } = await import('firebase/firestore');
       const { db } = await import('./firebase.js');
       await deleteDoc(doc(db, 'bookings', bookingId, 'students', studentId));
       setStudents(prev => prev.filter(s => s.id !== studentId));
+
+      // Restore credit on the sale
+      if (student) {
+        const parentEmail = student.parentEmail?.toLowerCase();
+        const matchingSale = sales.find(s =>
+          s.parentEmail?.toLowerCase() === parentEmail &&
+          (s.status === 'active' || !s.status) &&
+          s.activationDate
+        );
+        if (matchingSale && matchingSale.creditsUsed) {
+          const activation = new Date(matchingSale.activationDate + 'T00:00:00');
+          const sessionDt = new Date((sessionDate || new Date().toISOString().split('T')[0]) + 'T00:00:00');
+          const daysSince = Math.floor((sessionDt - activation) / 86400000);
+          const weekNum = Math.floor(daysSince / 7);
+          const weekStart = new Date(activation);
+          weekStart.setDate(weekStart.getDate() + (weekNum * 7));
+          const weekKey = `week_${weekStart.toISOString().split('T')[0]}`;
+
+          const creditsUsed = { ...matchingSale.creditsUsed };
+          const weekData = { ...(creditsUsed[weekKey] || {}) };
+          const childKey = student.name.toLowerCase();
+          if (weekData[childKey] && weekData[childKey] > 0) {
+            weekData[childKey] -= 1;
+            creditsUsed[weekKey] = weekData;
+            await updateDoc(doc(db, 'sales', matchingSale.id), { creditsUsed });
+            matchingSale.creditsUsed = creditsUsed;
+          }
+        }
+      }
     } catch (e) { console.error('Failed to remove student:', e); }
   };
 
@@ -4091,21 +4206,32 @@ function SessionStudents({ bookingId, members }) {
               <div style={{ padding: '12px', fontSize: 12, color: 'var(--fp-muted)', textAlign: 'center' }}>
                 {allChildren.length === 0 ? 'No students found in Members.' : 'No matching students.'}
               </div>
-            ) : filteredChildren.slice(0, 10).map((c, i) => (
-              <div key={i} onClick={() => addStudent(c)} style={{
-                padding: '10px 12px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f5f5f5',
+            ) : filteredChildren.slice(0, 10).map((c, i) => {
+              const creditStatus = getChildCreditStatus(c);
+              return (
+              <div key={i} onClick={() => creditStatus.allowed ? addStudent(c) : null} style={{
+                padding: '10px 12px', cursor: creditStatus.allowed ? 'pointer' : 'not-allowed', fontSize: 13, borderBottom: '1px solid #f5f5f5',
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                opacity: creditStatus.allowed ? 1 : 0.5,
               }}
-              onMouseEnter={e => e.currentTarget.style.background = 'var(--fp-bg)'}
+              onMouseEnter={e => { if (creditStatus.allowed) e.currentTarget.style.background = 'var(--fp-bg)'; }}
               onMouseLeave={e => e.currentTarget.style.background = '#fff'}
               >
                 <div>
                   <div style={{ fontWeight: 600, color: 'var(--fp-text)' }}>{c.name}</div>
                   <div style={{ fontSize: 11, color: 'var(--fp-muted)' }}>{c.grade ? `Grade ${c.grade} · ` : ''}{c.parentName}</div>
                 </div>
-                <span style={{ fontSize: 11, color: 'var(--fp-accent)', fontWeight: 700 }}>Add</span>
+                {creditStatus.allowed ? (
+                  <div style={{ textAlign: 'right' }}>
+                    <span style={{ fontSize: 11, color: 'var(--fp-accent)', fontWeight: 700 }}>Add</span>
+                    <div style={{ fontSize: 10, color: 'var(--fp-muted)' }}>{creditStatus.remaining === '∞' ? '∞' : creditStatus.remaining} credit{creditStatus.remaining !== 1 && creditStatus.remaining !== '∞' ? 's' : ''} left</div>
+                  </div>
+                ) : (
+                  <span style={{ fontSize: 10, color: '#dc2626', fontWeight: 600, maxWidth: 120, textAlign: 'right' }}>{creditStatus.reason}</span>
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -8959,7 +9085,7 @@ function FranchisePortal({ user, onLogout }) {
 
                     {/* Students & Attendance (sessions only) */}
                     {isSession && (
-                      <SessionStudents bookingId={b.id} members={members} />
+                      <SessionStudents bookingId={b.id} members={members} sales={sales} sessionDate={b.date} allBookings={bookings} />
                     )}
 
                     {isSession ? (
