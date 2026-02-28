@@ -4637,6 +4637,10 @@ function FranchisePortal({ user, onLogout }) {
   const [refundMode, setRefundMode] = useState(false);
   const [refundData, setRefundData] = useState({ type: 'full', amount: '', reason: '' });
   const [refundProcessing, setRefundProcessing] = useState(false);
+  const [salesFilterChild, setSalesFilterChild] = useState('');
+  const [salesFilterParent, setSalesFilterParent] = useState('');
+  const [salesFilterStatus, setSalesFilterStatus] = useState('');
+  const [salesFilterDate, setSalesFilterDate] = useState('');
   const [settingsTab, setSettingsTab] = useState('general'); // 'general' | 'marketing' | 'availability' | 'payments' | 'logs'
   const [activityLogs, setActivityLogs] = useState([]);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -7133,7 +7137,48 @@ function FranchisePortal({ user, onLogout }) {
                 <Icon path={icons.plus} size={14} /> New Sale
               </button>
             </div>
-          ) : (
+          ) : (() => {
+            const selectStyle = { padding: '8px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 13, outline: 'none', cursor: 'pointer', minWidth: 130 };
+            const filteredSales = sales.filter(s => {
+              if (salesFilterChild && !(s.children || []).some(c => c.name === salesFilterChild)) return false;
+              if (salesFilterParent && s.parentName !== salesFilterParent) return false;
+              if (salesFilterStatus && (s.status || 'active') !== salesFilterStatus) return false;
+              if (salesFilterDate && s.activationDate !== salesFilterDate) return false;
+              return true;
+            });
+            return (
+            <>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+              <select value={salesFilterChild} onChange={e => setSalesFilterChild(e.target.value)}
+                style={{ ...selectStyle, color: salesFilterChild ? 'var(--fp-text)' : 'var(--fp-muted)' }}>
+                <option value="">All Students</option>
+                {[...new Set(sales.flatMap(s => (s.children || []).map(c => c.name)).filter(Boolean))].sort().map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+              <select value={salesFilterParent} onChange={e => setSalesFilterParent(e.target.value)}
+                style={{ ...selectStyle, color: salesFilterParent ? 'var(--fp-text)' : 'var(--fp-muted)' }}>
+                <option value="">All Parents</option>
+                {[...new Set(sales.map(s => s.parentName).filter(Boolean))].sort().map(p => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+              <select value={salesFilterStatus} onChange={e => setSalesFilterStatus(e.target.value)}
+                style={{ ...selectStyle, color: salesFilterStatus ? 'var(--fp-text)' : 'var(--fp-muted)' }}>
+                <option value="">All Statuses</option>
+                <option value="active">Active</option>
+                <option value="suspended">Suspended</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+              <input type="date" value={salesFilterDate} onChange={e => setSalesFilterDate(e.target.value)}
+                style={{ ...selectStyle, color: salesFilterDate ? 'var(--fp-text)' : 'var(--fp-muted)' }} />
+              {(salesFilterChild || salesFilterParent || salesFilterStatus || salesFilterDate) && (
+                <button onClick={() => { setSalesFilterChild(''); setSalesFilterParent(''); setSalesFilterStatus(''); setSalesFilterDate(''); }}
+                  style={{ padding: '8px 12px', borderRadius: 8, border: 'none', background: 'none', color: 'var(--fp-accent)', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  Clear filters
+                </button>
+              )}
+            </div>
             <div className="card fp" style={{ padding: 0, overflow: 'hidden' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                 <thead>
@@ -7148,7 +7193,7 @@ function FranchisePortal({ user, onLogout }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {sales.map(s => {
+                  {filteredSales.map(s => {
                     const fmtDate = (d) => { if (!d) return '—'; const dt = new Date(d + 'T00:00:00'); return dt.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }); };
                     const hasPayment = s.stripeStatus === 'connected' || s.paymentMethod;
                     return (
@@ -7253,7 +7298,9 @@ function FranchisePortal({ user, onLogout }) {
                 </tbody>
               </table>
             </div>
-          )}
+            </>
+            );
+          })()}
 
           {/* Payment Transaction Logs */}
           <div style={{ marginTop: 28 }}>
