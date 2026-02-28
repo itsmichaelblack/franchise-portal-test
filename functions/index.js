@@ -541,20 +541,23 @@ exports.onEnquiryCreated = functions.firestore
   });
 
 // ── Stripe Integration ─────────────────────────────────────────────────────
-const stripeKey = process.env.STRIPE_SECRET_KEY ||
-  (functions.config().stripe && functions.config().stripe.secret_key) ||
-  "";
-const stripe = stripeKey ? require("stripe")(stripeKey) : null;
+let _stripe = null;
 
-// Helper to check Stripe is configured
+// Lazy Stripe initialization — secrets are only available at function runtime, not module load
 function requireStripe() {
-  if (!stripe) {
-    throw new functions.https.HttpsError(
-      "failed-precondition",
-      "Stripe is not configured. Set STRIPE_SECRET_KEY environment variable in Google Cloud Console."
-    );
+  if (!_stripe) {
+    const stripeKey = process.env.STRIPE_SECRET_KEY ||
+      (functions.config().stripe && functions.config().stripe.secret_key) ||
+      "";
+    if (!stripeKey) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Stripe is not configured. Set STRIPE_SECRET_KEY environment variable in Google Cloud Console."
+      );
+    }
+    _stripe = require("stripe")(stripeKey);
   }
-  return stripe;
+  return _stripe;
 }
 
 // Create a Stripe Connect account for a franchise partner and return onboarding link
