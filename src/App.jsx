@@ -1608,6 +1608,19 @@ function HQPortal({ user, onLogout }) {
   // HQ Settings
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [settingsLoading, setSettingsLoading] = useState(false);
+  const [hqSettingsTab, setHqSettingsTab] = useState('general'); // 'general' | 'policies'
+
+  // Policies state
+  const [policies, setPolicies] = useState({
+    membershipPolicy: { content: '', countries: [], enabled: true },
+    termsAndConditions: { content: '', countries: [], enabled: true },
+    privacyPolicy: { content: '', countries: [], enabled: true },
+  });
+  const [policiesLoading, setPoliciesLoading] = useState(false);
+  const [policiesSaving, setPoliciesSaving] = useState(false);
+  const [editingPolicy, setEditingPolicy] = useState(null); // null | 'membershipPolicy' | 'termsAndConditions' | 'privacyPolicy'
+  const quillRef = useRef(null);
+  const quillInstanceRef = useRef(null);
 
   // Services
   const [services, setServices] = useState([]);
@@ -1626,6 +1639,13 @@ function HQPortal({ user, onLogout }) {
         if (snap.exists()) {
           const data = snap.data();
           if (data.youtubeUrl) setYoutubeUrl(data.youtubeUrl);
+          if (data.policies) {
+            setPolicies(prev => ({
+              membershipPolicy: { ...prev.membershipPolicy, ...data.policies.membershipPolicy },
+              termsAndConditions: { ...prev.termsAndConditions, ...data.policies.termsAndConditions },
+              privacyPolicy: { ...prev.privacyPolicy, ...data.policies.privacyPolicy },
+            }));
+          }
         }
       } catch (e) { console.error("Failed to load settings:", e); }
     };
@@ -1648,6 +1668,106 @@ function HQPortal({ user, onLogout }) {
     }
     setSettingsLoading(false);
   };
+
+  const handleSavePolicies = async () => {
+    setPoliciesSaving(true);
+    try {
+      const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
+      const { db } = await import('./firebase.js');
+      await setDoc(doc(db, 'settings', 'hq'), {
+        policies,
+        policiesUpdatedAt: serverTimestamp(),
+      }, { merge: true });
+      showToast('✓ Policies saved.');
+    } catch (err) {
+      console.error("Failed to save policies:", err);
+      showToast('✗ Failed to save policies.');
+    }
+    setPoliciesSaving(false);
+  };
+
+  // Quill editor initialization
+  const initQuill = (policyKey) => {
+    setEditingPolicy(policyKey);
+    setTimeout(() => {
+      if (quillRef.current && !quillInstanceRef.current) {
+        quillInstanceRef.current = new window.Quill(quillRef.current, {
+          theme: 'snow',
+          modules: {
+            toolbar: [
+              [{ header: [1, 2, 3, false] }],
+              ['bold', 'italic', 'underline', 'strike'],
+              [{ color: [] }, { background: [] }],
+              [{ list: 'ordered' }, { list: 'bullet' }],
+              ['link', 'image'],
+              [{ align: [] }],
+              ['blockquote', 'code-block'],
+              ['clean'],
+            ],
+          },
+          placeholder: 'Enter policy content...',
+        });
+        quillInstanceRef.current.root.innerHTML = policies[policyKey]?.content || '';
+      }
+    }, 100);
+  };
+
+  const saveQuillContent = () => {
+    if (quillInstanceRef.current && editingPolicy) {
+      const html = quillInstanceRef.current.root.innerHTML;
+      setPolicies(prev => ({
+        ...prev,
+        [editingPolicy]: { ...prev[editingPolicy], content: html === '<p><br></p>' ? '' : html },
+      }));
+      quillInstanceRef.current = null;
+      setEditingPolicy(null);
+    }
+  };
+
+  const cancelQuillEdit = () => {
+    quillInstanceRef.current = null;
+    setEditingPolicy(null);
+  };
+
+  const POLICY_COUNTRIES = [
+    { code: 'AU', label: 'Australia' },
+    { code: 'NZ', label: 'New Zealand' },
+    { code: 'US', label: 'United States' },
+  ];
+
+  const togglePolicyCountry = (policyKey, countryCode) => {
+    setPolicies(prev => {
+      const current = prev[policyKey].countries || [];
+      const updated = current.includes(countryCode)
+        ? current.filter(c => c !== countryCode)
+        : [...current, countryCode];
+      return { ...prev, [policyKey]: { ...prev[policyKey], countries: updated } };
+    });
+  };
+
+  const togglePolicyEnabled = (policyKey) => {
+    setPolicies(prev => ({
+      ...prev,
+      [policyKey]: { ...prev[policyKey], enabled: !prev[policyKey].enabled },
+    }));
+  };
+
+  // Load Quill CDN for rich text editing
+  useEffect(() => {
+    if (!document.getElementById('quill-css')) {
+      const link = document.createElement('link');
+      link.id = 'quill-css';
+      link.rel = 'stylesheet';
+      link.href = 'https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.snow.min.css';
+      document.head.appendChild(link);
+    }
+    if (!document.getElementById('quill-js')) {
+      const script = document.createElement('script');
+      script.id = 'quill-js';
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.min.js';
+      document.body.appendChild(script);
+    }
+  }, []);
 
   // Load services
   useEffect(() => {
@@ -2251,35 +2371,182 @@ function HQPortal({ user, onLogout }) {
               <div className="page-desc">Configure booking page and portal-wide settings.</div>
             </div>
           </div>
-          <div className="settings-grid">
-            <div className="setting-card hq" style={{ gridColumn: '1 / -1' }}>
-              <div className="setting-label-row">
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)', marginBottom: 4 }}>Confirmation Page Video</div>
-                  <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>YouTube video shown to customers after they book an assessment. Paste the full YouTube URL.</div>
+
+          {/* Settings sub-tabs */}
+          <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid var(--border)', marginBottom: 24 }}>
+            {[
+              { key: 'general', label: 'General', icon: icons.building },
+              { key: 'policies', label: 'Legal / Policies', icon: icons.shield },
+            ].map(tab => (
+              <button key={tab.key} onClick={() => setHqSettingsTab(tab.key)} style={{
+                padding: '12px 20px', fontSize: 13, fontWeight: 600, fontFamily: 'inherit',
+                border: 'none', borderBottom: hqSettingsTab === tab.key ? '2px solid var(--orange)' : '2px solid transparent',
+                background: 'none', color: hqSettingsTab === tab.key ? 'var(--orange)' : 'var(--text-muted)',
+                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, marginBottom: -2,
+                transition: 'color 0.15s, border-color 0.15s',
+              }}>
+                <Icon path={tab.icon} size={14} /> {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* ── General Tab ── */}
+          {hqSettingsTab === 'general' && (
+            <>
+              <div className="settings-grid">
+                <div className="setting-card hq" style={{ gridColumn: '1 / -1' }}>
+                  <div className="setting-label-row">
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)', marginBottom: 4 }}>Confirmation Page Video</div>
+                      <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>YouTube video shown to customers after they book an assessment. Paste the full YouTube URL.</div>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 14 }}>
+                    <input
+                      className="form-input hq"
+                      style={{ width: '100%' }}
+                      value={youtubeUrl}
+                      onChange={e => setYoutubeUrl(e.target.value)}
+                      placeholder="https://www.youtube.com/watch?v=..."
+                    />
+                  </div>
+                  {youtubeUrl && (
+                    <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
+                      Preview: <a href={youtubeUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--orange)' }}>{youtubeUrl}</a>
+                    </div>
+                  )}
                 </div>
               </div>
-              <div style={{ marginTop: 14 }}>
-                <input
-                  className="form-input hq"
-                  style={{ width: '100%' }}
-                  value={youtubeUrl}
-                  onChange={e => setYoutubeUrl(e.target.value)}
-                  placeholder="https://www.youtube.com/watch?v=..."
-                />
+              <div className="save-bar" style={{ marginTop: 16 }}>
+                <button className="btn btn-primary hq" onClick={handleSaveSettings} disabled={settingsLoading}>
+                  <Icon path={icons.check} size={14} /> {settingsLoading ? 'Saving...' : 'Save Settings'}
+                </button>
               </div>
-              {youtubeUrl && (
-                <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
-                  Preview: <a href={youtubeUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--orange)' }}>{youtubeUrl}</a>
+            </>
+          )}
+
+          {/* ── Policies Tab ── */}
+          {hqSettingsTab === 'policies' && (
+            <>
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                  Manage the legal policies shown to parents during sign-up in the mobile app. You can enable/disable each policy, assign which countries it applies to, and edit the content with the rich text editor.
                 </div>
-              )}
-            </div>
-          </div>
-          <div className="save-bar" style={{ marginTop: 16 }}>
-            <button className="btn btn-primary hq" onClick={handleSaveSettings} disabled={settingsLoading}>
-              <Icon path={icons.check} size={14} /> {settingsLoading ? 'Saving...' : 'Save Settings'}
-            </button>
-          </div>
+              </div>
+
+              {[
+                { key: 'membershipPolicy', label: 'Membership Policy', icon: icons.shield },
+                { key: 'termsAndConditions', label: 'Terms & Conditions', icon: icons.check },
+                { key: 'privacyPolicy', label: 'Privacy Policy', icon: icons.eye },
+              ].map(policy => (
+                <div key={policy.key} style={{
+                  background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+                  padding: 24, marginBottom: 16,
+                  opacity: policies[policy.key]?.enabled ? 1 : 0.6,
+                  transition: 'opacity 0.2s',
+                }}>
+                  {/* Header row */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--orange-pale)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Icon path={policy.icon} size={16} style={{ color: 'var(--orange)' }} />
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)' }}>{policy.label}</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                          {policies[policy.key]?.content ? 'Content saved' : 'No content yet'}
+                          {policies[policy.key]?.countries?.length > 0 && ` · ${policies[policy.key].countries.length} ${policies[policy.key].countries.length === 1 ? 'country' : 'countries'}`}
+                        </div>
+                      </div>
+                    </div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', userSelect: 'none' }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: policies[policy.key]?.enabled ? 'var(--success)' : 'var(--text-muted)' }}>
+                        {policies[policy.key]?.enabled ? 'Enabled' : 'Disabled'}
+                      </span>
+                      <div onClick={() => togglePolicyEnabled(policy.key)} style={{
+                        width: 40, height: 22, borderRadius: 11, cursor: 'pointer',
+                        background: policies[policy.key]?.enabled ? 'var(--success)' : 'var(--border-dark)',
+                        position: 'relative', transition: 'background 0.2s',
+                      }}>
+                        <div style={{
+                          width: 18, height: 18, borderRadius: 9, background: 'white',
+                          position: 'absolute', top: 2, transition: 'left 0.2s',
+                          left: policies[policy.key]?.enabled ? 20 : 2,
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
+                        }} />
+                      </div>
+                    </label>
+                  </div>
+
+                  {/* Countries */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Applies to countries</div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {POLICY_COUNTRIES.map(c => {
+                        const isSelected = (policies[policy.key]?.countries || []).includes(c.code);
+                        return (
+                          <button key={c.code} onClick={() => togglePolicyCountry(policy.key, c.code)} style={{
+                            padding: '6px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, fontFamily: 'inherit',
+                            border: isSelected ? '2px solid var(--orange)' : '2px solid var(--border)',
+                            background: isSelected ? 'var(--orange-pale)' : 'var(--surface)',
+                            color: isSelected ? 'var(--orange)' : 'var(--text-muted)',
+                            cursor: 'pointer', transition: 'all 0.15s',
+                          }}>
+                            {isSelected && <span style={{ marginRight: 4 }}>✓</span>}
+                            {c.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {(policies[policy.key]?.countries || []).length === 0 && (
+                      <div style={{ fontSize: 12, color: 'var(--danger)', marginTop: 6 }}>⚠ No countries selected — this policy won't appear in the app.</div>
+                    )}
+                  </div>
+
+                  {/* Content preview / editor */}
+                  {editingPolicy === policy.key ? (
+                    <div>
+                      <div ref={quillRef} style={{ minHeight: 250, background: 'white', borderRadius: '0 0 8px 8px' }} />
+                      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                        <button className="btn btn-primary hq" onClick={saveQuillContent} style={{ fontSize: 13 }}>
+                          <Icon path={icons.check} size={13} /> Done Editing
+                        </button>
+                        <button className="btn btn-ghost hq" onClick={cancelQuillEdit} style={{ fontSize: 13 }}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      {policies[policy.key]?.content ? (
+                        <div style={{
+                          border: '1px solid var(--border)', borderRadius: 8, padding: 16,
+                          maxHeight: 200, overflowY: 'auto', fontSize: 13, lineHeight: 1.7, color: 'var(--text)',
+                          background: 'var(--bg)',
+                        }} dangerouslySetInnerHTML={{ __html: policies[policy.key].content }} />
+                      ) : (
+                        <div style={{
+                          border: '2px dashed var(--border)', borderRadius: 8, padding: 32,
+                          textAlign: 'center', color: 'var(--text-muted)', fontSize: 13,
+                        }}>
+                          No content yet. Click "Edit Content" to add your policy text.
+                        </div>
+                      )}
+                      <button className="btn btn-ghost hq" onClick={() => initQuill(policy.key)} style={{ marginTop: 12, fontSize: 13 }}>
+                        <Icon path={icons.edit} size={13} /> Edit Content
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              <div className="save-bar" style={{ marginTop: 8 }}>
+                <button className="btn btn-primary hq" onClick={handleSavePolicies} disabled={policiesSaving}>
+                  <Icon path={icons.check} size={14} /> {policiesSaving ? 'Saving Policies...' : 'Save All Policies'}
+                </button>
+              </div>
+            </>
+          )}
         </>
       )}
 
