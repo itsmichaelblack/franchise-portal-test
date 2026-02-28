@@ -4630,6 +4630,7 @@ function FranchisePortal({ user, onLogout }) {
   const [selectedSale, setSelectedSale] = useState(null);
   const [saleAction, setSaleAction] = useState(null); // null | 'suspend' | 'cancel'
   const [saleActionSaving, setSaleActionSaving] = useState(false);
+  const [saleModalTab, setSaleModalTab] = useState('details'); // 'details' | 'future'
   const [suspendData, setSuspendData] = useState({ startDate: '', endDate: '', fee: '15' });
   const [cancelData, setCancelData] = useState({ date: '', immediate: true, reason: '' });
   const [selectedTx, setSelectedTx] = useState(null); // selected transaction for detail modal
@@ -7028,7 +7029,7 @@ function FranchisePortal({ user, onLogout }) {
                       <tr key={s.id} style={{ borderBottom: '1px solid var(--fp-border)', transition: 'background 0.1s', cursor: 'pointer' }}
                         onMouseEnter={e => e.currentTarget.style.background = 'var(--fp-bg)'}
                         onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                        onClick={() => { setSelectedSale(s); setSaleAction(null); }}
+                        onClick={() => { setSelectedSale(s); setSaleAction(null); setSaleModalTab('details'); }}
                       >
                         <td style={{ padding: '14px 16px' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -7396,11 +7397,23 @@ function FranchisePortal({ user, onLogout }) {
           {selectedSale && (
             <div className="modal-overlay" onClick={() => { setSelectedSale(null); setSaleAction(null); }}>
               <div className="modal fp" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px', borderBottom: '1px solid var(--fp-border)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px 0 24px' }}>
                   <div style={{ fontWeight: 800, fontSize: 18, color: 'var(--fp-text)' }}>Membership Details</div>
                   <button onClick={() => { setSelectedSale(null); setSaleAction(null); }}
                     style={{ width: 32, height: 32, borderRadius: 8, border: '2px solid var(--fp-border)', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 14, fontWeight: 700, color: 'var(--fp-muted)' }}>✕</button>
                 </div>
+                {/* Tabs */}
+                <div style={{ display: 'flex', gap: 0, padding: '12px 24px 0 24px', borderBottom: '2px solid var(--fp-border)' }}>
+                  {['details', 'future'].map(tab => (
+                    <button key={tab} onClick={() => setSaleModalTab(tab)}
+                      style={{ padding: '10px 20px', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', background: 'none', border: 'none', borderBottom: saleModalTab === tab ? '2px solid var(--fp-accent)' : '2px solid transparent', marginBottom: -2, color: saleModalTab === tab ? 'var(--fp-accent)' : 'var(--fp-muted)', transition: 'all 0.15s' }}>
+                      {tab === 'details' ? 'Details' : 'Future Payments'}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Details Tab */}
+                {saleModalTab === 'details' && (
                 <div style={{ padding: 24 }}>
                   {/* Sale info */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
@@ -7597,6 +7610,78 @@ function FranchisePortal({ user, onLogout }) {
                     </div>
                   )}
                 </div>
+                )}
+
+                {/* Future Payments Tab */}
+                {saleModalTab === 'future' && (
+                <div style={{ padding: 24 }}>
+                  <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginBottom: 16 }}>
+                    Upcoming scheduled payments based on {selectedSale.billingFrequency === 'monthly' ? 'monthly' : 'weekly'} billing from the first payment date.
+                  </div>
+                  {(() => {
+                    const startDate = selectedSale.firstPaymentDate || selectedSale.activationDate;
+                    if (!startDate) return <div style={{ padding: 20, textAlign: 'center', color: 'var(--fp-muted)', fontSize: 13 }}>No payment date set for this membership.</div>;
+                    
+                    const interval = selectedSale.billingFrequency === 'monthly' ? 30 : 7;
+                    const amount = Number(selectedSale.weeklyAmount || 0);
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    const start = new Date(startDate + 'T00:00:00');
+                    
+                    // Find the next upcoming payment date
+                    let nextPayment = new Date(start);
+                    while (nextPayment < today) {
+                      nextPayment.setDate(nextPayment.getDate() + interval);
+                    }
+                    
+                    // Generate next 8 payments
+                    const payments = [];
+                    for (let i = 0; i < 8; i++) {
+                      const payDate = new Date(nextPayment);
+                      payDate.setDate(payDate.getDate() + (interval * i));
+                      const isSuspended = selectedSale.status === 'suspended' && selectedSale.suspension &&
+                        payDate >= new Date(selectedSale.suspension.startDate + 'T00:00:00') &&
+                        payDate <= new Date(selectedSale.suspension.endDate + 'T00:00:00');
+                      payments.push({
+                        date: payDate,
+                        amount: isSuspended ? Number(selectedSale.suspension?.fee || 0) : amount,
+                        suspended: isSuspended,
+                        cancelled: selectedSale.status === 'cancelled',
+                      });
+                    }
+                    
+                    return (
+                      <div>
+                        {payments.map((p, i) => {
+                          const isNext = i === 0;
+                          const dateStr = p.date.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+                          return (
+                            <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '14px 16px', borderBottom: i < payments.length - 1 ? '1px solid var(--fp-border)' : 'none', background: isNext ? 'rgba(109,203,202,0.06)' : 'transparent' }}>
+                              <div style={{ width: 32, height: 32, borderRadius: '50%', background: p.cancelled ? '#fef2f2' : p.suspended ? '#fffbeb' : isNext ? 'rgba(109,203,202,0.2)' : 'var(--fp-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 14, flexShrink: 0 }}>
+                                <span style={{ fontSize: 13, fontWeight: 700, color: p.cancelled ? '#dc2626' : p.suspended ? '#d97706' : 'var(--fp-accent)' }}>{i + 1}</span>
+                              </div>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: 14, fontWeight: 600, color: p.cancelled ? 'var(--fp-muted)' : 'var(--fp-text)', textDecoration: p.cancelled ? 'line-through' : 'none' }}>{dateStr}</div>
+                                {isNext && !p.cancelled && <div style={{ fontSize: 11, color: 'var(--fp-accent)', fontWeight: 600, marginTop: 1 }}>Next payment</div>}
+                                {p.suspended && <div style={{ fontSize: 11, color: '#d97706', fontWeight: 600, marginTop: 1 }}>Suspended — reduced fee</div>}
+                                {p.cancelled && <div style={{ fontSize: 11, color: '#dc2626', fontWeight: 600, marginTop: 1 }}>Cancelled</div>}
+                              </div>
+                              <div style={{ fontSize: 15, fontWeight: 700, color: p.cancelled ? 'var(--fp-muted)' : p.suspended ? '#d97706' : 'var(--fp-text)', textDecoration: p.cancelled ? 'line-through' : 'none' }}>
+                                ${p.amount.toFixed(2)}
+                              </div>
+                            </div>
+                          );
+                        })}
+                        <div style={{ padding: '12px 16px', background: 'var(--fp-bg)', borderRadius: '0 0 12px 12px', display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 700 }}>
+                          <span style={{ color: 'var(--fp-muted)' }}>Total (8 weeks)</span>
+                          <span style={{ color: 'var(--fp-text)' }}>${payments.reduce((sum, p) => sum + (p.cancelled ? 0 : p.amount), 0).toFixed(2)}</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+                )}
+
               </div>
             </div>
           )}
