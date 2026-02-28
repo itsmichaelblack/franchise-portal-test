@@ -4624,6 +4624,9 @@ function FranchisePortal({ user, onLogout }) {
   const [cardFormSaving, setCardFormSaving] = useState(false);
   const [txLogStartDate, setTxLogStartDate] = useState('');
   const [txLogEndDate, setTxLogEndDate] = useState('');
+  const [txLogParent, setTxLogParent] = useState('');
+  const [txLogChild, setTxLogChild] = useState('');
+  const [txLogStatus, setTxLogStatus] = useState('');
   const [selectedSale, setSelectedSale] = useState(null);
   const [saleAction, setSaleAction] = useState(null); // null | 'suspend' | 'cancel'
   const [saleActionSaving, setSaleActionSaving] = useState(false);
@@ -7127,12 +7130,33 @@ function FranchisePortal({ user, onLogout }) {
 
           {/* Payment Transaction Logs */}
           <div style={{ marginTop: 28 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 17, color: 'var(--fp-text)' }}>Transaction Log</div>
-                <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 2 }}>All processed payment transactions.</div>
-              </div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontWeight: 700, fontSize: 17, color: 'var(--fp-text)' }}>Transaction Log</div>
+              <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 2 }}>All processed payment transactions.</div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
+              <select value={txLogParent} onChange={e => setTxLogParent(e.target.value)}
+                style={{ padding: '8px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 13, color: txLogParent ? 'var(--fp-text)' : 'var(--fp-muted)', outline: 'none', cursor: 'pointer', minWidth: 140 }}>
+                <option value="">All Parents</option>
+                {[...new Set(sales.filter(s => s.paymentMethod || s.stripeStatus === 'connected').map(s => s.parentName).filter(Boolean))].sort().map(p => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+              <select value={txLogChild} onChange={e => setTxLogChild(e.target.value)}
+                style={{ padding: '8px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 13, color: txLogChild ? 'var(--fp-text)' : 'var(--fp-muted)', outline: 'none', cursor: 'pointer', minWidth: 140 }}>
+                <option value="">All Students</option>
+                {[...new Set(sales.filter(s => s.paymentMethod || s.stripeStatus === 'connected').flatMap(s => (s.children || []).map(c => c.name)).filter(Boolean))].sort().map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+              <select value={txLogStatus} onChange={e => setTxLogStatus(e.target.value)}
+                style={{ padding: '8px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 13, color: txLogStatus ? 'var(--fp-text)' : 'var(--fp-muted)', outline: 'none', cursor: 'pointer', minWidth: 120 }}>
+                <option value="">All Statuses</option>
+                <option value="Processed">Processed</option>
+                <option value="Refunded">Refunded</option>
+                <option value="Pending">Pending</option>
+              </select>
+              <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
                 <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--fp-muted)' }}>From</label>
                 <input type="date" value={txLogStartDate} onChange={e => setTxLogStartDate(e.target.value)}
                   style={{ padding: '8px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 13, color: 'var(--fp-text)', outline: 'none' }} />
@@ -7164,6 +7188,9 @@ function FranchisePortal({ user, onLogout }) {
               })).filter(tx => {
                 if (txLogStartDate && tx.date < txLogStartDate) return false;
                 if (txLogEndDate && tx.date > txLogEndDate) return false;
+                if (txLogParent && tx.parent !== txLogParent) return false;
+                if (txLogChild && !tx.children.includes(txLogChild)) return false;
+                if (txLogStatus && tx.status !== txLogStatus) return false;
                 return true;
               }).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
