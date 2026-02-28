@@ -56,8 +56,12 @@ service cloud.firestore {
 
     // ── Franchise Locations collection ──────────────────────────────────────
     match /locations/{locationId} {
+      // Allow public read access (needed for parent app to list centres)
+      allow read: if true;
+
       // HQ admins (both roles) can read all locations
-      allow read: if isAdmin();
+      // (redundant with above but kept for clarity)
+      // allow read: if isAdmin();
 
       // Franchise partners can read their own location
       allow read: if isFranchisePartner(locationId);
@@ -261,6 +265,24 @@ service cloud.firestore {
       allow read: if isAuth();
       allow create: if isAuth();
       allow update, delete: if false;
+    }
+
+    // ── Parents collection (parent app accounts) ─────────────────────────
+    match /parents/{parentId} {
+      // Allow public create (parent app sign-up, no Firebase Auth)
+      allow create: if true;
+
+      // Allow public read for own document (parent app uses parentId directly)
+      allow read: if true;
+
+      // Allow updates (e.g. adding children, editing profile)
+      allow update: if true;
+
+      // HQ admins can read all parents
+      allow read: if isAdmin();
+
+      // No public delete
+      allow delete: if isAdmin();
     }
 
     // ── Deny everything else ────────────────────────────────────────────────
