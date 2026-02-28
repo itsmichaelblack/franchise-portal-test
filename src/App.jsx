@@ -4624,6 +4624,11 @@ function FranchisePortal({ user, onLogout }) {
   const [cardFormSaving, setCardFormSaving] = useState(false);
   const [txLogStartDate, setTxLogStartDate] = useState('');
   const [txLogEndDate, setTxLogEndDate] = useState('');
+  const [selectedSale, setSelectedSale] = useState(null);
+  const [saleAction, setSaleAction] = useState(null); // null | 'suspend' | 'cancel'
+  const [saleActionSaving, setSaleActionSaving] = useState(false);
+  const [suspendData, setSuspendData] = useState({ startDate: '', endDate: '', fee: '15' });
+  const [cancelData, setCancelData] = useState({ date: '', immediate: true, reason: '' });
   const [settingsTab, setSettingsTab] = useState('general'); // 'general' | 'marketing' | 'availability' | 'payments'
   const [locationData, setLocationData] = useState(null); // full location document for General tab
   const [marketingData, setMarketingData] = useState({ instagramUrl: '', facebookUrl: '' });
@@ -7004,6 +7009,7 @@ function FranchisePortal({ user, onLogout }) {
                     <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Membership</th>
                     <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Amount</th>
                     <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Start Date</th>
+                    <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Status</th>
                     <th style={{ padding: '12px 16px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fp-muted)' }}>Payment</th>
                   </tr>
                 </thead>
@@ -7012,9 +7018,10 @@ function FranchisePortal({ user, onLogout }) {
                     const fmtDate = (d) => { if (!d) return '—'; const dt = new Date(d + 'T00:00:00'); return dt.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }); };
                     const hasPayment = s.stripeStatus === 'connected' || s.paymentMethod;
                     return (
-                      <tr key={s.id} style={{ borderBottom: '1px solid var(--fp-border)', transition: 'background 0.1s' }}
+                      <tr key={s.id} style={{ borderBottom: '1px solid var(--fp-border)', transition: 'background 0.1s', cursor: 'pointer' }}
                         onMouseEnter={e => e.currentTarget.style.background = 'var(--fp-bg)'}
                         onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                        onClick={() => { setSelectedSale(s); setSaleAction(null); }}
                       >
                         <td style={{ padding: '14px 16px' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -7046,6 +7053,18 @@ function FranchisePortal({ user, onLogout }) {
                         </td>
                         <td style={{ padding: '14px 16px', color: 'var(--fp-muted)', fontSize: 13 }}>
                           {fmtDate(s.activationDate)}
+                        </td>
+                        <td style={{ padding: '14px 16px' }}>
+                          {(() => {
+                            const st = s.status || 'active';
+                            const styles = {
+                              active: { bg: '#ecfdf5', color: '#059669', label: 'Active' },
+                              suspended: { bg: '#fffbeb', color: '#d97706', label: 'Suspended' },
+                              cancelled: { bg: '#fef2f2', color: '#dc2626', label: 'Cancelled' },
+                            };
+                            const style = styles[st] || styles.active;
+                            return <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600, background: style.bg, color: style.color }}>{style.label}</span>;
+                          })()}
                         </td>
                         <td style={{ padding: '14px 16px' }}>
                           {hasPayment ? (
@@ -7179,6 +7198,215 @@ function FranchisePortal({ user, onLogout }) {
               );
             })()}
           </div>
+
+          {/* Membership Detail Modal */}
+          {selectedSale && (
+            <div className="modal-overlay" onClick={() => { setSelectedSale(null); setSaleAction(null); }}>
+              <div className="modal fp" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px', borderBottom: '1px solid var(--fp-border)' }}>
+                  <div style={{ fontWeight: 800, fontSize: 18, color: 'var(--fp-text)' }}>Membership Details</div>
+                  <button onClick={() => { setSelectedSale(null); setSaleAction(null); }}
+                    style={{ width: 32, height: 32, borderRadius: 8, border: '2px solid var(--fp-border)', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 14, fontWeight: 700, color: 'var(--fp-muted)' }}>✕</button>
+                </div>
+                <div style={{ padding: 24 }}>
+                  {/* Sale info */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Membership</div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fp-text)' }}>{selectedSale.membershipName}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Amount</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--fp-text)' }}>${Number(selectedSale.weeklyAmount || 0).toFixed(2)}/wk</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Parent</div>
+                      <div style={{ fontSize: 14, color: 'var(--fp-text)' }}>{selectedSale.parentName}</div>
+                      <div style={{ fontSize: 12, color: 'var(--fp-muted)' }}>{selectedSale.parentEmail}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Child(ren)</div>
+                      <div style={{ fontSize: 14, color: 'var(--fp-text)' }}>{(selectedSale.children || []).map(c => c.name).join(', ') || '—'}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Start Date</div>
+                      <div style={{ fontSize: 14, color: 'var(--fp-text)' }}>{selectedSale.activationDate ? new Date(selectedSale.activationDate + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Status</div>
+                      {(() => {
+                        const st = selectedSale.status || 'active';
+                        const styles = { active: { bg: '#ecfdf5', color: '#059669', label: 'Active' }, suspended: { bg: '#fffbeb', color: '#d97706', label: 'Suspended' }, cancelled: { bg: '#fef2f2', color: '#dc2626', label: 'Cancelled' } };
+                        const style = styles[st] || styles.active;
+                        return <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600, background: style.bg, color: style.color }}>{style.label}</span>;
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Suspension info if suspended */}
+                  {selectedSale.status === 'suspended' && selectedSale.suspension && (
+                    <div style={{ padding: 14, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, marginBottom: 16, fontSize: 13 }}>
+                      <div style={{ fontWeight: 700, color: '#92400e', marginBottom: 4 }}>Suspension Details</div>
+                      <div style={{ color: '#92400e' }}>
+                        {new Date(selectedSale.suspension.startDate + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })} — {new Date(selectedSale.suspension.endDate + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        {selectedSale.suspension.fee ? ` • $${selectedSale.suspension.fee}/wk fee` : ''}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Cancellation info if cancelled */}
+                  {selectedSale.status === 'cancelled' && selectedSale.cancellation && (
+                    <div style={{ padding: 14, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, marginBottom: 16, fontSize: 13 }}>
+                      <div style={{ fontWeight: 700, color: '#991b1b', marginBottom: 4 }}>Cancellation Details</div>
+                      <div style={{ color: '#991b1b' }}>
+                        Cancelled {selectedSale.cancellation.date ? new Date(selectedSale.cancellation.date + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : 'immediately'}
+                        {selectedSale.cancellation.reason ? ` • Reason: ${selectedSale.cancellation.reason}` : ''}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Action forms */}
+                  {!saleAction && (selectedSale.status || 'active') !== 'cancelled' && (
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      {(selectedSale.status || 'active') === 'active' && (
+                        <>
+                          <button className="btn btn-ghost fp" style={{ flex: 1, justifyContent: 'center', border: '1px solid #d97706', color: '#d97706' }}
+                            onClick={() => { setSaleAction('suspend'); setSuspendData({ startDate: new Date().toISOString().split('T')[0], endDate: '', fee: '15' }); }}>
+                            Suspend
+                          </button>
+                          <button className="btn btn-ghost fp" style={{ flex: 1, justifyContent: 'center', border: '1px solid #dc2626', color: '#dc2626' }}
+                            onClick={() => { setSaleAction('cancel'); setCancelData({ date: '', immediate: true, reason: '' }); }}>
+                            Cancel
+                          </button>
+                        </>
+                      )}
+                      {selectedSale.status === 'suspended' && (
+                        <button className="btn btn-primary fp" style={{ flex: 1, justifyContent: 'center' }}
+                          onClick={async () => {
+                            setSaleActionSaving(true);
+                            try {
+                              const { doc, updateDoc } = await import('firebase/firestore');
+                              const { db } = await import('./firebase.js');
+                              await updateDoc(doc(db, 'sales', selectedSale.id), { status: 'active', suspension: null });
+                              showToast('✓ Membership reactivated.');
+                              setSales(prev => prev.map(s => s.id === selectedSale.id ? { ...s, status: 'active', suspension: null } : s));
+                              setSelectedSale(prev => ({ ...prev, status: 'active', suspension: null }));
+                            } catch (e) { showToast('✗ Failed to reactivate.'); }
+                            setSaleActionSaving(false);
+                          }} disabled={saleActionSaving}>
+                          {saleActionSaving ? 'Saving...' : 'Reactivate Membership'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Suspend form */}
+                  {saleAction === 'suspend' && (
+                    <div style={{ background: 'var(--fp-bg)', borderRadius: 10, padding: 16 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: '#d97706', marginBottom: 12 }}>Suspend Membership</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Start Date</label>
+                          <input type="date" value={suspendData.startDate} onChange={e => setSuspendData(p => ({ ...p, startDate: e.target.value }))}
+                            style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>End Date</label>
+                          <input type="date" value={suspendData.endDate} onChange={e => setSuspendData(p => ({ ...p, endDate: e.target.value }))}
+                            min={suspendData.startDate}
+                            style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
+                        </div>
+                      </div>
+                      <div style={{ marginBottom: 16 }}>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Suspension Fee ($/week)</label>
+                        <div style={{ display: 'flex', alignItems: 'center', border: '2px solid var(--fp-border)', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
+                          <span style={{ padding: '10px 10px 10px 12px', color: 'var(--fp-muted)', fontSize: 14, fontWeight: 700 }}>$</span>
+                          <input type="number" min="0" step="0.01" value={suspendData.fee} onChange={e => setSuspendData(p => ({ ...p, fee: e.target.value }))}
+                            style={{ flex: 1, padding: '10px 12px 10px 0', border: 'none', outline: 'none', fontFamily: 'inherit', fontSize: 14, fontWeight: 600 }} />
+                          <span style={{ padding: '10px 12px', color: 'var(--fp-muted)', fontSize: 13 }}>/wk</span>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button className="btn btn-ghost fp" style={{ border: '1px solid var(--fp-border)' }} onClick={() => setSaleAction(null)}>Cancel</button>
+                        <button className="btn btn-primary fp" style={{ background: '#d97706' }} disabled={saleActionSaving || !suspendData.startDate || !suspendData.endDate}
+                          onClick={async () => {
+                            setSaleActionSaving(true);
+                            try {
+                              const { doc, updateDoc } = await import('firebase/firestore');
+                              const { db } = await import('./firebase.js');
+                              const suspension = { startDate: suspendData.startDate, endDate: suspendData.endDate, fee: suspendData.fee };
+                              await updateDoc(doc(db, 'sales', selectedSale.id), { status: 'suspended', suspension });
+                              showToast('✓ Membership suspended.');
+                              setSales(prev => prev.map(s => s.id === selectedSale.id ? { ...s, status: 'suspended', suspension } : s));
+                              setSelectedSale(prev => ({ ...prev, status: 'suspended', suspension }));
+                              setSaleAction(null);
+                            } catch (e) { showToast('✗ Failed to suspend.'); }
+                            setSaleActionSaving(false);
+                          }}>
+                          <Icon path={icons.check} size={14} /> {saleActionSaving ? 'Saving...' : 'Update'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Cancel form */}
+                  {saleAction === 'cancel' && (
+                    <div style={{ background: 'var(--fp-bg)', borderRadius: 10, padding: 16 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: '#dc2626', marginBottom: 12 }}>Cancel Membership</div>
+                      <div style={{ marginBottom: 12 }}>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Cancellation Date</label>
+                        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                          <button onClick={() => setCancelData(p => ({ ...p, immediate: true, date: '' }))}
+                            style={{ padding: '8px 16px', borderRadius: 8, border: `2px solid ${cancelData.immediate ? '#dc2626' : 'var(--fp-border)'}`, background: cancelData.immediate ? '#fef2f2' : '#fff', color: cancelData.immediate ? '#dc2626' : 'var(--fp-text)', fontWeight: 600, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>Immediately</button>
+                          <button onClick={() => setCancelData(p => ({ ...p, immediate: false, date: new Date().toISOString().split('T')[0] }))}
+                            style={{ padding: '8px 16px', borderRadius: 8, border: `2px solid ${!cancelData.immediate ? '#dc2626' : 'var(--fp-border)'}`, background: !cancelData.immediate ? '#fef2f2' : '#fff', color: !cancelData.immediate ? '#dc2626' : 'var(--fp-text)', fontWeight: 600, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>Specific Date</button>
+                        </div>
+                        {!cancelData.immediate && (
+                          <input type="date" value={cancelData.date} onChange={e => setCancelData(p => ({ ...p, date: e.target.value }))}
+                            min={new Date().toISOString().split('T')[0]}
+                            style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
+                        )}
+                      </div>
+                      <div style={{ marginBottom: 16 }}>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Reason</label>
+                        <select value={cancelData.reason} onChange={e => setCancelData(p => ({ ...p, reason: e.target.value }))}
+                          style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none', appearance: 'auto', cursor: 'pointer' }}>
+                          <option value="">Select reason...</option>
+                          <option value="Too expensive">Too expensive</option>
+                          <option value="Not using enough">Not using enough</option>
+                          <option value="Moving away">Moving away</option>
+                          <option value="Switching provider">Switching provider</option>
+                          <option value="Financial hardship">Financial hardship</option>
+                          <option value="Temporary break">Temporary break</option>
+                          <option value="Other">Other</option>
+                        </select>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button className="btn btn-ghost fp" style={{ border: '1px solid var(--fp-border)' }} onClick={() => setSaleAction(null)}>Cancel</button>
+                        <button className="btn btn-primary fp" style={{ background: '#dc2626' }} disabled={saleActionSaving || (!cancelData.immediate && !cancelData.date)}
+                          onClick={async () => {
+                            setSaleActionSaving(true);
+                            try {
+                              const { doc, updateDoc } = await import('firebase/firestore');
+                              const { db } = await import('./firebase.js');
+                              const cancellation = { date: cancelData.immediate ? new Date().toISOString().split('T')[0] : cancelData.date, reason: cancelData.reason, immediate: cancelData.immediate };
+                              await updateDoc(doc(db, 'sales', selectedSale.id), { status: 'cancelled', cancellation });
+                              showToast('✓ Membership cancelled.');
+                              setSales(prev => prev.map(s => s.id === selectedSale.id ? { ...s, status: 'cancelled', cancellation } : s));
+                              setSelectedSale(prev => ({ ...prev, status: 'cancelled', cancellation }));
+                              setSaleAction(null);
+                            } catch (e) { showToast('✗ Failed to cancel.'); }
+                            setSaleActionSaving(false);
+                          }}>
+                          <Icon path={icons.check} size={14} /> {saleActionSaving ? 'Saving...' : 'Update'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Card Collection Modal */}
           {cardCollecting && cardCollecting.clientSecret && (
