@@ -937,6 +937,100 @@ exports.savePaymentFromCheckout = functions.https.onCall(async (data, context) =
   };
 });
 
+// Process a refund through Stripe
+exports.processRefund = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  }
+
+  const { saleId, locationId, amount, reason } = data;
+  if (!saleId || !locationId || !amount || !reason) {
+    throw new functions.https.HttpsError("invalid-argument", "saleId, locationId, amount, and reason are required.");
+  }
+
+  const db = getFirestore();
+  const saleDoc = await db.doc(`sales/${saleId}`).get();
+  if (!saleDoc.exists) {
+    throw new functions.https.HttpsError("not-found", "Sale not found.");
+  }
+
+  const sale = saleDoc.data();
+  const locationDoc = await db.doc(`locations/${locationId}`).get();
+  const location = locationDoc.data();
+  const stripeAccountId = location.stripeAccountId;
+
+  if (!stripeAccountId) {
+    throw new functions.https.HttpsError("failed-precondition", "Stripe not connected for this location.");
+  }
+
+  if (!sale.stripeCustomerId) {
+    throw new functions.https.HttpsError("failed-precondition", "No Stripe customer linked to this sale.");
+  }
+
+  const stripeInstance = requireStripe();
+
+  // Find the most recent payment intent for this customer on the connected account
+  const charges = await stripeInstance.charges.list(
+    { customer: sale.stripeCustomerId, limit: 10 },
+    { stripeAccount: stripeAccountId }
+  );
+
+  if (charges.data.length === 0) {
+    // No charges found — record refund manually
+    const refundRecord = {
+      amount: parseFloat(amount),
+      reason,
+      processedAt: new Date().toISOString(),
+      status: "recorded",
+      note: "No Stripe charges found. Refund recorded manually.",
+    };
+    const refunds = sale.refunds || [];
+    refunds.push(refundRecord);
+    await db.doc(`sales/${saleId}`).update({ refunds });
+    return { success: true, status: "recorded", message: "No charges to refund. Recorded manually." };
+  }
+
+  // Refund the most recent charge
+  const amountInCents = Math.round(parseFloat(amount) * 100);
+  try {
+    const refund = await stripeInstance.refunds.create(
+      {
+        charge: charges.data[0].id,
+        amount: amountInCents,
+        reason: "requested_by_customer",
+      },
+      { stripeAccount: stripeAccountId }
+    );
+
+    const refundRecord = {
+      amount: parseFloat(amount),
+      reason,
+      processedAt: new Date().toISOString(),
+      status: "processed",
+      stripeRefundId: refund.id,
+      chargeId: charges.data[0].id,
+    };
+    const refunds = sale.refunds || [];
+    refunds.push(refundRecord);
+    await db.doc(`sales/${saleId}`).update({ refunds });
+
+    return { success: true, status: "processed", refundId: refund.id };
+  } catch (stripeErr) {
+    // If Stripe refund fails, record manually
+    const refundRecord = {
+      amount: parseFloat(amount),
+      reason,
+      processedAt: new Date().toISOString(),
+      status: "recorded",
+      note: `Stripe error: ${stripeErr.message}`,
+    };
+    const refunds = sale.refunds || [];
+    refunds.push(refundRecord);
+    await db.doc(`sales/${saleId}`).update({ refunds });
+    return { success: true, status: "recorded", message: stripeErr.message };
+  }
+});
+
 // ── Scheduled: Generate recurring sessions ────────────────────────────────────
 // Runs every Sunday at midnight UTC. Generates booking documents for active
 // recurrence rules up to 3 months ahead, skipping dates that already have a doc.

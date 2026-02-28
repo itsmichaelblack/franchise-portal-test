@@ -4629,6 +4629,10 @@ function FranchisePortal({ user, onLogout }) {
   const [saleActionSaving, setSaleActionSaving] = useState(false);
   const [suspendData, setSuspendData] = useState({ startDate: '', endDate: '', fee: '15' });
   const [cancelData, setCancelData] = useState({ date: '', immediate: true, reason: '' });
+  const [selectedTx, setSelectedTx] = useState(null); // selected transaction for detail modal
+  const [refundMode, setRefundMode] = useState(false);
+  const [refundData, setRefundData] = useState({ type: 'full', amount: '', reason: '' });
+  const [refundProcessing, setRefundProcessing] = useState(false);
   const [settingsTab, setSettingsTab] = useState('general'); // 'general' | 'marketing' | 'availability' | 'payments'
   const [locationData, setLocationData] = useState(null); // full location document for General tab
   const [marketingData, setMarketingData] = useState({ instagramUrl: '', facebookUrl: '' });
@@ -7143,12 +7147,20 @@ function FranchisePortal({ user, onLogout }) {
                 date: s.activationDate || s.createdAt?.toDate?.()?.toISOString?.()?.split('T')[0] || '',
                 parent: s.parentName,
                 email: s.parentEmail,
+                phone: s.parentPhone || '',
                 membership: s.membershipName,
+                membershipCategory: s.membershipCategory || '',
                 amount: s.weeklyAmount || 0,
                 setupFee: s.setupFee || 0,
                 method: s.paymentMethod ? `${s.paymentMethod.brand} •••• ${s.paymentMethod.last4}` : 'Pending',
+                paymentMethod: s.paymentMethod || null,
                 status: s.stripeStatus === 'connected' ? 'Processed' : 'Pending',
                 children: (s.children || []).map(c => c.name).join(', '),
+                billingFrequency: s.billingFrequency || 'weekly',
+                refunds: s.refunds || [],
+                discountType: s.discountType,
+                discountValue: s.discountValue,
+                createdAt: s.createdAt,
               })).filter(tx => {
                 if (txLogStartDate && tx.date < txLogStartDate) return false;
                 if (txLogEndDate && tx.date > txLogEndDate) return false;
@@ -7177,7 +7189,11 @@ function FranchisePortal({ user, onLogout }) {
                     </thead>
                     <tbody>
                       {txLogs.map(tx => (
-                        <tr key={tx.id} style={{ borderBottom: '1px solid var(--fp-border)' }}>
+                        <tr key={tx.id} style={{ borderBottom: '1px solid var(--fp-border)', cursor: 'pointer', transition: 'background 0.1s' }}
+                          onMouseEnter={e => e.currentTarget.style.background = 'var(--fp-bg)'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                          onClick={() => { setSelectedTx(tx); setRefundMode(false); setRefundData({ type: 'full', amount: String(tx.amount), reason: '' }); }}
+                        >
                           <td style={{ padding: '12px 14px', fontSize: 13, color: 'var(--fp-text)' }}>{tx.date ? new Date(tx.date + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</td>
                           <td style={{ padding: '12px 14px' }}>
                             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fp-text)' }}>{tx.parent}</div>
@@ -7198,6 +7214,156 @@ function FranchisePortal({ user, onLogout }) {
               );
             })()}
           </div>
+
+          {/* Payment Detail Modal */}
+          {selectedTx && (
+            <div className="modal-overlay" onClick={() => { setSelectedTx(null); setRefundMode(false); }}>
+              <div className="modal fp" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px', borderBottom: '1px solid var(--fp-border)' }}>
+                  <div style={{ fontWeight: 800, fontSize: 18, color: 'var(--fp-text)' }}>Payment Details</div>
+                  <button onClick={() => { setSelectedTx(null); setRefundMode(false); }}
+                    style={{ width: 32, height: 32, borderRadius: 8, border: '2px solid var(--fp-border)', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 14, fontWeight: 700, color: 'var(--fp-muted)' }}>✕</button>
+                </div>
+                <div style={{ padding: 24 }}>
+                  {/* Payment info grid */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Date Processed</div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fp-text)' }}>{selectedTx.date ? new Date(selectedTx.date + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' }) : '—'}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Status</div>
+                      <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600, background: selectedTx.status === 'Processed' ? '#ecfdf5' : '#fffbeb', color: selectedTx.status === 'Processed' ? '#059669' : '#d97706' }}>{selectedTx.status}</span>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Amount</div>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--fp-text)' }}>${Number(selectedTx.amount).toFixed(2)}<span style={{ fontSize: 13, fontWeight: 400, color: 'var(--fp-muted)' }}>/{selectedTx.billingFrequency === 'weekly' ? 'wk' : 'mo'}</span></div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Payment Method</div>
+                      <div style={{ fontSize: 14, color: 'var(--fp-text)' }}>{selectedTx.method}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Parent</div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fp-text)' }}>{selectedTx.parent}</div>
+                      <div style={{ fontSize: 12, color: 'var(--fp-muted)' }}>{selectedTx.email}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Membership</div>
+                      <div style={{ fontSize: 14, color: 'var(--fp-text)' }}>{selectedTx.membership}</div>
+                      <div style={{ fontSize: 12, color: 'var(--fp-muted)' }}>{selectedTx.children}</div>
+                    </div>
+                  </div>
+
+                  {/* Setup fee if applicable */}
+                  {selectedTx.setupFee > 0 && (
+                    <div style={{ padding: '10px 14px', background: 'var(--fp-bg)', borderRadius: 8, marginBottom: 16, display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                      <span style={{ color: 'var(--fp-muted)' }}>Setup Fee</span>
+                      <span style={{ fontWeight: 700, color: 'var(--fp-text)' }}>${Number(selectedTx.setupFee).toFixed(2)}</span>
+                    </div>
+                  )}
+
+                  {/* Previous refunds */}
+                  {selectedTx.refunds.length > 0 && (
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Refund History</div>
+                      {selectedTx.refunds.map((r, i) => (
+                        <div key={i} style={{ padding: '10px 14px', background: '#fef2f2', borderRadius: 8, marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
+                          <div>
+                            <div style={{ fontWeight: 600, color: '#991b1b' }}>-${Number(r.amount).toFixed(2)} refunded</div>
+                            <div style={{ fontSize: 11, color: '#b91c1c' }}>{r.reason} • {new Date(r.processedAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+                          </div>
+                          <span style={{ padding: '2px 8px', borderRadius: 12, fontSize: 10, fontWeight: 600, background: r.status === 'processed' ? '#ecfdf5' : '#fffbeb', color: r.status === 'processed' ? '#059669' : '#d97706' }}>{r.status === 'processed' ? 'Stripe' : 'Manual'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Refund button / form */}
+                  {!refundMode ? (
+                    <button className="btn btn-ghost fp" style={{ width: '100%', justifyContent: 'center', border: '1px solid #dc2626', color: '#dc2626' }}
+                      onClick={() => setRefundMode(true)}>
+                      Process Refund
+                    </button>
+                  ) : (
+                    <div style={{ background: 'var(--fp-bg)', borderRadius: 10, padding: 16 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: '#dc2626', marginBottom: 12 }}>Process Refund</div>
+
+                      {/* Full / Partial toggle */}
+                      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                        <button onClick={() => setRefundData(p => ({ ...p, type: 'full', amount: String(selectedTx.amount) }))}
+                          style={{ padding: '8px 16px', borderRadius: 8, border: `2px solid ${refundData.type === 'full' ? '#dc2626' : 'var(--fp-border)'}`, background: refundData.type === 'full' ? '#fef2f2' : '#fff', color: refundData.type === 'full' ? '#dc2626' : 'var(--fp-text)', fontWeight: 600, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>Full Refund</button>
+                        <button onClick={() => setRefundData(p => ({ ...p, type: 'partial', amount: '' }))}
+                          style={{ padding: '8px 16px', borderRadius: 8, border: `2px solid ${refundData.type === 'partial' ? '#dc2626' : 'var(--fp-border)'}`, background: refundData.type === 'partial' ? '#fef2f2' : '#fff', color: refundData.type === 'partial' ? '#dc2626' : 'var(--fp-text)', fontWeight: 600, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>Partial Refund</button>
+                      </div>
+
+                      {/* Amount */}
+                      <div style={{ marginBottom: 12 }}>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Refund Amount</label>
+                        <div style={{ display: 'flex', alignItems: 'center', border: '2px solid var(--fp-border)', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
+                          <span style={{ padding: '10px 10px 10px 12px', color: 'var(--fp-muted)', fontSize: 14, fontWeight: 700 }}>$</span>
+                          <input type="number" min="0.01" max={selectedTx.amount} step="0.01" value={refundData.amount}
+                            onChange={e => setRefundData(p => ({ ...p, amount: e.target.value }))}
+                            disabled={refundData.type === 'full'}
+                            placeholder="0.00"
+                            style={{ flex: 1, padding: '10px 12px 10px 0', border: 'none', outline: 'none', fontFamily: 'inherit', fontSize: 14, fontWeight: 600, background: refundData.type === 'full' ? 'var(--fp-bg)' : '#fff' }} />
+                        </div>
+                      </div>
+
+                      {/* Reason (required) */}
+                      <div style={{ marginBottom: 16 }}>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Reason *</label>
+                        <select value={refundData.reason} onChange={e => setRefundData(p => ({ ...p, reason: e.target.value }))}
+                          style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none', appearance: 'auto', cursor: 'pointer' }}>
+                          <option value="">Select reason...</option>
+                          <option value="Duplicate charge">Duplicate charge</option>
+                          <option value="Service not provided">Service not provided</option>
+                          <option value="Customer request">Customer request</option>
+                          <option value="Billing error">Billing error</option>
+                          <option value="Session cancelled">Session cancelled</option>
+                          <option value="Other">Other</option>
+                        </select>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button className="btn btn-ghost fp" style={{ border: '1px solid var(--fp-border)' }} onClick={() => setRefundMode(false)}>Cancel</button>
+                        <button className="btn btn-primary fp" style={{ background: '#dc2626', flex: 1 }}
+                          disabled={refundProcessing || !refundData.reason || !refundData.amount || Number(refundData.amount) <= 0}
+                          onClick={async () => {
+                            setRefundProcessing(true);
+                            try {
+                              const { getFunctions, httpsCallable } = await import('firebase/functions');
+                              const fns = getFunctions();
+                              const processRefund = httpsCallable(fns, 'processRefund');
+                              const result = await processRefund({ saleId: selectedTx.id, locationId, amount: refundData.amount, reason: refundData.reason });
+                              if (result.data.status === 'processed') {
+                                showToast(`✓ $${Number(refundData.amount).toFixed(2)} refunded via Stripe.`);
+                              } else {
+                                showToast(`✓ $${Number(refundData.amount).toFixed(2)} refund recorded. ${result.data.message || ''}`);
+                              }
+                              // Refresh sales
+                              const { collection, getDocs, query, where } = await import('firebase/firestore');
+                              const { db } = await import('./firebase.js');
+                              const q = query(collection(db, 'sales'), where('locationId', '==', locationId));
+                              const snap = await getDocs(q);
+                              setSales(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+                              setSelectedTx(null);
+                              setRefundMode(false);
+                            } catch (e) {
+                              console.error('Refund error:', e);
+                              showToast('✗ Refund failed: ' + (e.message || 'Unknown error'));
+                            }
+                            setRefundProcessing(false);
+                          }}>
+                          {refundProcessing ? 'Processing...' : `Refund $${Number(refundData.amount || 0).toFixed(2)}`}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Membership Detail Modal */}
           {selectedSale && (
