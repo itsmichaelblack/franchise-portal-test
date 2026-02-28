@@ -158,16 +158,15 @@ service cloud.firestore {
 
     // ── Pricing collection ──────────────────────────────────────────────
     match /pricing/{locationId} {
-      allow read: if isAdmin();
-      allow read: if isAuth() && resource.data != null;
+      allow read: if true;
       allow write: if isAuth();
       allow write: if isAdmin();
     }
 
     // ── Sales/Memberships collection ──────────────────────────────────────
     match /sales/{saleId} {
-      allow read: if isAdmin();
-      allow read: if isAuth() && resource.data.locationId == userDoc().locationId;
+      allow read: if true;
+      allow create: if true;
       allow create, update, delete: if isAuth();
       allow create, update, delete: if isAdmin();
     }
