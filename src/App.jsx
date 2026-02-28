@@ -5520,10 +5520,10 @@ function FranchisePortal({ user, onLogout }) {
         </div>
         <nav className="sidebar-nav">
           <button className={`nav-item ${page === 'bookings' ? 'active' : ''}`} onClick={() => setPagePersist('bookings')}>
-            <Icon path={icons.users} size={16} /> Bookings
+            <Icon path={icons.users} size={16} /> Timetable
           </button>
           <button className={`nav-item ${page === 'members' ? 'active' : ''}`} onClick={() => setPagePersist('members')}>
-            <Icon path={icons.users} size={16} /> Members
+            <Icon path={icons.users} size={16} /> Contacts
           </button>
           <button className={`nav-item ${page === 'enquiries' ? 'active' : ''}`} onClick={() => setPagePersist('enquiries')}>
             <Icon path={icons.mail} size={16} /> Enquiries
@@ -5535,7 +5535,7 @@ function FranchisePortal({ user, onLogout }) {
             <Icon path={icons.creditCard} size={16} /> Payments
           </button>
           <button className={`nav-item ${page === 'reporting' ? 'active' : ''}`} onClick={() => setPagePersist('reporting')}>
-            <Icon path={icons.chart} size={16} /> Reporting
+            <Icon path={icons.chart} size={16} /> Reports
           </button>
           <button className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => setPagePersist('settings')}>
             <Icon path={icons.clock} size={16} /> Settings
@@ -5563,8 +5563,8 @@ function FranchisePortal({ user, onLogout }) {
           <>
             <div className="page-header">
               <div className="page-header-left">
-                <div className="page-title" style={{ color: 'var(--fp-text)' }}>Upcoming Bookings</div>
-                <div className="page-desc" style={{ color: 'var(--fp-muted)' }}>View all assessment bookings for your centre.</div>
+                <div className="page-title" style={{ color: 'var(--fp-text)' }}>Timetable</div>
+                <div className="page-desc" style={{ color: 'var(--fp-muted)' }}>View your timetable, sessions and bookings.</div>
               </div>
             </div>
 
@@ -6967,8 +6967,8 @@ function FranchisePortal({ user, onLogout }) {
           <>
             <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
-                <div className="page-title" style={{ color: 'var(--fp-text)' }}>Members</div>
-                <div className="page-desc" style={{ color: 'var(--fp-muted)' }}>View parent and child profiles from bookings at your centre.</div>
+                <div className="page-title" style={{ color: 'var(--fp-text)' }}>Contacts</div>
+                <div className="page-desc" style={{ color: 'var(--fp-muted)' }}>View and manage your contacts, parents and students.</div>
               </div>
               <button className="btn btn-primary fp" onClick={() => setShowAddMemberModal(true)}>
                 <Icon path={icons.plus} size={14} /> Add Member
@@ -7238,7 +7238,7 @@ function FranchisePortal({ user, onLogout }) {
         <>
           <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
-              <div className="page-title" style={{ color: 'var(--fp-text)' }}>Reporting</div>
+              <div className="page-title" style={{ color: 'var(--fp-text)' }}>Reports</div>
               <div className="page-desc" style={{ color: 'var(--fp-muted)' }}>View performance reports for your centre.</div>
             </div>
           </div>
