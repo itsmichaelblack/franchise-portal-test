@@ -4622,6 +4622,8 @@ function FranchisePortal({ user, onLogout }) {
   const [locationStripeId, setLocationStripeId] = useState(null); // stripeAccountId from location doc
   const [cardFormState, setCardFormState] = useState(null); // { clientSecret, stripeAccountId } for embedded form
   const [cardFormSaving, setCardFormSaving] = useState(false);
+  const [txLogStartDate, setTxLogStartDate] = useState('');
+  const [txLogEndDate, setTxLogEndDate] = useState('');
   const [settingsTab, setSettingsTab] = useState('general'); // 'general' | 'marketing' | 'availability' | 'payments'
   const [locationData, setLocationData] = useState(null); // full location document for General tab
   const [marketingData, setMarketingData] = useState({ instagramUrl: '', facebookUrl: '' });
@@ -6843,76 +6845,82 @@ function FranchisePortal({ user, onLogout }) {
             {/* Add Member Modal */}
             {showAddMemberModal && (
               <div className="modal-overlay" onClick={() => { setShowAddMemberModal(false); setNewMemberParent({ name: '', email: '', phone: '' }); setNewMemberChildren([{ name: '', grade: '' }]); }}>
-                <div className="modal fp" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
-                  <div className="modal-header fp">
-                    <div className="modal-title fp">Add Member</div>
-                    <button className="modal-close" onClick={() => { setShowAddMemberModal(false); setNewMemberParent({ name: '', email: '', phone: '' }); setNewMemberChildren([{ name: '', grade: '' }]); }}>✕</button>
+                <div className="modal fp" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px', borderBottom: '1px solid var(--fp-border)' }}>
+                    <div style={{ fontWeight: 800, fontSize: 18, color: 'var(--fp-text)' }}>Add Member</div>
+                    <button onClick={() => { setShowAddMemberModal(false); setNewMemberParent({ name: '', email: '', phone: '' }); setNewMemberChildren([{ name: '', grade: '' }]); }}
+                      style={{ width: 32, height: 32, borderRadius: 8, border: '2px solid var(--fp-border)', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 14, fontWeight: 700, color: 'var(--fp-muted)' }}>\u2715</button>
                   </div>
-                  <div className="modal-body" style={{ padding: '24px' }}>
-                    {/* Parent Details */}
-                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>Parent Details</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>
+                  <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Parent / Guardian</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                       <div>
-                        <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--fp-text)', display: 'block', marginBottom: 4 }}>Full Name *</label>
-                        <input type="text" className="form-input fp" value={newMemberParent.name} onChange={e => setNewMemberParent(p => ({ ...p, name: e.target.value }))} placeholder="e.g. Jane Smith" style={{ width: '100%' }} />
+                        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>First Name</label>
+                        <input value={newMemberParent.firstName || ''} onChange={e => setNewMemberParent(p => ({ ...p, firstName: e.target.value }))}
+                          style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
                       </div>
-                      <div style={{ display: 'flex', gap: 12 }}>
-                        <div style={{ flex: 1 }}>
-                          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--fp-text)', display: 'block', marginBottom: 4 }}>Email *</label>
-                          <input type="email" className="form-input fp" value={newMemberParent.email} onChange={e => setNewMemberParent(p => ({ ...p, email: e.target.value }))} placeholder="jane@example.com" style={{ width: '100%' }} />
-                        </div>
-                        <div style={{ flex: 1 }}>
-                          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--fp-text)', display: 'block', marginBottom: 4 }}>Phone</label>
-                          <input type="tel" className="form-input fp" value={newMemberParent.phone} onChange={e => setNewMemberParent(p => ({ ...p, phone: e.target.value }))} placeholder="0400 000 000" style={{ width: '100%' }} />
-                        </div>
+                      <div>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Last Name</label>
+                        <input value={newMemberParent.lastName || ''} onChange={e => setNewMemberParent(p => ({ ...p, lastName: e.target.value }))}
+                          style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
+                      </div>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                      <div>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Email</label>
+                        <input type="email" value={newMemberParent.email} onChange={e => setNewMemberParent(p => ({ ...p, email: e.target.value }))}
+                          style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Phone</label>
+                        <input type="tel" value={newMemberParent.phone} onChange={e => setNewMemberParent(p => ({ ...p, phone: e.target.value }))}
+                          style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
                       </div>
                     </div>
 
-                    {/* Children */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Children</div>
-                      <button className="btn btn-ghost fp" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => setNewMemberChildren(prev => [...prev, { name: '', grade: '' }])}>
-                        <Icon path={icons.plus} size={11} /> Add Another Child
-                      </button>
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
-                      {newMemberChildren.map((child, idx) => (
-                        <div key={idx} style={{ display: 'flex', gap: 10, alignItems: 'flex-end', padding: '12px 14px', background: 'var(--fp-bg)', borderRadius: 10 }}>
-                          <div style={{ flex: 2 }}>
-                            <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--fp-muted)', display: 'block', marginBottom: 4 }}>Child Name *</label>
-                            <input type="text" className="form-input fp" value={child.name} onChange={e => setNewMemberChildren(prev => prev.map((c, i) => i === idx ? { ...c, name: e.target.value } : c))} placeholder="e.g. Tom Smith" style={{ width: '100%' }} />
-                          </div>
-                          <div style={{ flex: 1 }}>
-                            <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--fp-muted)', display: 'block', marginBottom: 4 }}>Grade</label>
-                            <select className="form-input fp" value={child.grade} onChange={e => setNewMemberChildren(prev => prev.map((c, i) => i === idx ? { ...c, grade: e.target.value } : c))} style={{ width: '100%', cursor: 'pointer' }}>
-                              <option value="">Select</option>
-                              {['Kindergarten', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'].map(g => (
-                                <option key={g} value={g}>{g === 'Kindergarten' ? 'Kindergarten' : `Grade ${g}`}</option>
-                              ))}
-                            </select>
-                          </div>
-                          {newMemberChildren.length > 1 && (
-                            <button onClick={() => setNewMemberChildren(prev => prev.filter((_, i) => i !== idx))} style={{ background: 'none', border: 'none', color: 'var(--fp-muted)', cursor: 'pointer', padding: '8px', fontSize: 14, fontWeight: 700 }}>✕</button>
-                          )}
+                    <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Children</div>
+                    {newMemberChildren.map((c, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                        <div style={{ flex: 1 }}>
+                          {i === 0 && <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Name</label>}
+                          <input value={c.name} onChange={e => setNewMemberChildren(prev => prev.map((ch, idx) => idx === i ? { ...ch, name: e.target.value } : ch))} placeholder="Child's name"
+                            style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
                         </div>
-                      ))}
-                    </div>
+                        <div style={{ flex: 1 }}>
+                          {i === 0 && <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Grade</label>}
+                          <select value={c.grade || ''} onChange={e => setNewMemberChildren(prev => prev.map((ch, idx) => idx === i ? { ...ch, grade: e.target.value } : ch))}
+                            style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none', appearance: 'auto', cursor: 'pointer' }}>
+                            <option value="">Select grade...</option>
+                            {["Kindergarten","Grade 1","Grade 2","Grade 3","Grade 4","Grade 5","Grade 6","Grade 7","Grade 8","Grade 9","Grade 10","Grade 11","Grade 12","Grade 13"].map(g => <option key={g} value={g}>{g}</option>)}
+                          </select>
+                        </div>
+                        {newMemberChildren.length > 1 && (
+                          <button onClick={() => setNewMemberChildren(prev => prev.filter((_, idx) => idx !== i))}
+                            style={{ padding: '10px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', flexShrink: 0 }}>Remove</button>
+                        )}
+                      </div>
+                    ))}
+                    <button onClick={() => setNewMemberChildren(prev => [...prev, { name: '', grade: '' }])}
+                      style={{ alignSelf: 'flex-start', background: 'none', border: '1px dashed var(--fp-border)', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 600, color: 'var(--fp-accent)', cursor: 'pointer', fontFamily: 'inherit' }}>
+                      + Add Child
+                    </button>
 
-                    <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-                      <button className="btn btn-ghost fp" onClick={() => { setShowAddMemberModal(false); setNewMemberParent({ name: '', email: '', phone: '' }); setNewMemberChildren([{ name: '', grade: '' }]); }}>Cancel</button>
-                      <button className="btn btn-primary fp" disabled={addMemberSaving} onClick={async () => {
-                        if (!newMemberParent.name.trim() || !newMemberParent.email.trim()) { showToast('✗ Parent name and email are required.'); return; }
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                      <button onClick={() => { setShowAddMemberModal(false); setNewMemberParent({ name: '', email: '', phone: '' }); setNewMemberChildren([{ name: '', grade: '' }]); }} className="btn btn-ghost fp" style={{ border: '1px solid var(--fp-border)' }}>Cancel</button>
+                      <button className="btn btn-primary fp" disabled={addMemberSaving || !newMemberParent.firstName || !newMemberParent.email} onClick={async () => {
+                        const fullName = `${(newMemberParent.firstName || '').trim()} ${(newMemberParent.lastName || '').trim()}`.trim();
                         const validChildren = newMemberChildren.filter(c => c.name.trim());
-                        if (validChildren.length === 0) { showToast('✗ Add at least one child.'); return; }
+                        if (!fullName || !newMemberParent.email.trim()) { showToast('\u2717 Name and email are required.'); return; }
+                        if (validChildren.length === 0) { showToast('\u2717 Add at least one child.'); return; }
                         setAddMemberSaving(true);
                         try {
                           const { collection, addDoc, getDocs, query, where } = await import('firebase/firestore');
                           const { db } = await import('./firebase.js');
                           await addDoc(collection(db, 'bookings'), {
                             locationId,
-                            customerName: newMemberParent.name.trim(),
+                            customerName: fullName,
                             customerEmail: newMemberParent.email.trim().toLowerCase(),
-                            customerPhone: newMemberParent.phone.trim(),
+                            customerPhone: (newMemberParent.phone || '').trim(),
                             children: validChildren.map(c => ({ name: c.name.trim(), grade: c.grade || '' })),
                             status: 'lead',
                             type: 'manual',
@@ -6921,20 +6929,19 @@ function FranchisePortal({ user, onLogout }) {
                             time: '00:00',
                             createdAt: new Date(),
                           });
-                          showToast(`✓ ${newMemberParent.name.trim()} added as a new member.`);
+                          showToast(`\u2713 ${fullName} added as a new member.`);
                           setShowAddMemberModal(false);
                           setNewMemberParent({ name: '', email: '', phone: '' });
                           setNewMemberChildren([{ name: '', grade: '' }]);
-                          // Refresh bookings
                           const q = query(collection(db, 'bookings'), where('locationId', '==', locationId));
                           const snap = await getDocs(q);
                           const allBookings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
                           allBookings.sort((a, b) => a.date === b.date ? a.time.localeCompare(b.time) : a.date.localeCompare(b.date));
                           setBookings(allBookings);
-                        } catch (e) { console.error('Failed to add member:', e); showToast('✗ Failed to add member.'); }
+                        } catch (e) { console.error('Failed to add member:', e); showToast('\u2717 Failed to add member.'); }
                         setAddMemberSaving(false);
                       }}>
-                        <Icon path={icons.check} size={14} /> {addMemberSaving ? 'Adding...' : 'Add Member'}
+                        <Icon path={icons.check} size={14} /> {addMemberSaving ? 'Adding...' : 'Save Changes'}
                       </button>
                     </div>
                   </div>
@@ -7094,6 +7101,84 @@ function FranchisePortal({ user, onLogout }) {
               </table>
             </div>
           )}
+
+          {/* Payment Transaction Logs */}
+          <div style={{ marginTop: 28 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 17, color: 'var(--fp-text)' }}>Transaction Log</div>
+                <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 2 }}>All processed payment transactions.</div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--fp-muted)' }}>From</label>
+                <input type="date" value={txLogStartDate} onChange={e => setTxLogStartDate(e.target.value)}
+                  style={{ padding: '8px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 13, color: 'var(--fp-text)', outline: 'none' }} />
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--fp-muted)' }}>To</label>
+                <input type="date" value={txLogEndDate} onChange={e => setTxLogEndDate(e.target.value)}
+                  style={{ padding: '8px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 13, color: 'var(--fp-text)', outline: 'none' }} />
+              </div>
+            </div>
+            {(() => {
+              const txLogs = sales.filter(s => s.paymentMethod || s.stripeStatus === 'connected').map(s => ({
+                id: s.id,
+                date: s.activationDate || s.createdAt?.toDate?.()?.toISOString?.()?.split('T')[0] || '',
+                parent: s.parentName,
+                email: s.parentEmail,
+                membership: s.membershipName,
+                amount: s.weeklyAmount || 0,
+                setupFee: s.setupFee || 0,
+                method: s.paymentMethod ? `${s.paymentMethod.brand} •••• ${s.paymentMethod.last4}` : 'Pending',
+                status: s.stripeStatus === 'connected' ? 'Processed' : 'Pending',
+                children: (s.children || []).map(c => c.name).join(', '),
+              })).filter(tx => {
+                if (txLogStartDate && tx.date < txLogStartDate) return false;
+                if (txLogEndDate && tx.date > txLogEndDate) return false;
+                return true;
+              }).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+              if (txLogs.length === 0) {
+                return (
+                  <div style={{ padding: 32, textAlign: 'center', color: 'var(--fp-muted)', background: 'var(--fp-bg)', borderRadius: 12, border: '1px dashed var(--fp-border)' }}>
+                    <div style={{ fontSize: 24, marginBottom: 8 }}>📋</div>
+                    <div style={{ fontWeight: 600, fontSize: 14 }}>No transactions found</div>
+                    <div style={{ fontSize: 12, marginTop: 4 }}>Processed payments will appear here.</div>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="card fp" style={{ padding: 0, overflow: 'hidden' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid var(--fp-border)', background: 'var(--fp-bg)' }}>
+                        {['Date', 'Parent', 'Membership', 'Child', 'Amount', 'Method', 'Status'].map(h => (
+                          <th key={h} style={{ padding: '12px 14px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {txLogs.map(tx => (
+                        <tr key={tx.id} style={{ borderBottom: '1px solid var(--fp-border)' }}>
+                          <td style={{ padding: '12px 14px', fontSize: 13, color: 'var(--fp-text)' }}>{tx.date ? new Date(tx.date + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</td>
+                          <td style={{ padding: '12px 14px' }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fp-text)' }}>{tx.parent}</div>
+                            <div style={{ fontSize: 11, color: 'var(--fp-muted)' }}>{tx.email}</div>
+                          </td>
+                          <td style={{ padding: '12px 14px', fontSize: 13, color: 'var(--fp-text)' }}>{tx.membership}</td>
+                          <td style={{ padding: '12px 14px', fontSize: 13, color: 'var(--fp-muted)' }}>{tx.children || '—'}</td>
+                          <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, color: 'var(--fp-text)' }}>${Number(tx.amount).toFixed(2)}</td>
+                          <td style={{ padding: '12px 14px', fontSize: 12, color: 'var(--fp-muted)' }}>{tx.method}</td>
+                          <td style={{ padding: '12px 14px' }}>
+                            <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: tx.status === 'Processed' ? '#ecfdf5' : '#fffbeb', color: tx.status === 'Processed' ? '#059669' : '#d97706' }}>{tx.status}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
+          </div>
 
           {/* Card Collection Modal */}
           {cardCollecting && cardCollecting.clientSecret && (
