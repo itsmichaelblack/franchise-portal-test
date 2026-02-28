@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, Fragment } from "react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { createLocation, updateLocation, deleteLocation, saveAvailability, getLocations, resendConfirmationEmail, resendInviteEmail, updateHqUser, logUserAction, getActivityLogs, getHqUserLogs } from "./services/firestore";
 
 // --- Simulated Data -------------------------------------------------------------
@@ -93,6 +94,7 @@ const icons = {
   eye: "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
   send: "M22 2L11 13 M22 2l-7 20-4-9-9-4 20-7z",
   creditCard: "M1 4h22v16H1z M1 10h22",
+  chart: "M3 3v18h18 M7 14l4-4 4 4 5-6",
 };
 
 // --- Styles ---------------------------------------------------------------------
@@ -4641,6 +4643,8 @@ function FranchisePortal({ user, onLogout }) {
   const [salesFilterParent, setSalesFilterParent] = useState('');
   const [salesFilterStatus, setSalesFilterStatus] = useState('');
   const [salesFilterDate, setSalesFilterDate] = useState('');
+  const [reportType, setReportType] = useState('membership'); // 'membership' | 'revenue' | 'staff'
+  const [reportInterval, setReportInterval] = useState('weekly'); // 'weekly' | 'fortnightly' | 'monthly'
   const [settingsTab, setSettingsTab] = useState('general'); // 'general' | 'marketing' | 'availability' | 'payments' | 'logs'
   const [activityLogs, setActivityLogs] = useState([]);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -5403,6 +5407,9 @@ function FranchisePortal({ user, onLogout }) {
           </button>
           <button className={`nav-item ${page === 'payments' ? 'active' : ''}`} onClick={() => setPagePersist('payments')}>
             <Icon path={icons.creditCard} size={16} /> Payments
+          </button>
+          <button className={`nav-item ${page === 'reporting' ? 'active' : ''}`} onClick={() => setPagePersist('reporting')}>
+            <Icon path={icons.chart} size={16} /> Reporting
           </button>
           <button className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => setPagePersist('settings')}>
             <Icon path={icons.clock} size={16} /> Settings
@@ -7099,6 +7106,204 @@ function FranchisePortal({ user, onLogout }) {
             )}
           </>
         )}
+
+      {/* === REPORTING PAGE === */}
+      {page === 'reporting' && (
+        <>
+          <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <div className="page-title" style={{ color: 'var(--fp-text)' }}>Reporting</div>
+              <div className="page-desc" style={{ color: 'var(--fp-muted)' }}>View performance reports for your centre.</div>
+            </div>
+          </div>
+
+          {/* Report selector cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 24 }}>
+            {[
+              { key: 'membership', label: 'Membership Report', desc: 'Lead, active, inactive & suspended members', icon: icons.users, color: '#3d9695' },
+              { key: 'revenue', label: 'Revenue Report', desc: 'Recurring monthly revenue', icon: icons.creditCard, color: '#8b5cf6' },
+              { key: 'staff', label: 'Staff Hours Report', desc: 'Scheduled staff hours', icon: icons.clock, color: '#f59e0b' },
+            ].map(r => (
+              <button key={r.key} onClick={() => setReportType(r.key)}
+                style={{
+                  padding: 20, borderRadius: 12, border: reportType === r.key ? `2px solid ${r.color}` : '2px solid var(--fp-border)',
+                  background: reportType === r.key ? r.color + '08' : '#fff', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', transition: 'all 0.15s',
+                }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: r.color + '15', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon path={r.icon} size={18} style={{ color: r.color }} />
+                  </div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--fp-text)' }}>{r.label}</div>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--fp-muted)' }}>{r.desc}</div>
+              </button>
+            ))}
+          </div>
+
+          {/* Interval toggle */}
+          <div style={{ display: 'flex', gap: 6, marginBottom: 20 }}>
+            {['weekly', 'fortnightly', 'monthly'].map(i => (
+              <button key={i} onClick={() => setReportInterval(i)}
+                style={{
+                  padding: '8px 18px', borderRadius: 20, fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
+                  border: reportInterval === i ? '2px solid var(--fp-accent)' : '2px solid var(--fp-border)',
+                  background: reportInterval === i ? 'rgba(109,203,202,0.1)' : '#fff',
+                  color: reportInterval === i ? 'var(--fp-accent)' : 'var(--fp-muted)',
+                }}>
+                {i.charAt(0).toUpperCase() + i.slice(1)}
+              </button>
+            ))}
+          </div>
+
+          {/* Chart area */}
+          <div className="card fp" style={{ padding: 24 }}>
+            {(() => {
+              const now = new Date();
+              const intervalDays = reportInterval === 'weekly' ? 7 : reportInterval === 'fortnightly' ? 14 : 30;
+              const periods = 12;
+
+              // Generate period labels
+              const periodLabels = [];
+              for (let i = periods - 1; i >= 0; i--) {
+                const d = new Date(now);
+                d.setDate(d.getDate() - (i * intervalDays));
+                periodLabels.push({
+                  date: d,
+                  label: d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }),
+                  dateStr: d.toISOString().split('T')[0],
+                });
+              }
+
+              if (reportType === 'membership') {
+                // Count members by status at each period point
+                const data = periodLabels.map(p => {
+                  const periodBookings = bookings.filter(b => {
+                    const created = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt || b.date);
+                    return created <= p.date;
+                  });
+                  // Unique parents
+                  const parents = {};
+                  periodBookings.forEach(b => {
+                    const email = b.customerEmail?.toLowerCase();
+                    if (!email) return;
+                    if (!parents[email]) parents[email] = { status: b.status || 'lead' };
+                    // Upgrade status
+                    if (b.status === 'active' || b.type === 'session') parents[email].status = 'active';
+                  });
+                  // Also check sales for active/suspended/cancelled
+                  sales.forEach(s => {
+                    const email = s.parentEmail?.toLowerCase();
+                    if (!email) return;
+                    const activated = s.activationDate;
+                    if (activated && activated <= p.dateStr) {
+                      if (!parents[email]) parents[email] = { status: 'active' };
+                      if (s.status === 'suspended') parents[email].status = 'suspended';
+                      if (s.status === 'cancelled') parents[email].status = 'inactive';
+                      if (!s.status || s.status === 'active') parents[email].status = 'active';
+                    }
+                  });
+                  const counts = { lead: 0, active: 0, inactive: 0, suspended: 0 };
+                  Object.values(parents).forEach(p2 => { counts[p2.status] = (counts[p2.status] || 0) + 1; });
+                  return { name: p.label, Lead: counts.lead, Active: counts.active, Inactive: counts.inactive, Suspended: counts.suspended };
+                });
+                return (
+                  <>
+                    <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--fp-text)', marginBottom: 4 }}>Membership Report</div>
+                    <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginBottom: 20 }}>Member status breakdown over time ({reportInterval})</div>
+                    <ResponsiveContainer width="100%" height={340}>
+                      <LineChart data={data}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--fp-border)" />
+                        <XAxis dataKey="name" fontSize={11} tick={{ fill: '#9ca3af' }} />
+                        <YAxis fontSize={11} tick={{ fill: '#9ca3af' }} allowDecimals={false} />
+                        <Tooltip contentStyle={{ borderRadius: 10, border: '1px solid #e5e7eb', fontSize: 13 }} />
+                        <Legend wrapperStyle={{ fontSize: 12 }} />
+                        <Line type="monotone" dataKey="Lead" stroke="#9ca3af" strokeWidth={2} dot={{ r: 3 }} />
+                        <Line type="monotone" dataKey="Active" stroke="#059669" strokeWidth={2} dot={{ r: 3 }} />
+                        <Line type="monotone" dataKey="Inactive" stroke="#dc2626" strokeWidth={2} dot={{ r: 3 }} />
+                        <Line type="monotone" dataKey="Suspended" stroke="#d97706" strokeWidth={2} dot={{ r: 3 }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </>
+                );
+              }
+
+              if (reportType === 'revenue') {
+                const data = periodLabels.map((p, idx) => {
+                  const periodStart = idx > 0 ? periodLabels[idx - 1].date : new Date(p.date.getTime() - intervalDays * 86400000);
+                  // Sum weekly amounts of active sales at this point
+                  let weeklyTotal = 0;
+                  sales.forEach(s => {
+                    if (!s.activationDate || s.activationDate > p.dateStr) return;
+                    if (s.status === 'cancelled') {
+                      if (s.cancellation?.date && s.cancellation.date < p.dateStr) return;
+                    }
+                    const amount = Number(s.weeklyAmount || 0);
+                    if (s.status === 'suspended' && s.suspension) {
+                      weeklyTotal += Number(s.suspension.fee || 0);
+                    } else {
+                      weeklyTotal += amount;
+                    }
+                  });
+                  // Convert to monthly
+                  const monthlyRevenue = weeklyTotal * 4.33;
+                  return { name: p.label, Revenue: Math.round(monthlyRevenue * 100) / 100 };
+                });
+                return (
+                  <>
+                    <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--fp-text)', marginBottom: 4 }}>Recurring Revenue Report</div>
+                    <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginBottom: 20 }}>Monthly recurring revenue over time ({reportInterval})</div>
+                    <ResponsiveContainer width="100%" height={340}>
+                      <LineChart data={data}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--fp-border)" />
+                        <XAxis dataKey="name" fontSize={11} tick={{ fill: '#9ca3af' }} />
+                        <YAxis fontSize={11} tick={{ fill: '#9ca3af' }} tickFormatter={v => `$${v}`} />
+                        <Tooltip contentStyle={{ borderRadius: 10, border: '1px solid #e5e7eb', fontSize: 13 }} formatter={v => [`$${Number(v).toFixed(2)}`, 'Revenue']} />
+                        <Legend wrapperStyle={{ fontSize: 12 }} />
+                        <Line type="monotone" dataKey="Revenue" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 3 }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </>
+                );
+              }
+
+              if (reportType === 'staff') {
+                // Calculate scheduled hours from sessions (bookings with type: 'session')
+                const sessions = bookings.filter(b => b.type === 'session');
+                const data = periodLabels.map((p, idx) => {
+                  const periodStart = idx > 0 ? periodLabels[idx - 1].dateStr : new Date(p.date.getTime() - intervalDays * 86400000).toISOString().split('T')[0];
+                  const periodEnd = p.dateStr;
+                  let totalHours = 0;
+                  sessions.forEach(s => {
+                    if (s.date >= periodStart && s.date <= periodEnd && s.status !== 'cancelled') {
+                      const dur = Number(s.duration || 40);
+                      totalHours += dur / 60;
+                    }
+                  });
+                  return { name: p.label, Hours: Math.round(totalHours * 10) / 10 };
+                });
+                return (
+                  <>
+                    <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--fp-text)', marginBottom: 4 }}>Staff Hours Report</div>
+                    <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginBottom: 20 }}>Scheduled staff hours over time ({reportInterval})</div>
+                    <ResponsiveContainer width="100%" height={340}>
+                      <LineChart data={data}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--fp-border)" />
+                        <XAxis dataKey="name" fontSize={11} tick={{ fill: '#9ca3af' }} />
+                        <YAxis fontSize={11} tick={{ fill: '#9ca3af' }} tickFormatter={v => `${v}h`} />
+                        <Tooltip contentStyle={{ borderRadius: 10, border: '1px solid #e5e7eb', fontSize: 13 }} formatter={v => [`${v} hrs`, 'Hours']} />
+                        <Legend wrapperStyle={{ fontSize: 12 }} />
+                        <Line type="monotone" dataKey="Hours" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </>
+                );
+              }
+
+              return null;
+            })()}
+          </div>
+        </>
+      )}
 
       {/* === PAYMENTS PAGE === */}
       {page === 'payments' && (
