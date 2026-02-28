@@ -4577,12 +4577,12 @@ function FranchisePortal({ user, onLogout }) {
     membership: {
       label: 'Membership',
       items: [
-        { id: 'foundation_phase_1', name: 'Foundation Memberships Phase 1', desc: 'Introductory membership for new students starting their learning journey. Includes foundational assessment and personalised learning plan.' },
-        { id: 'foundation_phase_2', name: 'Foundation Memberships Phase 2', desc: 'Building on Phase 1 foundations with expanded subject coverage and increased session frequency.' },
-        { id: 'foundation_phase_3', name: 'Foundation Memberships Phase 3', desc: 'Advanced foundation program with comprehensive subject mastery and exam preparation support.' },
-        { id: 'membership_1_session', name: 'Membership (1 session)', desc: 'Standard weekly membership with one tutoring session per week covering core subjects.' },
-        { id: 'membership_2_sessions', name: 'Membership (2 sessions)', desc: 'Enhanced weekly membership with two tutoring sessions per week for accelerated learning progress.' },
-        { id: 'membership_unlimited', name: 'Membership (Unlimited)', desc: 'Premium all-access membership with unlimited tutoring sessions across all available subjects.' },
+        { id: 'foundation_phase_1', name: 'Foundation Memberships Phase 1', desc: 'Introductory membership for new students starting their learning journey. Includes foundational assessment and personalised learning plan.', credits: '2 Credits Per Week' },
+        { id: 'foundation_phase_2', name: 'Foundation Memberships Phase 2', desc: 'Building on Phase 1 foundations with expanded subject coverage and increased session frequency.', credits: '2 Credits Per Week' },
+        { id: 'foundation_phase_3', name: 'Foundation Memberships Phase 3', desc: 'Advanced foundation program with comprehensive subject mastery and exam preparation support.', credits: '2 Credits Per Week' },
+        { id: 'membership_1_session', name: 'Membership (1 session)', desc: 'Standard weekly membership with one tutoring session per week covering core subjects.', credits: '1 Credit Per Week' },
+        { id: 'membership_2_sessions', name: 'Membership (2 sessions)', desc: 'Enhanced weekly membership with two tutoring sessions per week for accelerated learning progress.', credits: '2 Credits Per Week' },
+        { id: 'membership_unlimited', name: 'Membership (Unlimited)', desc: 'Premium all-access membership with unlimited tutoring sessions across all available subjects.', credits: 'Unlimited Credits Per Week + Max 1 Credit Per Day' },
       ]
     },
     one_on_one: {
@@ -6676,6 +6676,9 @@ function FranchisePortal({ user, onLogout }) {
                             <div style={{ flex: 1 }}>
                               <div style={{ fontWeight: 700, fontSize: 14, color: enabled ? 'var(--fp-text)' : 'var(--fp-muted)' }}>{item.name}</div>
                               <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 2, lineHeight: 1.4 }}>{item.desc}</div>
+                              {item.credits && (
+                                <span style={{ display: 'inline-block', marginTop: 6, padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: 'rgba(109,203,202,0.12)', color: '#3d9695', border: '1px solid rgba(109,203,202,0.25)' }}>{item.credits}</span>
+                              )}
                             </div>
                             <div style={{ flexShrink: 0, width: 110, opacity: enabled ? 1 : 0.4 }}>
                               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Price</div>
