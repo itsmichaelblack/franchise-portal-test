@@ -4637,6 +4637,10 @@ function FranchisePortal({ user, onLogout }) {
   const [memberSearch, setMemberSearch] = useState('');
   const [memberFilter, setMemberFilter] = useState('all');
   const [selectedMember, setSelectedMember] = useState(null);
+  const [showAddMemberModal, setShowAddMemberModal] = useState(false);
+  const [addMemberSaving, setAddMemberSaving] = useState(false);
+  const [newMemberParent, setNewMemberParent] = useState({ name: '', email: '', phone: '' });
+  const [newMemberChildren, setNewMemberChildren] = useState([{ name: '', grade: '' }]);
   const [memberTab, setMemberTab] = useState('profile'); // profile | timetable | payments
   const [editingMember, setEditingMember] = useState(null); // temp edit state
   const [memberSaving, setMemberSaving] = useState(false);
@@ -6678,9 +6682,14 @@ function FranchisePortal({ user, onLogout }) {
         {/* === MEMBERS PAGE === */}
         {page === 'members' && (
           <>
-            <div className="page-header">
-              <div className="page-title" style={{ color: 'var(--fp-text)' }}>Members</div>
-              <div className="page-desc" style={{ color: 'var(--fp-muted)' }}>View parent and child profiles from bookings at your centre.</div>
+            <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <div className="page-title" style={{ color: 'var(--fp-text)' }}>Members</div>
+                <div className="page-desc" style={{ color: 'var(--fp-muted)' }}>View parent and child profiles from bookings at your centre.</div>
+              </div>
+              <button className="btn btn-primary fp" onClick={() => setShowAddMemberModal(true)}>
+                <Icon path={icons.plus} size={14} /> Add Member
+              </button>
             </div>
 
             {/* Search & Filter */}
@@ -6830,6 +6839,108 @@ function FranchisePortal({ user, onLogout }) {
                 </div>
               );
             })()}
+
+            {/* Add Member Modal */}
+            {showAddMemberModal && (
+              <div className="modal-overlay" onClick={() => { setShowAddMemberModal(false); setNewMemberParent({ name: '', email: '', phone: '' }); setNewMemberChildren([{ name: '', grade: '' }]); }}>
+                <div className="modal fp" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
+                  <div className="modal-header fp">
+                    <div className="modal-title fp">Add Member</div>
+                    <button className="modal-close" onClick={() => { setShowAddMemberModal(false); setNewMemberParent({ name: '', email: '', phone: '' }); setNewMemberChildren([{ name: '', grade: '' }]); }}>✕</button>
+                  </div>
+                  <div className="modal-body" style={{ padding: '24px' }}>
+                    {/* Parent Details */}
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>Parent Details</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>
+                      <div>
+                        <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--fp-text)', display: 'block', marginBottom: 4 }}>Full Name *</label>
+                        <input type="text" className="form-input fp" value={newMemberParent.name} onChange={e => setNewMemberParent(p => ({ ...p, name: e.target.value }))} placeholder="e.g. Jane Smith" style={{ width: '100%' }} />
+                      </div>
+                      <div style={{ display: 'flex', gap: 12 }}>
+                        <div style={{ flex: 1 }}>
+                          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--fp-text)', display: 'block', marginBottom: 4 }}>Email *</label>
+                          <input type="email" className="form-input fp" value={newMemberParent.email} onChange={e => setNewMemberParent(p => ({ ...p, email: e.target.value }))} placeholder="jane@example.com" style={{ width: '100%' }} />
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--fp-text)', display: 'block', marginBottom: 4 }}>Phone</label>
+                          <input type="tel" className="form-input fp" value={newMemberParent.phone} onChange={e => setNewMemberParent(p => ({ ...p, phone: e.target.value }))} placeholder="0400 000 000" style={{ width: '100%' }} />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Children */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Children</div>
+                      <button className="btn btn-ghost fp" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => setNewMemberChildren(prev => [...prev, { name: '', grade: '' }])}>
+                        <Icon path={icons.plus} size={11} /> Add Another Child
+                      </button>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
+                      {newMemberChildren.map((child, idx) => (
+                        <div key={idx} style={{ display: 'flex', gap: 10, alignItems: 'flex-end', padding: '12px 14px', background: 'var(--fp-bg)', borderRadius: 10 }}>
+                          <div style={{ flex: 2 }}>
+                            <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--fp-muted)', display: 'block', marginBottom: 4 }}>Child Name *</label>
+                            <input type="text" className="form-input fp" value={child.name} onChange={e => setNewMemberChildren(prev => prev.map((c, i) => i === idx ? { ...c, name: e.target.value } : c))} placeholder="e.g. Tom Smith" style={{ width: '100%' }} />
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--fp-muted)', display: 'block', marginBottom: 4 }}>Grade</label>
+                            <select className="form-input fp" value={child.grade} onChange={e => setNewMemberChildren(prev => prev.map((c, i) => i === idx ? { ...c, grade: e.target.value } : c))} style={{ width: '100%', cursor: 'pointer' }}>
+                              <option value="">Select</option>
+                              {['Kindergarten', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'].map(g => (
+                                <option key={g} value={g}>{g === 'Kindergarten' ? 'Kindergarten' : `Grade ${g}`}</option>
+                              ))}
+                            </select>
+                          </div>
+                          {newMemberChildren.length > 1 && (
+                            <button onClick={() => setNewMemberChildren(prev => prev.filter((_, i) => i !== idx))} style={{ background: 'none', border: 'none', color: 'var(--fp-muted)', cursor: 'pointer', padding: '8px', fontSize: 14, fontWeight: 700 }}>✕</button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                      <button className="btn btn-ghost fp" onClick={() => { setShowAddMemberModal(false); setNewMemberParent({ name: '', email: '', phone: '' }); setNewMemberChildren([{ name: '', grade: '' }]); }}>Cancel</button>
+                      <button className="btn btn-primary fp" disabled={addMemberSaving} onClick={async () => {
+                        if (!newMemberParent.name.trim() || !newMemberParent.email.trim()) { showToast('✗ Parent name and email are required.'); return; }
+                        const validChildren = newMemberChildren.filter(c => c.name.trim());
+                        if (validChildren.length === 0) { showToast('✗ Add at least one child.'); return; }
+                        setAddMemberSaving(true);
+                        try {
+                          const { collection, addDoc, getDocs, query, where } = await import('firebase/firestore');
+                          const { db } = await import('./firebase.js');
+                          await addDoc(collection(db, 'bookings'), {
+                            locationId,
+                            customerName: newMemberParent.name.trim(),
+                            customerEmail: newMemberParent.email.trim().toLowerCase(),
+                            customerPhone: newMemberParent.phone.trim(),
+                            children: validChildren.map(c => ({ name: c.name.trim(), grade: c.grade || '' })),
+                            status: 'lead',
+                            type: 'manual',
+                            source: 'manual_add',
+                            date: new Date().toISOString().split('T')[0],
+                            time: '00:00',
+                            createdAt: new Date(),
+                          });
+                          showToast(`✓ ${newMemberParent.name.trim()} added as a new member.`);
+                          setShowAddMemberModal(false);
+                          setNewMemberParent({ name: '', email: '', phone: '' });
+                          setNewMemberChildren([{ name: '', grade: '' }]);
+                          // Refresh bookings
+                          const q = query(collection(db, 'bookings'), where('locationId', '==', locationId));
+                          const snap = await getDocs(q);
+                          const allBookings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                          allBookings.sort((a, b) => a.date === b.date ? a.time.localeCompare(b.time) : a.date.localeCompare(b.date));
+                          setBookings(allBookings);
+                        } catch (e) { console.error('Failed to add member:', e); showToast('✗ Failed to add member.'); }
+                        setAddMemberSaving(false);
+                      }}>
+                        <Icon path={icons.check} size={14} /> {addMemberSaving ? 'Adding...' : 'Add Member'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         )}
 
