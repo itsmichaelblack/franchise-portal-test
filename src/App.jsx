@@ -4588,18 +4588,18 @@ function FranchisePortal({ user, onLogout }) {
     one_on_one: {
       label: 'Membership (One-on-one)',
       items: [
-        { id: 'one_on_one_primary', name: 'One-on-One Session (Primary)', desc: 'Dedicated one-on-one tutoring for primary school students (K-6) tailored to individual learning needs.' },
-        { id: 'one_on_one_secondary', name: 'One-on-One Session (Secondary)', desc: 'Personalised one-on-one tutoring for secondary school students (7-12) with subject-specific focus.' },
+        { id: 'one_on_one_primary', name: 'One-on-One Session (Primary)', desc: 'Dedicated one-on-one tutoring for primary school students (K-6) tailored to individual learning needs.', credits: '1 Credit Per Week' },
+        { id: 'one_on_one_secondary', name: 'One-on-One Session (Secondary)', desc: 'Personalised one-on-one tutoring for secondary school students (7-12) with subject-specific focus.', credits: '1 Credit Per Week' },
       ]
     },
     holiday_camps: {
       label: 'Holiday Camps',
       items: [
-        { id: 'camp_coding', name: 'Coding', desc: 'Fun and engaging coding camp teaching programming fundamentals through hands-on projects and games.' },
-        { id: 'camp_public_speaking', name: 'Public Speaking', desc: 'Build confidence and communication skills through structured public speaking exercises and presentations.' },
-        { id: 'camp_creative_writing', name: 'Creative Writing', desc: 'Unlock creativity through storytelling, poetry, and narrative writing workshops with published author mentors.' },
-        { id: 'camp_learn_ai', name: 'Learn AI', desc: 'Introduction to artificial intelligence concepts with age-appropriate activities and real-world applications.' },
-        { id: 'camp_speed_typing', name: 'Speed Typing', desc: 'Develop fast and accurate typing skills through gamified lessons and timed challenges.' },
+        { id: 'camp_coding', name: 'Coding', desc: 'Fun and engaging coding camp teaching programming fundamentals through hands-on projects and games. Runs for 2 hours per day.', credits: '1 Credit Per Week' },
+        { id: 'camp_public_speaking', name: 'Public Speaking', desc: 'Build confidence and communication skills through structured public speaking exercises and presentations. Runs for 2 hours per day.', credits: '1 Credit Per Week' },
+        { id: 'camp_creative_writing', name: 'Creative Writing', desc: 'Unlock creativity through storytelling, poetry, and narrative writing workshops with published author mentors. Runs for 2 hours per day.', credits: '1 Credit Per Week' },
+        { id: 'camp_learn_ai', name: 'Learn AI', desc: 'Introduction to artificial intelligence concepts with age-appropriate activities and real-world applications. Runs for 2 hours per day.', credits: '1 Credit Per Week' },
+        { id: 'camp_speed_typing', name: 'Speed Typing', desc: 'Develop fast and accurate typing skills through gamified lessons and timed challenges. Runs for 2 hours per day.', credits: '1 Credit Per Week' },
       ]
     }
   };
