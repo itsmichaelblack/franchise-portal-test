@@ -5302,11 +5302,17 @@ function FranchisePortal({ user, onLogout }) {
   const loadLogs = async () => {
     setLogsLoading(true);
     try {
-      const { collection, getDocs, query, where, orderBy, limit } = await import('firebase/firestore');
+      const { collection, getDocs, query, where, limit } = await import('firebase/firestore');
       const { db } = await import('./firebase.js');
-      const q = query(collection(db, 'logs'), where('locationId', '==', locationId), orderBy('timestamp', 'desc'), limit(200));
+      const q = query(collection(db, 'logs'), where('locationId', '==', locationId), limit(200));
       const snap = await getDocs(q);
-      setActivityLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const logs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      logs.sort((a, b) => {
+        const ta = a.timestamp?.toDate ? a.timestamp.toDate() : new Date(a.timestamp);
+        const tb = b.timestamp?.toDate ? b.timestamp.toDate() : new Date(b.timestamp);
+        return tb - ta;
+      });
+      setActivityLogs(logs);
     } catch (e) { console.error('Load logs error:', e); setActivityLogs([]); }
     setLogsLoading(false);
   };
@@ -6731,8 +6737,13 @@ function FranchisePortal({ user, onLogout }) {
             {/* ── LOGS TAB ── */}
             {settingsTab === 'logs' && (
               <div>
-                {/* Load logs on first view */}
-                {activityLogs.length === 0 && !logsLoading && (() => { loadLogs(); return null; })()}
+                {/* Auto-load logs when tab opens */}
+                <div style={{ display: 'none' }} ref={el => {
+                  if (el && !el.dataset.loaded) {
+                    el.dataset.loaded = 'true';
+                    loadLogs();
+                  }
+                }} />
                 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                   <div style={{ display: 'flex', gap: 6 }}>
