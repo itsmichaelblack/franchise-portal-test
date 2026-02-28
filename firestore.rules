@@ -283,6 +283,12 @@ service cloud.firestore {
 
       // No public delete
       allow delete: if isAdmin();
+
+      // ── Children sub-collection ───────────────────────────────────────
+      match /children/{childId} {
+        allow read, create, update: if true;
+        allow delete: if isAdmin();
+      }
     }
 
     // ── Deny everything else ────────────────────────────────────────────────
