@@ -7127,15 +7127,15 @@ function FranchisePortal({ user, onLogout }) {
               <button key={r.key} onClick={() => setReportType(r.key)}
                 style={{
                   padding: 20, borderRadius: 12, border: reportType === r.key ? `2px solid ${r.color}` : '2px solid var(--fp-border)',
-                  background: reportType === r.key ? r.color + '08' : '#fff', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', transition: 'all 0.15s',
+                  background: reportType === r.key ? r.color + '0D' : '#fff', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', transition: 'all 0.15s',
                 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                  <div style={{ width: 36, height: 36, borderRadius: 10, background: r.color + '15', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: r.color + '20', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <Icon path={r.icon} size={18} style={{ color: r.color }} />
                   </div>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--fp-text)' }}>{r.label}</div>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)' }}>{r.label}</div>
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--fp-muted)' }}>{r.desc}</div>
+                <div style={{ fontSize: 13, color: '#6b7280' }}>{r.desc}</div>
               </button>
             ))}
           </div>
