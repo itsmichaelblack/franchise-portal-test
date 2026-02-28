@@ -4637,7 +4637,10 @@ function FranchisePortal({ user, onLogout }) {
   const [refundMode, setRefundMode] = useState(false);
   const [refundData, setRefundData] = useState({ type: 'full', amount: '', reason: '' });
   const [refundProcessing, setRefundProcessing] = useState(false);
-  const [settingsTab, setSettingsTab] = useState('general'); // 'general' | 'marketing' | 'availability' | 'payments'
+  const [settingsTab, setSettingsTab] = useState('general'); // 'general' | 'marketing' | 'availability' | 'payments' | 'logs'
+  const [activityLogs, setActivityLogs] = useState([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logFilter, setLogFilter] = useState('all'); // 'all' | 'marketing' | 'admin' | 'user' | 'bookings'
   const [locationData, setLocationData] = useState(null); // full location document for General tab
   const [marketingData, setMarketingData] = useState({ instagramUrl: '', facebookUrl: '' });
   const [currency, setCurrency] = useState('AUD');
@@ -5279,6 +5282,35 @@ function FranchisePortal({ user, onLogout }) {
     setTimeout(() => setToast(null), 3000);
   };
 
+  // Activity log helper
+  const writeLog = async (type, action, details = {}) => {
+    try {
+      const { collection, addDoc } = await import('firebase/firestore');
+      const { db } = await import('./firebase.js');
+      await addDoc(collection(db, 'logs'), {
+        locationId,
+        type, // 'marketing' | 'admin' | 'user' | 'bookings'
+        action,
+        details,
+        timestamp: new Date(),
+        userEmail: user?.email || '',
+      });
+    } catch (e) { console.error('Log write error:', e); }
+  };
+
+  // Load logs when Logs tab is opened
+  const loadLogs = async () => {
+    setLogsLoading(true);
+    try {
+      const { collection, getDocs, query, where, orderBy, limit } = await import('firebase/firestore');
+      const { db } = await import('./firebase.js');
+      const q = query(collection(db, 'logs'), where('locationId', '==', locationId), orderBy('timestamp', 'desc'), limit(200));
+      const snap = await getDocs(q);
+      setActivityLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch (e) { console.error('Load logs error:', e); setActivityLogs([]); }
+    setLogsLoading(false);
+  };
+
   const toggleDay = (i) => {
     setAvailability(prev => prev.map((d, j) => j === i ? { ...d, enabled: !d.enabled } : d));
   };
@@ -5296,6 +5328,7 @@ function FranchisePortal({ user, onLogout }) {
         unavailableDates,
       });
       showToast('✓ Availability saved successfully.');
+      writeLog('user', 'Availability updated', { buffer });
     } catch (err) {
       console.error("Failed to save availability:", err);
       showToast('✗ Failed to save availability. Please try again.');
@@ -6292,6 +6325,7 @@ function FranchisePortal({ user, onLogout }) {
                 { key: 'marketing', label: 'Marketing', icon: icons.globe },
                 { key: 'availability', label: 'Availability', icon: icons.calendar },
                 { key: 'payments', label: 'Payments', icon: icons.creditCard },
+                { key: 'logs', label: 'Logs', icon: icons.clock },
               ].map(tab => (
                 <button key={tab.key} onClick={() => setSettingsTab(tab.key)} style={{
                   padding: '12px 20px', fontSize: 13, fontWeight: 600, fontFamily: 'inherit',
@@ -6366,6 +6400,7 @@ function FranchisePortal({ user, onLogout }) {
                     const { db } = await import('./firebase.js');
                     await setDoc(doc(db, 'locations', locationId), { timezone, currency }, { merge: true });
                     showToast('\u2713 General settings saved.');
+                    writeLog('user', 'General settings updated', { timezone: locationData.timezone, currency });
                   } catch (e) { showToast('\u2717 Failed to save.'); }
                 }}>
                   <Icon path={icons.check} size={14} /> Save General Settings
@@ -6416,6 +6451,7 @@ function FranchisePortal({ user, onLogout }) {
                     const { db } = await import('./firebase.js');
                     await setDoc(doc(db, 'locations', locationId), { instagramUrl: marketingData.instagramUrl, facebookUrl: marketingData.facebookUrl }, { merge: true });
                     showToast('\u2713 Marketing settings saved.');
+                    writeLog('user', 'Marketing settings updated', { instagramUrl: marketingData.instagramUrl, facebookUrl: marketingData.facebookUrl });
                   } catch (e) { showToast('\u2717 Failed to save.'); }
                 }}>
                   <Icon path={icons.check} size={14} /> Save Marketing Settings
@@ -6654,6 +6690,7 @@ function FranchisePortal({ user, onLogout }) {
                       const { db } = await import('./firebase.js');
                       await setDoc(doc(db, 'pricing', locationId), pricing);
                       showToast('\u2713 Pricing saved.');
+                      writeLog('user', 'Pricing updated', { pricingCount: Object.keys(pricing).filter(k => pricing[k]?.enabled).length });
                     } catch (e) { console.error('Failed to save pricing:', e); showToast('\u2717 Failed to save pricing.'); }
                     setPricingSaving(false);
                   }}>
@@ -6690,9 +6727,86 @@ function FranchisePortal({ user, onLogout }) {
                 </div>
               </div>
             )}
+
+            {/* ── LOGS TAB ── */}
+            {settingsTab === 'logs' && (
+              <div>
+                {/* Load logs on first view */}
+                {activityLogs.length === 0 && !logsLoading && (() => { loadLogs(); return null; })()}
+                
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {[
+                      { key: 'all', label: 'All', color: 'var(--fp-accent)' },
+                      { key: 'marketing', label: 'Marketing', color: '#8b5cf6' },
+                      { key: 'admin', label: 'Admin', color: '#0ea5e9' },
+                      { key: 'user', label: 'User', color: '#f59e0b' },
+                      { key: 'bookings', label: 'Bookings', color: '#10b981' },
+                    ].map(f => (
+                      <button key={f.key} onClick={() => setLogFilter(f.key)}
+                        style={{
+                          padding: '6px 14px', borderRadius: 20, fontSize: 12, fontWeight: 600,
+                          fontFamily: 'inherit', cursor: 'pointer', transition: 'all 0.15s',
+                          border: logFilter === f.key ? `2px solid ${f.color}` : '2px solid var(--fp-border)',
+                          background: logFilter === f.key ? f.color + '12' : '#fff',
+                          color: logFilter === f.key ? f.color : 'var(--fp-muted)',
+                        }}>
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                  <button className="btn btn-ghost fp" style={{ fontSize: 12, padding: '6px 12px' }} onClick={loadLogs}>
+                    <Icon path={icons.clock} size={12} /> Refresh
+                  </button>
+                </div>
+
+                {logsLoading ? (
+                  <div style={{ padding: 40, textAlign: 'center', color: 'var(--fp-muted)' }}>Loading logs...</div>
+                ) : (() => {
+                  const filtered = logFilter === 'all' ? activityLogs : activityLogs.filter(l => l.type === logFilter);
+                  if (filtered.length === 0) {
+                    return (
+                      <div style={{ padding: 32, textAlign: 'center', color: 'var(--fp-muted)', background: 'var(--fp-bg)', borderRadius: 12, border: '1px dashed var(--fp-border)' }}>
+                        <div style={{ fontSize: 24, marginBottom: 8 }}>📋</div>
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>No logs found</div>
+                        <div style={{ fontSize: 12, marginTop: 4 }}>Activity will be logged here automatically.</div>
+                      </div>
+                    );
+                  }
+                  const typeColors = { marketing: { bg: '#f3e8ff', color: '#8b5cf6' }, admin: { bg: '#e0f2fe', color: '#0ea5e9' }, user: { bg: '#fef3c7', color: '#f59e0b' }, bookings: { bg: '#d1fae5', color: '#10b981' } };
+                  return (
+                    <div className="card fp" style={{ padding: 0, overflow: 'hidden' }}>
+                      {filtered.map((log, i) => {
+                        const tc = typeColors[log.type] || typeColors.admin;
+                        const ts = log.timestamp?.toDate ? log.timestamp.toDate() : new Date(log.timestamp);
+                        return (
+                          <div key={log.id} style={{ padding: '14px 20px', borderBottom: i < filtered.length - 1 ? '1px solid var(--fp-border)' : 'none', display: 'flex', alignItems: 'center', gap: 14 }}>
+                            <div style={{ width: 8, height: 8, borderRadius: '50%', background: tc.color, flexShrink: 0 }} />
+                            <div style={{ flex: 1 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                                <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--fp-text)' }}>{log.action}</span>
+                                <span style={{ padding: '1px 8px', borderRadius: 12, fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', background: tc.bg, color: tc.color }}>{log.type}</span>
+                              </div>
+                              {log.details && Object.keys(log.details).length > 0 && (
+                                <div style={{ fontSize: 12, color: 'var(--fp-muted)' }}>
+                                  {Object.entries(log.details).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join(' • ')}
+                                </div>
+                              )}
+                            </div>
+                            <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                              <div style={{ fontSize: 12, color: 'var(--fp-muted)' }}>{ts.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+                              <div style={{ fontSize: 11, color: 'var(--fp-muted)' }}>{ts.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' })}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
           </>
         )}
-
 
         {/* === MEMBERS PAGE === */}
         {page === 'members' && (
@@ -6943,6 +7057,7 @@ function FranchisePortal({ user, onLogout }) {
                             createdAt: new Date(),
                           });
                           showToast(`\u2713 ${fullName} added as a new member.`);
+                          writeLog('bookings', 'Member added', { name: fullName, email: newMemberParent.email.trim(), children: validChildren.map(c => c.name.trim()) });
                           setShowAddMemberModal(false);
                           setNewMemberParent({ name: '', email: '', phone: '' });
                           setNewMemberChildren([{ name: '', grade: '' }]);
@@ -7369,6 +7484,7 @@ function FranchisePortal({ user, onLogout }) {
                               } else {
                                 showToast(`✓ $${Number(refundData.amount).toFixed(2)} refund recorded. ${result.data.message || ''}`);
                               }
+                              writeLog('admin', 'Refund processed', { parent: selectedTx.parent, membership: selectedTx.membership, amount: refundData.amount, reason: refundData.reason, status: result.data.status });
                               // Refresh sales
                               const { collection, getDocs, query, where } = await import('firebase/firestore');
                               const { db } = await import('./firebase.js');
@@ -7495,6 +7611,7 @@ function FranchisePortal({ user, onLogout }) {
                               const { db } = await import('./firebase.js');
                               await updateDoc(doc(db, 'sales', selectedSale.id), { status: 'active', suspension: null });
                               showToast('✓ Membership reactivated.');
+                              writeLog('admin', 'Membership reactivated', { parent: selectedSale.parentName, membership: selectedSale.membershipName });
                               setSales(prev => prev.map(s => s.id === selectedSale.id ? { ...s, status: 'active', suspension: null } : s));
                               setSelectedSale(prev => ({ ...prev, status: 'active', suspension: null }));
                             } catch (e) { showToast('✗ Failed to reactivate.'); }
@@ -7543,6 +7660,7 @@ function FranchisePortal({ user, onLogout }) {
                               const suspension = { startDate: suspendData.startDate, endDate: suspendData.endDate, fee: suspendData.fee };
                               await updateDoc(doc(db, 'sales', selectedSale.id), { status: 'suspended', suspension });
                               showToast('✓ Membership suspended.');
+                              writeLog('admin', 'Membership suspended', { parent: selectedSale.parentName, membership: selectedSale.membershipName, startDate: suspendData.startDate, endDate: suspendData.endDate, fee: suspendData.fee });
                               setSales(prev => prev.map(s => s.id === selectedSale.id ? { ...s, status: 'suspended', suspension } : s));
                               setSelectedSale(prev => ({ ...prev, status: 'suspended', suspension }));
                               setSaleAction(null);
@@ -7598,6 +7716,7 @@ function FranchisePortal({ user, onLogout }) {
                               const cancellation = { date: cancelData.immediate ? new Date().toISOString().split('T')[0] : cancelData.date, reason: cancelData.reason, immediate: cancelData.immediate };
                               await updateDoc(doc(db, 'sales', selectedSale.id), { status: 'cancelled', cancellation });
                               showToast('✓ Membership cancelled.');
+                              writeLog('admin', 'Membership cancelled', { parent: selectedSale.parentName, membership: selectedSale.membershipName, reason: cancelData.reason });
                               setSales(prev => prev.map(s => s.id === selectedSale.id ? { ...s, status: 'cancelled', cancellation } : s));
                               setSelectedSale(prev => ({ ...prev, status: 'cancelled', cancellation }));
                               setSaleAction(null);

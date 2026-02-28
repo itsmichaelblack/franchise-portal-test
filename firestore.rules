@@ -256,6 +256,13 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ── Logs collection (franchise partner activity) ─────────────────────────
+    match /logs/{logId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update, delete: if false;
+    }
+
     // ── Deny everything else ────────────────────────────────────────────────
     match /{document=**} {
       allow read, write: if false;
