@@ -1103,3 +1103,159 @@ exports.generateRecurringSessions = functions.pubsub
     console.log(`Generated ${totalCreated} recurring session documents.`);
     return null;
   });
+
+// ── Public HTTPS endpoints for Parent App (no Firebase Auth) ─────────────
+
+// CORS helper for public endpoints
+function setCors(res) {
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type");
+}
+
+// Public version of createPaymentLink for parent app
+exports.createPaymentLinkPublic = functions.https.onRequest(async (req, res) => {
+  setCors(res);
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
+
+  try {
+    const { parentEmail, locationId, saleId } = req.body;
+    if (!locationId) { res.status(400).json({ error: "locationId required." }); return; }
+
+    const db = getFirestore();
+    const locationDoc = await db.doc(`locations/${locationId}`).get();
+    if (!locationDoc.exists) { res.status(404).json({ error: "Location not found." }); return; }
+
+    const location = locationDoc.data();
+    const stripeAccountId = location.stripeAccountId;
+    if (!stripeAccountId) { res.status(400).json({ error: "Stripe not connected for this centre. Please contact your centre." }); return; }
+
+    let customerEmail = parentEmail;
+    if (saleId && saleId !== "none") {
+      const saleDoc = await db.doc(`sales/${saleId}`).get();
+      if (saleDoc.exists) {
+        customerEmail = saleDoc.data().parentEmail || customerEmail;
+      }
+    }
+
+    const countryToCurrency = { AU: "aud", NZ: "nzd", US: "usd", GB: "gbp", CA: "cad", SG: "sgd" };
+    const currency = (location.currency || countryToCurrency[(location.country || "AU").toUpperCase()] || "aud").toLowerCase();
+
+    const session = await requireStripe().checkout.sessions.create(
+      {
+        mode: "setup",
+        currency,
+        customer_email: customerEmail || undefined,
+        payment_method_types: ["card"],
+        success_url: `${PORTAL_URL}?payment_setup=success&sale_id=${saleId || ""}`,
+        cancel_url: `${PORTAL_URL}?payment_setup=cancelled`,
+        metadata: { saleId: saleId || "", locationId },
+      },
+      { stripeAccount: stripeAccountId }
+    );
+
+    res.status(200).json({ url: session.url });
+  } catch (e) {
+    console.error("createPaymentLinkPublic error:", e);
+    res.status(500).json({ error: e.message || "Failed to create payment link." });
+  }
+});
+
+// Public version of savePaymentFromCheckout for parent app
+exports.savePaymentFromCheckoutPublic = functions.https.onRequest(async (req, res) => {
+  setCors(res);
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
+
+  try {
+    const { parentEmail, locationId } = req.body;
+    if (!parentEmail || !locationId) { res.status(400).json({ error: "parentEmail and locationId required." }); return; }
+
+    const db = getFirestore();
+    const locationDoc = await db.doc(`locations/${locationId}`).get();
+    if (!locationDoc.exists) { res.status(404).json({ error: "Location not found." }); return; }
+
+    const location = locationDoc.data();
+    const stripeAccountId = location.stripeAccountId;
+    if (!stripeAccountId) { res.status(400).json({ error: "Stripe not connected." }); return; }
+
+    // Find the customer on the connected account
+    const customers = await requireStripe().customers.list(
+      { email: parentEmail, limit: 1 },
+      { stripeAccount: stripeAccountId }
+    );
+
+    if (customers.data.length === 0) {
+      res.status(404).json({ error: "No Stripe customer found for this email." });
+      return;
+    }
+
+    const customer = customers.data[0];
+
+    // Get payment methods (try card first, then BECS)
+    let pm = null;
+    const cardMethods = await requireStripe().paymentMethods.list(
+      { customer: customer.id, type: "card" },
+      { stripeAccount: stripeAccountId }
+    );
+    if (cardMethods.data.length > 0) {
+      pm = cardMethods.data[0];
+    } else {
+      const becsMethods = await requireStripe().paymentMethods.list(
+        { customer: customer.id, type: "au_becs_debit" },
+        { stripeAccount: stripeAccountId }
+      );
+      if (becsMethods.data.length > 0) {
+        pm = becsMethods.data[0];
+      }
+    }
+
+    if (!pm) {
+      res.status(404).json({ error: "No payment method found. It may take a moment to process." });
+      return;
+    }
+
+    // Build payment method info
+    let paymentMethodInfo;
+    if (pm.type === "au_becs_debit") {
+      paymentMethodInfo = {
+        id: pm.id, type: "au_becs_debit",
+        brand: "BECS Direct Debit", last4: pm.au_becs_debit.last4,
+      };
+    } else {
+      paymentMethodInfo = {
+        id: pm.id, type: "card",
+        brand: pm.card.brand, last4: pm.card.last4,
+        expMonth: pm.card.exp_month, expYear: pm.card.exp_year,
+      };
+    }
+
+    // Update sales for this parent at this location
+    const salesSnap = await db.collection("sales")
+      .where("locationId", "==", locationId)
+      .where("parentEmail", "==", parentEmail)
+      .get();
+
+    const batch = db.batch();
+    salesSnap.docs.forEach((doc) => {
+      batch.update(doc.ref, {
+        paymentMethod: paymentMethodInfo,
+        stripeCustomerId: customer.id,
+        stripeStatus: "connected",
+      });
+    });
+    await batch.commit();
+
+    res.status(200).json({
+      success: true,
+      last4: paymentMethodInfo.last4,
+      brand: paymentMethodInfo.brand,
+      type: paymentMethodInfo.type || "card",
+      customerId: customer.id,
+    });
+  } catch (e) {
+    console.error("savePaymentFromCheckoutPublic error:", e);
+    res.status(500).json({ error: e.message || "Failed to confirm payment." });
+  }
+});
