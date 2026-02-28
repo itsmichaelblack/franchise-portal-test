@@ -4649,6 +4649,9 @@ function FranchisePortal({ user, onLogout }) {
   const [marketingData, setMarketingData] = useState({ instagramUrl: '', facebookUrl: '' });
   const [currency, setCurrency] = useState('AUD');
   const [selectedBooking, setSelectedBooking] = useState(null);
+  const [bookingEditMode, setBookingEditMode] = useState(false);
+  const [bookingEditData, setBookingEditData] = useState(null);
+  const [bookingEditSaving, setBookingEditSaving] = useState(false);
   const [sessionModal, setSessionModal] = useState(null); // null | { date: 'YYYY-MM-DD', hour: number, editing?: booking }
   const [sessionSaving, setSessionSaving] = useState(false);
   const [sessionDeleteConfirm, setSessionDeleteConfirm] = useState(null); // null | booking to delete
@@ -8585,11 +8588,12 @@ function FranchisePortal({ user, onLogout }) {
 
       {/* Booking Detail Modal */}
       {selectedBooking && (
-        <div className="modal-overlay" onClick={() => setSelectedBooking(null)}>
+        <div className="modal-overlay" onClick={() => { setSelectedBooking(null); setBookingEditMode(false); }}>
           <div className="modal fp" onClick={e => e.stopPropagation()} style={{ maxWidth: 440 }}>
-            <div className="modal-header fp" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div className="modal-title fp">{selectedBooking?.type === 'session' ? 'Session Details' : 'Booking Details'}</div>
-              <button className="modal-close" onClick={() => setSelectedBooking(null)} style={{ marginLeft: 'auto' }}>✕</button>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px', borderBottom: '1px solid var(--fp-border)' }}>
+              <div style={{ fontWeight: 800, fontSize: 18, color: 'var(--fp-text)' }}>{selectedBooking?.type === 'session' ? 'Session Details' : 'Booking Details'}</div>
+              <button onClick={() => { setSelectedBooking(null); setBookingEditMode(false); }}
+                style={{ width: 32, height: 32, borderRadius: 8, border: '2px solid var(--fp-border)', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 14, fontWeight: 700, color: 'var(--fp-muted)' }}>✕</button>
             </div>
             <div className="modal-body" style={{ padding: '24px' }}>
               {(() => {
@@ -8598,7 +8602,6 @@ function FranchisePortal({ user, onLogout }) {
                 const dateLabel = dateObj.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
                 const timeLabel = fmtTime(b.time);
                 const [bh, bm] = b.time.split(':').map(Number);
-                // Duration: use stored duration, or look up from service, or fallback to 40 min
                 const svcMatch = b.serviceId ? locationServices.find(s => s.id === b.serviceId) : null;
                 const duration = b.duration ? Number(b.duration) : (svcMatch?.duration ? Number(svcMatch.duration) : 40);
                 const endMin = bh * 60 + bm + duration;
@@ -8606,9 +8609,15 @@ function FranchisePortal({ user, onLogout }) {
                 const refCode = b.id.slice(0, 8).toUpperCase();
                 const serviceName = b.serviceName || svcMatch?.name || '';
                 const isSession = b.type === 'session';
+                const childNames = (b.children || []).map(c => c.name).join(', ');
 
                 return (
                   <>
+                    {/* Cancelled banner */}
+                    {b.status === 'cancelled' && (
+                      <div style={{ padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, marginBottom: 16, textAlign: 'center', fontWeight: 700, fontSize: 13, color: '#dc2626' }}>Cancelled</div>
+                    )}
+
                     <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 }}>
                       <div style={{ width: 52, height: 52, borderRadius: 12, background: isSession ? 'linear-gradient(135deg, #3d9695, #6DCBCA)' : 'linear-gradient(135deg, #E25D25, #f0845a)', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                         <div style={{ fontSize: 18, fontWeight: 800, lineHeight: 1 }}>{dateObj.getDate()}</div>
@@ -8620,47 +8629,128 @@ function FranchisePortal({ user, onLogout }) {
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 20 }}>
-                      {serviceName && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'var(--fp-bg)', borderRadius: 8 }}>
-                          <Icon path={icons.star} size={15} style={{ color: 'var(--fp-accent)', flexShrink: 0 }} />
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 11, color: 'var(--fp-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Service</div>
-                            <div style={{ fontSize: 14, color: 'var(--fp-text)', fontWeight: 600 }}>{serviceName}</div>
+                    {/* Edit mode for assessment bookings */}
+                    {!isSession && bookingEditMode && bookingEditData ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                          <div>
+                            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Parent Name</label>
+                            <input value={bookingEditData.customerName} onChange={e => setBookingEditData(p => ({ ...p, customerName: e.target.value }))}
+                              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Child Name</label>
+                            <input value={bookingEditData.childName || ''} onChange={e => setBookingEditData(p => ({ ...p, childName: e.target.value }))}
+                              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
                           </div>
                         </div>
-                      )}
-                      {[
-                        { icon: icons.clock, label: 'Time', value: `${timeLabel} — ${endLabel} (${duration} min)` },
-                        ...(isSession ? [
-                          { icon: icons.users, label: 'Tutor', value: b.tutorName || '—' },
-                          { icon: icons.calendar, label: 'Session Type', value: b.sessionType === 'recurring' ? 'Recurring' : 'One Off' },
-                        ] : [
-                          { icon: icons.mail, label: 'Email', value: b.customerEmail, href: `mailto:${b.customerEmail}` },
-                          { icon: icons.phone, label: 'Phone', value: b.customerPhone, href: `tel:${b.customerPhone?.replace(/\s/g, '')}` },
-                        ]),
-                      ].map((row, ri) => (
-                        <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'var(--fp-bg)', borderRadius: 8 }}>
-                          <Icon path={row.icon} size={15} style={{ color: 'var(--fp-accent)', flexShrink: 0 }} />
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 11, color: 'var(--fp-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{row.label}</div>
-                            {row.href ? (
-                              <a href={row.href} style={{ fontSize: 14, color: 'var(--fp-text)', textDecoration: 'none', fontWeight: 600 }}>{row.value}</a>
-                            ) : (
-                              <div style={{ fontSize: 14, color: 'var(--fp-text)', fontWeight: 600 }}>{row.value}</div>
-                            )}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                          <div>
+                            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Date</label>
+                            <input type="date" value={bookingEditData.date} onChange={e => setBookingEditData(p => ({ ...p, date: e.target.value }))}
+                              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Time</label>
+                            <input type="time" value={bookingEditData.time} onChange={e => setBookingEditData(p => ({ ...p, time: e.target.value }))}
+                              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
                           </div>
                         </div>
-                      ))}
-                      {b.notes && (
-                        <div style={{ padding: '10px 14px', background: 'var(--fp-bg)', borderRadius: 8 }}>
-                          <div style={{ fontSize: 11, color: 'var(--fp-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Notes</div>
-                          <div style={{ fontSize: 14, color: 'var(--fp-text)' }}>{b.notes}</div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                          <div>
+                            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Email</label>
+                            <input type="email" value={bookingEditData.customerEmail || ''} onChange={e => setBookingEditData(p => ({ ...p, customerEmail: e.target.value }))}
+                              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Phone</label>
+                            <input type="tel" value={bookingEditData.customerPhone || ''} onChange={e => setBookingEditData(p => ({ ...p, customerPhone: e.target.value }))}
+                              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
+                          </div>
                         </div>
-                      )}
-                    </div>
+                        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                          <button className="btn btn-ghost fp" style={{ border: '1px solid var(--fp-border)' }} onClick={() => setBookingEditMode(false)}>Cancel</button>
+                          <button className="btn btn-primary fp" disabled={bookingEditSaving} onClick={async () => {
+                            setBookingEditSaving(true);
+                            try {
+                              const { doc, updateDoc } = await import('firebase/firestore');
+                              const { db } = await import('./firebase.js');
+                              const updates = {
+                                customerName: bookingEditData.customerName,
+                                customerEmail: bookingEditData.customerEmail,
+                                customerPhone: bookingEditData.customerPhone,
+                                date: bookingEditData.date,
+                                time: bookingEditData.time,
+                              };
+                              if (bookingEditData.childName !== undefined) {
+                                updates.children = [{ name: bookingEditData.childName, grade: (b.children?.[0]?.grade || '') }];
+                              }
+                              await updateDoc(doc(db, 'bookings', b.id), updates);
+                              showToast('✓ Booking updated.');
+                              writeLog('bookings', 'Booking rescheduled', { name: bookingEditData.customerName, date: bookingEditData.date, time: bookingEditData.time });
+                              setSelectedBooking({ ...b, ...updates, children: updates.children || b.children });
+                              setBookingEditMode(false);
+                              // Refresh bookings
+                              const { collection, getDocs, query, where } = await import('firebase/firestore');
+                              const q = query(collection(db, 'bookings'), where('locationId', '==', locationId));
+                              const snap = await getDocs(q);
+                              const allBookings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                              allBookings.sort((a, b2) => a.date === b2.date ? a.time.localeCompare(b2.time) : a.date.localeCompare(b2.date));
+                              setBookings(allBookings);
+                            } catch (e) { console.error(e); showToast('✗ Failed to update booking.'); }
+                            setBookingEditSaving(false);
+                          }}>
+                            <Icon path={icons.check} size={14} /> {bookingEditSaving ? 'Saving...' : 'Save Changes'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Read-only info rows */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 20 }}>
+                          {serviceName && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'var(--fp-bg)', borderRadius: 8 }}>
+                              <Icon path={icons.star} size={15} style={{ color: 'var(--fp-accent)', flexShrink: 0 }} />
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: 11, color: 'var(--fp-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Service</div>
+                                <div style={{ fontSize: 14, color: 'var(--fp-text)', fontWeight: 600 }}>{serviceName}</div>
+                              </div>
+                            </div>
+                          )}
+                          {[
+                            { icon: icons.clock, label: 'Time', value: `${timeLabel} — ${endLabel} (${duration} min)` },
+                            ...(isSession ? [
+                              { icon: icons.users, label: 'Tutor', value: b.tutorName || '—' },
+                              { icon: icons.calendar, label: 'Session Type', value: b.sessionType === 'recurring' ? 'Recurring' : 'One Off' },
+                            ] : [
+                              ...(childNames ? [{ icon: icons.users, label: 'Child', value: childNames }] : []),
+                              { icon: icons.mail, label: 'Email', value: b.customerEmail, href: `mailto:${b.customerEmail}` },
+                              { icon: icons.phone, label: 'Phone', value: b.customerPhone, href: `tel:${b.customerPhone?.replace(/\s/g, '')}` },
+                            ]),
+                          ].map((row, ri) => (
+                            <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'var(--fp-bg)', borderRadius: 8 }}>
+                              <Icon path={row.icon} size={15} style={{ color: 'var(--fp-accent)', flexShrink: 0 }} />
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: 11, color: 'var(--fp-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{row.label}</div>
+                                {row.href ? (
+                                  <a href={row.href} style={{ fontSize: 14, color: 'var(--fp-text)', textDecoration: 'none', fontWeight: 600 }}>{row.value}</a>
+                                ) : (
+                                  <div style={{ fontSize: 14, color: 'var(--fp-text)', fontWeight: 600 }}>{row.value}</div>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                          {b.notes && (
+                            <div style={{ padding: '10px 14px', background: 'var(--fp-bg)', borderRadius: 8 }}>
+                              <div style={{ fontSize: 11, color: 'var(--fp-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Notes</div>
+                              <div style={{ fontSize: 14, color: 'var(--fp-text)' }}>{b.notes}</div>
+                            </div>
+                          )}
+                        </div>
 
-                    <div style={{ fontSize: 11, color: 'var(--fp-muted)', textAlign: 'center' }}>Ref: {refCode}</div>
+                        <div style={{ fontSize: 11, color: 'var(--fp-muted)', textAlign: 'center' }}>Ref: {refCode}</div>
+                      </>
+                    )}
 
                     {/* Students & Attendance (sessions only) */}
                     {isSession && (
@@ -8693,14 +8783,42 @@ function FranchisePortal({ user, onLogout }) {
                         </div>
                       </div>
                     ) : (
-                      <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-                        <a href={`mailto:${b.customerEmail}`} className="btn btn-primary fp" style={{ flex: 1, textDecoration: 'none', textAlign: 'center', justifyContent: 'center' }}>
-                          <Icon path={icons.mail} size={14} /> Email Customer
-                        </a>
-                        <a href={`tel:${b.customerPhone?.replace(/\s/g, '')}`} className="btn btn-ghost fp" style={{ flex: 1, textDecoration: 'none', textAlign: 'center', justifyContent: 'center', border: '1px solid var(--fp-border)' }}>
-                          <Icon path={icons.phone} size={14} /> Call
-                        </a>
-                      </div>
+                      !bookingEditMode && b.status !== 'cancelled' && (
+                        <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+                          <button className="btn btn-primary fp" style={{ flex: 1, justifyContent: 'center' }} onClick={() => {
+                            setBookingEditMode(true);
+                            setBookingEditData({
+                              customerName: b.customerName || '',
+                              childName: (b.children?.[0]?.name || ''),
+                              customerEmail: b.customerEmail || '',
+                              customerPhone: b.customerPhone || '',
+                              date: b.date,
+                              time: b.time,
+                            });
+                          }}>
+                            <Icon path={icons.edit} size={14} /> Edit / Reschedule
+                          </button>
+                          <button className="btn btn-ghost fp" style={{ flex: 1, justifyContent: 'center', color: '#dc2626', border: '1px solid #fecaca' }} onClick={async () => {
+                            if (!confirm('Cancel this booking? It will be marked as cancelled.')) return;
+                            try {
+                              const { doc, updateDoc } = await import('firebase/firestore');
+                              const { db } = await import('./firebase.js');
+                              await updateDoc(doc(db, 'bookings', b.id), { status: 'cancelled' });
+                              showToast('✓ Booking cancelled.');
+                              writeLog('bookings', 'Booking cancelled', { name: b.customerName, date: b.date });
+                              setSelectedBooking({ ...b, status: 'cancelled' });
+                              const { collection, getDocs, query, where } = await import('firebase/firestore');
+                              const q = query(collection(db, 'bookings'), where('locationId', '==', locationId));
+                              const snap = await getDocs(q);
+                              const allBookings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                              allBookings.sort((a2, b2) => a2.date === b2.date ? a2.time.localeCompare(b2.time) : a2.date.localeCompare(b2.date));
+                              setBookings(allBookings);
+                            } catch (e) { showToast('✗ Failed to cancel.'); }
+                          }}>
+                            <Icon path={icons.trash} size={14} /> Cancel
+                          </button>
+                        </div>
+                      )
                     )}
                   </>
                 );
