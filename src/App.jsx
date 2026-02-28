@@ -7247,21 +7247,22 @@ function FranchisePortal({ user, onLogout }) {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 24 }}>
             {[
               { key: 'membership', label: 'Membership Report', desc: 'Lead, active, inactive & suspended members', icon: icons.users, color: '#3d9695' },
-              { key: 'revenue', label: 'Revenue Report', desc: 'Recurring monthly revenue', icon: icons.creditCard, color: '#8b5cf6' },
-              { key: 'staff', label: 'Staff Hours Report', desc: 'Scheduled staff hours', icon: icons.clock, color: '#f59e0b' },
+              { key: 'revenue', label: 'Revenue Report', desc: 'Recurring monthly revenue', icon: icons.creditCard, color: '#7c3aed' },
+              { key: 'staff', label: 'Staff Hours Report', desc: 'Scheduled staff hours', icon: icons.clock, color: '#d97706' },
             ].map(r => (
               <button key={r.key} onClick={() => setReportType(r.key)}
                 style={{
-                  padding: 20, borderRadius: 12, border: reportType === r.key ? `2px solid ${r.color}` : '2px solid var(--fp-border)',
-                  background: reportType === r.key ? r.color + '0D' : '#fff', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', transition: 'all 0.15s',
+                  padding: 20, borderRadius: 12, border: reportType === r.key ? `2px solid ${r.color}` : '2px solid #d1d5db',
+                  background: reportType === r.key ? '#fff' : '#fff', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', transition: 'all 0.15s',
+                  boxShadow: reportType === r.key ? `0 0 0 1px ${r.color}` : 'none',
                 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                  <div style={{ width: 36, height: 36, borderRadius: 10, background: r.color + '20', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Icon path={r.icon} size={18} style={{ color: r.color }} />
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: r.color, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon path={r.icon} size={18} style={{ color: '#fff' }} />
                   </div>
-                  <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)' }}>{r.label}</div>
+                  <div style={{ fontWeight: 800, fontSize: 15, color: '#1f2937' }}>{r.label}</div>
                 </div>
-                <div style={{ fontSize: 13, color: '#6b7280' }}>{r.desc}</div>
+                <div style={{ fontSize: 13, color: '#4b5563', fontWeight: 500 }}>{r.desc}</div>
               </button>
             ))}
           </div>
