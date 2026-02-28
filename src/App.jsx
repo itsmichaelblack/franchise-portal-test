@@ -7154,7 +7154,7 @@ function FranchisePortal({ user, onLogout }) {
                 setupFee: s.setupFee || 0,
                 method: s.paymentMethod ? `${s.paymentMethod.brand} •••• ${s.paymentMethod.last4}` : 'Pending',
                 paymentMethod: s.paymentMethod || null,
-                status: s.stripeStatus === 'connected' ? 'Processed' : 'Pending',
+                status: (s.refunds && s.refunds.length > 0) ? 'Refunded' : (s.stripeStatus === 'connected' ? 'Processed' : 'Pending'),
                 children: (s.children || []).map(c => c.name).join(', '),
                 billingFrequency: s.billingFrequency || 'weekly',
                 refunds: s.refunds || [],
@@ -7204,7 +7204,7 @@ function FranchisePortal({ user, onLogout }) {
                           <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, color: 'var(--fp-text)' }}>${Number(tx.amount).toFixed(2)}</td>
                           <td style={{ padding: '12px 14px', fontSize: 12, color: 'var(--fp-muted)' }}>{tx.method}</td>
                           <td style={{ padding: '12px 14px' }}>
-                            <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: tx.status === 'Processed' ? '#ecfdf5' : '#fffbeb', color: tx.status === 'Processed' ? '#059669' : '#d97706' }}>{tx.status}</span>
+                            <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: tx.status === 'Processed' ? '#ecfdf5' : tx.status === 'Refunded' ? '#fef2f2' : '#fffbeb', color: tx.status === 'Processed' ? '#059669' : tx.status === 'Refunded' ? '#dc2626' : '#d97706' }}>{tx.status}</span>
                           </td>
                         </tr>
                       ))}
