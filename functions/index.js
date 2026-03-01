@@ -1478,7 +1478,7 @@ exports.createSubscriptionPublic = functions.runWith({ secrets: ["STRIPE_SECRET_
     }
     console.log("Customer:", customer.id);
 
-    // Find payment method - check parent doc first, then list from customer
+    // Find payment method from parent doc
     let paymentMethodId = null;
     const parentSnap = await db.collection("parents")
       .where("email", "==", parentEmail.toLowerCase())
@@ -1489,8 +1489,10 @@ exports.createSubscriptionPublic = functions.runWith({ secrets: ["STRIPE_SECRET_
     if (!parentSnap.empty) {
       const parentDoc = parentSnap.docs[0].data();
       paymentMethodId = parentDoc.paymentMethod?.id || null;
+      console.log("PM from parent doc:", paymentMethodId);
     }
 
+    // If no PM in parent doc, try listing from customer
     if (!paymentMethodId) {
       const pms = await stripe.paymentMethods.list(
         { customer: customer.id, type: "card" },
@@ -1509,18 +1511,23 @@ exports.createSubscriptionPublic = functions.runWith({ secrets: ["STRIPE_SECRET_
       }
     }
 
-    // Attach payment method to customer if needed
+    console.log("Final paymentMethodId:", paymentMethodId);
+
+    // Attach payment method to customer
     if (paymentMethodId) {
       try {
         await stripe.paymentMethods.attach(paymentMethodId, { customer: customer.id }, { stripeAccount: stripeAccountId });
+        console.log("PM attached to customer");
       } catch (attachErr) {
-        if (!attachErr.message.includes("already been attached")) {
-          console.log("PM attach note:", attachErr.message);
-        }
+        // May already be attached — that's fine
+        console.log("PM attach note:", attachErr.message);
       }
       await stripe.customers.update(customer.id, {
         invoice_settings: { default_payment_method: paymentMethodId },
       }, { stripeAccount: stripeAccountId });
+      console.log("Customer default PM set");
+    } else {
+      console.log("WARNING: No payment method found!");
     }
 
     // Create product on connected account
