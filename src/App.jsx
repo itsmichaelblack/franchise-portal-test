@@ -5252,6 +5252,7 @@ function NewSessionModal({ initialDate, initialHour, editing, services, tutors, 
   const [studentSearchTerm, setStudentSearchTerm] = useState('');
   const [showStudentDropdown, setShowStudentDropdown] = useState(false);
   const [studentsLoading, setStudentsLoading] = useState(false);
+  const [notifyCustomer, setNotifyCustomer] = useState(false);
 
   // Build flat list of all children from members
   const allChildren = [];
@@ -5317,6 +5318,7 @@ function NewSessionModal({ initialDate, initialHour, editing, services, tutors, 
       tutorId,
       tutorName: selectedTutor ? `${selectedTutor.firstName} ${selectedTutor.lastName}` : '',
       students: selectedStudents,
+      notifyCustomer: editing ? notifyCustomer : false,
     }, editing?.id || null, editMode || null);
   };
 
@@ -5453,6 +5455,25 @@ function NewSessionModal({ initialDate, initialHour, editing, services, tutors, 
             </div>
           )}
         </div>
+
+        {/* Notify Customer toggle (only when editing) */}
+        {editing && (
+          <div style={{ marginBottom: 16, padding: '12px 14px', background: notifyCustomer ? 'rgba(226,93,37,0.06)' : 'var(--fp-bg)', borderRadius: 10, border: notifyCustomer ? '1px solid rgba(226,93,37,0.2)' : '1px solid var(--fp-border)' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--fp-text)' }}>
+              <input type="checkbox" checked={notifyCustomer} onChange={e => setNotifyCustomer(e.target.checked)}
+                style={{ width: 18, height: 18, accentColor: '#E25D25', cursor: 'pointer' }} />
+              Notify enrolled students of this change
+            </label>
+            {notifyCustomer && (
+              <div style={{ marginTop: 8, fontSize: 12, color: 'var(--fp-muted)', paddingLeft: 28 }}>
+                {selectedStudents.length > 0 && selectedStudents.some(s => s.parentEmail)
+                  ? <>An email will be sent to {[...new Set(selectedStudents.filter(s => s.parentEmail).map(s => s.parentEmail))].length} parent(s) with the updated session details.</>
+                  : <span style={{ color: '#E25D25', fontWeight: 600 }}>⚠ No student emails available. Add students with parent emails to send notifications.</span>
+                }
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Actions */}
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
@@ -5750,6 +5771,7 @@ function FranchisePortal({ user, onLogout }) {
   const [sessionModal, setSessionModal] = useState(null); // null | { date: 'YYYY-MM-DD', hour: number, editing?: booking }
   const [sessionSaving, setSessionSaving] = useState(false);
   const [sessionDeleteConfirm, setSessionDeleteConfirm] = useState(null); // null | booking to delete
+  const [notifyOnDelete, setNotifyOnDelete] = useState(false);
 
   // Members state
   const [members, setMembers] = useState([]);
@@ -6107,6 +6129,33 @@ function FranchisePortal({ user, onLogout }) {
           }
           setBookings(prev => prev.map(b => (b.recurrenceRuleId === ruleId && b.date >= today) ? { ...b, ...updateData } : b));
           showToast('✓ All future sessions updated.');
+
+          // Send reschedule notification if notifyCustomer was checked
+          if (data.notifyCustomer && data.students?.length > 0) {
+            const parentEmails = [...new Set(data.students.filter(s => s.parentEmail).map(s => s.parentEmail.toLowerCase().trim()))];
+            if (parentEmails.length > 0) {
+              try {
+                const { getFunctions, httpsCallable } = await import('firebase/functions');
+                const fns = getFunctions();
+                const notifyFn = httpsCallable(fns, 'sendSessionNotification');
+                for (const email of parentEmails) {
+                  await notifyFn({
+                    type: 'reschedule',
+                    booking: {
+                      customerEmail: email,
+                      customerName: data.students.find(s => (s.parentEmail || '').toLowerCase().trim() === email)?.parentName || 'there',
+                      serviceName: data.serviceName,
+                      date: data.date || bookings.find(b => b.id === sessionId)?.date,
+                      time: data.time,
+                      locationName: location?.name || '',
+                    },
+                    locationData: { name: location?.name, email: location?.email, phone: location?.phone, address: location?.address, country: location?.country },
+                  });
+                }
+                showToast(`✓ ${parentEmails.length} notification(s) sent.`);
+              } catch (emailErr) { console.warn('Reschedule notification failed:', emailErr); }
+            }
+          }
         }
       } else {
         // Edit just this one occurrence
@@ -6117,6 +6166,33 @@ function FranchisePortal({ user, onLogout }) {
         setBookings(prev => prev.map(b => b.id === sessionId ? { ...b, ...updateData, date: data.date } : b));
         showToast('✓ Session updated.');
       }
+
+      // Send reschedule notification if notifyCustomer was checked
+      if (data.notifyCustomer && data.students?.length > 0) {
+        const parentEmails = [...new Set(data.students.filter(s => s.parentEmail).map(s => s.parentEmail.toLowerCase().trim()))];
+        if (parentEmails.length > 0) {
+          try {
+            const { getFunctions, httpsCallable } = await import('firebase/functions');
+            const fns = getFunctions();
+            const notifyFn = httpsCallable(fns, 'sendSessionNotification');
+            for (const email of parentEmails) {
+              await notifyFn({
+                type: 'reschedule',
+                booking: {
+                  customerEmail: email,
+                  customerName: data.students.find(s => (s.parentEmail || '').toLowerCase().trim() === email)?.parentName || 'there',
+                  serviceName: data.serviceName,
+                  date: data.date || bookings.find(b => b.id === sessionId)?.date,
+                  time: data.time,
+                  locationName: location?.name || '',
+                },
+                locationData: { name: location?.name, email: location?.email, phone: location?.phone, address: location?.address, country: location?.country },
+              });
+            }
+            showToast(`✓ ${parentEmails.length} notification(s) sent.`);
+          } catch (emailErr) { console.warn('Reschedule notification failed:', emailErr); }
+        }
+      }
     } catch (err) {
       console.error("Failed to update session:", err);
       showToast('✗ Failed to update session.');
@@ -6126,7 +6202,19 @@ function FranchisePortal({ user, onLogout }) {
   };
 
   // Delete Session handler — supports 'this' (single) or 'all' (series) mode
-  const handleDeleteSession = async (sessionId, deleteMode) => {
+  const handleDeleteSession = async (sessionId, deleteMode, notify = false) => {
+    // Collect student emails before deleting (needed for notification)
+    let studentEmails = [];
+    const sessionData = bookings.find(b => b.id === sessionId);
+    if (notify) {
+      try {
+        const { collection: col, getDocs: gd } = await import('firebase/firestore');
+        const { db: database } = await import('./firebase.js');
+        const studSnap = await gd(col(database, 'bookings', sessionId, 'students'));
+        studentEmails = studSnap.docs.map(d => d.data()).filter(s => s.parentEmail).map(s => ({ email: s.parentEmail.toLowerCase().trim(), name: s.parentName || s.name || 'there' }));
+      } catch (e) { console.warn('Failed to load students for notification:', e); }
+    }
+
     try {
       const { doc, deleteDoc, setDoc, collection, getDocs, query, where, serverTimestamp } = await import('firebase/firestore');
       const { db } = await import('./firebase.js');
@@ -6153,11 +6241,37 @@ function FranchisePortal({ user, onLogout }) {
         setBookings(prev => prev.filter(b => b.id !== sessionId));
         showToast('✓ Session deleted.');
       }
+
+      // Send cancel notifications if notify was checked
+      if (notify && studentEmails.length > 0) {
+        try {
+          const { getFunctions, httpsCallable } = await import('firebase/functions');
+          const fns = getFunctions();
+          const notifyFn = httpsCallable(fns, 'sendSessionNotification');
+          const uniqueEmails = [...new Map(studentEmails.map(s => [s.email, s])).values()];
+          for (const s of uniqueEmails) {
+            await notifyFn({
+              type: 'cancel',
+              booking: {
+                customerEmail: s.email,
+                customerName: s.name,
+                serviceName: sessionData?.serviceName || '',
+                date: sessionData?.date || '',
+                time: sessionData?.time || '',
+                locationName: location?.name || '',
+              },
+              locationData: { name: location?.name, email: location?.email, phone: location?.phone, address: location?.address, country: location?.country },
+            });
+          }
+          showToast(`✓ ${uniqueEmails.length} cancellation notification(s) sent.`);
+        } catch (emailErr) { console.warn('Cancel notification failed:', emailErr); }
+      }
     } catch (err) {
       console.error("Failed to delete session:", err);
       showToast('✗ Failed to delete session.');
     }
     setSessionDeleteConfirm(null);
+    setNotifyOnDelete(false);
   };
 
   useEffect(() => {
@@ -7010,30 +7124,37 @@ function FranchisePortal({ user, onLogout }) {
             {/* Delete Session Confirmation */}
             {sessionDeleteConfirm && (
               <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                onClick={() => setSessionDeleteConfirm(null)}>
+                onClick={() => { setSessionDeleteConfirm(null); setNotifyOnDelete(false); }}>
                 <div style={{ background: '#fff', borderRadius: 16, padding: 32, maxWidth: 420, width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}
                   onClick={e => e.stopPropagation()}>
                   <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--fp-text)', marginBottom: 8 }}>Delete Session</div>
-                  <div style={{ fontSize: 14, color: 'var(--fp-muted)', marginBottom: 24, lineHeight: 1.6 }}>
+                  <div style={{ fontSize: 14, color: 'var(--fp-muted)', marginBottom: 16, lineHeight: 1.6 }}>
                     {sessionDeleteConfirm.recurrenceRuleId
                       ? <>This is a <strong>recurring session</strong>. Would you like to delete just this occurrence or the entire series?</>
                       : <>Are you sure you want to delete the <strong>{sessionDeleteConfirm.serviceName || 'session'}</strong> on <strong>{sessionDeleteConfirm.date}</strong>? This action cannot be undone.</>
                     }
                   </div>
+                  <div style={{ marginBottom: 20, padding: '12px 14px', background: notifyOnDelete ? 'rgba(226,93,37,0.06)' : 'var(--fp-bg)', borderRadius: 10, border: notifyOnDelete ? '1px solid rgba(226,93,37,0.2)' : '1px solid var(--fp-border)' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--fp-text)' }}>
+                      <input type="checkbox" checked={notifyOnDelete} onChange={e => setNotifyOnDelete(e.target.checked)}
+                        style={{ width: 18, height: 18, accentColor: '#E25D25', cursor: 'pointer' }} />
+                      Notify enrolled students of cancellation
+                    </label>
+                  </div>
                   <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                    <button className="btn btn-ghost fp" onClick={() => setSessionDeleteConfirm(null)}>Cancel</button>
+                    <button className="btn btn-ghost fp" onClick={() => { setSessionDeleteConfirm(null); setNotifyOnDelete(false); }}>Cancel</button>
                     {sessionDeleteConfirm.recurrenceRuleId && (
                       <button style={{
                         padding: '10px 16px', borderRadius: 10, border: '1px solid #fecaca', background: '#fff', color: '#dc2626',
                         fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
-                      }} onClick={() => handleDeleteSession(sessionDeleteConfirm.id, 'this')}>
+                      }} onClick={() => handleDeleteSession(sessionDeleteConfirm.id, 'this', notifyOnDelete)}>
                         Delete This Only
                       </button>
                     )}
                     <button style={{
                       padding: '10px 16px', borderRadius: 10, border: 'none', background: '#dc2626', color: '#fff',
                       fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
-                    }} onClick={() => handleDeleteSession(sessionDeleteConfirm.id, sessionDeleteConfirm.recurrenceRuleId ? 'all' : 'this')}>
+                    }} onClick={() => handleDeleteSession(sessionDeleteConfirm.id, sessionDeleteConfirm.recurrenceRuleId ? 'all' : 'this', notifyOnDelete)}>
                       {sessionDeleteConfirm.recurrenceRuleId ? 'Delete Entire Series' : 'Delete'}
                     </button>
                   </div>
