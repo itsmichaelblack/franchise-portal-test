@@ -1214,7 +1214,7 @@ exports.createPaymentLinkPublic = functions.runWith({ secrets: ["STRIPE_SECRET_K
         currency,
         customer_email: customerEmail || undefined,
         payment_method_types: ["card", "au_becs_debit"],
-        success_url: `${PORTAL_URL}?payment_setup=success&sale_id=${saleId || ""}`,
+        success_url: `${PORTAL_URL}?payment_setup=success&session_id={CHECKOUT_SESSION_ID}&sale_id=${saleId || ""}`,
         cancel_url: `${PORTAL_URL}?payment_setup=cancelled`,
         metadata: { saleId: saleId || "", locationId },
       },
@@ -1235,8 +1235,8 @@ exports.savePaymentFromCheckoutPublic = functions.runWith({ secrets: ["STRIPE_SE
   if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
 
   try {
-    const { parentEmail, locationId } = req.body;
-    if (!parentEmail || !locationId) { res.status(400).json({ error: "parentEmail and locationId required." }); return; }
+    const { parentEmail, locationId, sessionId } = req.body;
+    if (!locationId) { res.status(400).json({ error: "locationId required." }); return; }
 
     const db = getFirestore();
     const locationDoc = await db.doc(`locations/${locationId}`).get();
@@ -1247,27 +1247,52 @@ exports.savePaymentFromCheckoutPublic = functions.runWith({ secrets: ["STRIPE_SE
     if (!stripeAccountId) { res.status(400).json({ error: "Stripe not connected." }); return; }
 
     const stripe = requireStripe();
-
-    // Strategy 1: Find customer by email
     let customer = null;
-    const customers = await stripe.customers.list(
-      { email: parentEmail, limit: 1 },
-      { stripeAccount: stripeAccountId }
-    );
-    if (customers.data.length > 0) {
-      customer = customers.data[0];
-    }
+    let setupIntent = null;
 
-    // Strategy 2: Search recent completed checkout sessions if no customer found by email
-    if (!customer) {
-      const sessions = await stripe.checkout.sessions.list(
-        { limit: 10 },
-        { stripeAccount: stripeAccountId }
-      );
-      for (const session of sessions.data) {
-        if (session.mode === "setup" && session.status === "complete" && session.customer) {
+    // Strategy 1: Use session ID to get exact customer and setup intent
+    if (sessionId) {
+      try {
+        const session = await stripe.checkout.sessions.retrieve(
+          sessionId,
+          { expand: ["setup_intent"] },
+          { stripeAccount: stripeAccountId }
+        );
+        if (session.customer) {
           customer = await stripe.customers.retrieve(
             session.customer,
+            { stripeAccount: stripeAccountId }
+          );
+        }
+        if (session.setup_intent && typeof session.setup_intent === "object") {
+          setupIntent = session.setup_intent;
+        }
+      } catch (e) {
+        console.error("Session retrieval error:", e.message);
+      }
+    }
+
+    // Strategy 2: Find customer by email
+    if (!customer && parentEmail) {
+      const customers = await stripe.customers.list(
+        { email: parentEmail, limit: 1 },
+        { stripeAccount: stripeAccountId }
+      );
+      if (customers.data.length > 0) {
+        customer = customers.data[0];
+      }
+    }
+
+    // Strategy 3: Search recent completed checkout sessions
+    if (!customer) {
+      const sessions = await stripe.checkout.sessions.list(
+        { limit: 5 },
+        { stripeAccount: stripeAccountId }
+      );
+      for (const s of sessions.data) {
+        if (s.mode === "setup" && s.status === "complete" && s.customer) {
+          customer = await stripe.customers.retrieve(
+            s.customer,
             { stripeAccount: stripeAccountId }
           );
           break;
@@ -1280,21 +1305,28 @@ exports.savePaymentFromCheckoutPublic = functions.runWith({ secrets: ["STRIPE_SE
       return;
     }
 
-    // Get payment methods (try card first, then BECS)
+    // Get payment method - first try from setup intent, then list
     let pm = null;
-    const cardMethods = await stripe.paymentMethods.list(
-      { customer: customer.id, type: "card" },
-      { stripeAccount: stripeAccountId }
-    );
-    if (cardMethods.data.length > 0) {
-      pm = cardMethods.data[0];
-    } else {
-      const becsMethods = await stripe.paymentMethods.list(
-        { customer: customer.id, type: "au_becs_debit" },
+    if (setupIntent && setupIntent.payment_method) {
+      const pmId = typeof setupIntent.payment_method === "string" ? setupIntent.payment_method : setupIntent.payment_method.id;
+      pm = await stripe.paymentMethods.retrieve(pmId, { stripeAccount: stripeAccountId });
+    }
+
+    if (!pm) {
+      const cardMethods = await stripe.paymentMethods.list(
+        { customer: customer.id, type: "card" },
         { stripeAccount: stripeAccountId }
       );
-      if (becsMethods.data.length > 0) {
-        pm = becsMethods.data[0];
+      if (cardMethods.data.length > 0) {
+        pm = cardMethods.data[0];
+      } else {
+        const becsMethods = await stripe.paymentMethods.list(
+          { customer: customer.id, type: "au_becs_debit" },
+          { stripeAccount: stripeAccountId }
+        );
+        if (becsMethods.data.length > 0) {
+          pm = becsMethods.data[0];
+        }
       }
     }
 
@@ -1318,36 +1350,38 @@ exports.savePaymentFromCheckoutPublic = functions.runWith({ secrets: ["STRIPE_SE
       };
     }
 
-    // Update parent doc directly
-    const parentsSnap = await db.collection("parents")
-      .where("email", "==", parentEmail.toLowerCase())
-      .where("locationId", "==", locationId)
-      .limit(1)
-      .get();
-
-    if (!parentsSnap.empty) {
-      await parentsSnap.docs[0].ref.update({
-        paymentMethod: paymentMethodInfo,
-        stripeCustomerId: customer.id,
-      });
-    }
-
-    // Update sales for this parent at this location
-    const salesSnap = await db.collection("sales")
-      .where("locationId", "==", locationId)
-      .where("parentEmail", "==", parentEmail)
-      .get();
-
-    if (!salesSnap.empty) {
-      const batch = db.batch();
-      salesSnap.docs.forEach((d) => {
-        batch.update(d.ref, {
+    // Update parent doc
+    if (parentEmail) {
+      const parentsSnap = await db.collection("parents")
+        .where("email", "==", parentEmail.toLowerCase())
+        .where("locationId", "==", locationId)
+        .limit(1)
+        .get();
+      if (!parentsSnap.empty) {
+        await parentsSnap.docs[0].ref.update({
           paymentMethod: paymentMethodInfo,
           stripeCustomerId: customer.id,
-          stripeStatus: "connected",
         });
-      });
-      await batch.commit();
+      }
+    }
+
+    // Update sales
+    if (parentEmail) {
+      const salesSnap = await db.collection("sales")
+        .where("locationId", "==", locationId)
+        .where("parentEmail", "==", parentEmail)
+        .get();
+      if (!salesSnap.empty) {
+        const batch = db.batch();
+        salesSnap.docs.forEach((d) => {
+          batch.update(d.ref, {
+            paymentMethod: paymentMethodInfo,
+            stripeCustomerId: customer.id,
+            stripeStatus: "connected",
+          });
+        });
+        await batch.commit();
+      }
     }
 
     res.status(200).json({
