@@ -1117,7 +1117,7 @@ function setCors(res) {
 }
 
 // Public version of createPaymentLink for parent app
-exports.createPaymentLinkPublic = functions.https.onRequest(async (req, res) => {
+exports.createPaymentLinkPublic = functions.runWith({ secrets: ["STRIPE_SECRET_KEY"] }).https.onRequest(async (req, res) => {
   setCors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
@@ -1166,7 +1166,7 @@ exports.createPaymentLinkPublic = functions.https.onRequest(async (req, res) => 
 });
 
 // Public version of savePaymentFromCheckout for parent app
-exports.savePaymentFromCheckoutPublic = functions.https.onRequest(async (req, res) => {
+exports.savePaymentFromCheckoutPublic = functions.runWith({ secrets: ["STRIPE_SECRET_KEY"] }).https.onRequest(async (req, res) => {
   setCors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
