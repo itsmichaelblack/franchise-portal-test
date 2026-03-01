@@ -1437,6 +1437,7 @@ exports.createSubscriptionPublic = functions.runWith({ secrets: ["STRIPE_SECRET_
       locationId, childName, childGrade,
       membershipId, membershipName, membershipCategory,
       basePrice, totalAmount, feeAmount, feeDescription,
+      joiningFee, firstPaymentTotal,
     } = req.body;
 
     console.log("createSubscriptionPublic called:", { parentEmail, locationId, membershipId, basePrice, totalAmount });
@@ -1446,8 +1447,8 @@ exports.createSubscriptionPublic = functions.runWith({ secrets: ["STRIPE_SECRET_
       return;
     }
 
-    const stripe = getStripe();
-    const db = getDb();
+    const stripe = requireStripe();
+    const db = getFirestore();
 
     // Get stripe account ID for this location
     const locSnap = await db.collection("locations").doc(locationId).get();
@@ -1537,6 +1538,18 @@ exports.createSubscriptionPublic = functions.runWith({ secrets: ["STRIPE_SECRET_
       recurring: { interval: "week", interval_count: 1 },
     }, { stripeAccount: stripeAccountId });
 
+    // Add joining fee as one-time invoice item (will be included on first invoice)
+    const joiningFeeAmount = parseFloat(joiningFee) || 0;
+    if (joiningFeeAmount > 0) {
+      await stripe.invoiceItems.create({
+        customer: customer.id,
+        amount: Math.round(joiningFeeAmount * 100),
+        currency: "aud",
+        description: "Joining fee (one-time)",
+      }, { stripeAccount: stripeAccountId });
+      console.log("Joining fee invoice item created:", joiningFeeAmount);
+    }
+
     // Create subscription — charge immediately if we have a PM
     const subscriptionParams = {
       customer: customer.id,
@@ -1578,6 +1591,8 @@ exports.createSubscriptionPublic = functions.runWith({ secrets: ["STRIPE_SECRET_
       weeklyAmount: totalAmount,
       feeAmount: feeAmount || "0",
       feeDescription: feeDescription || "",
+      joiningFee: joiningFeeAmount > 0 ? joiningFee : "0",
+      firstPaymentTotal: firstPaymentTotal || totalAmount,
       activationDate: today,
       firstPaymentDate: today,
       billingFrequency: "weekly",
