@@ -1269,8 +1269,17 @@ exports.savePaymentFromCheckoutPublic = functions.runWith({ secrets: ["STRIPE_SE
           );
           console.log("Customer from session:", customer.id, customer.email);
         }
-        if (session.setup_intent && typeof session.setup_intent === "object") {
-          setupIntent = session.setup_intent;
+        // Get setup intent - may be expanded object or just ID string
+        if (session.setup_intent) {
+          if (typeof session.setup_intent === "object") {
+            setupIntent = session.setup_intent;
+          } else {
+            // It's a string ID, retrieve it
+            setupIntent = await stripe.setupIntents.retrieve(
+              session.setup_intent,
+              { stripeAccount: stripeAccountId }
+            );
+          }
           console.log("SetupIntent:", setupIntent.id, "payment_method:", setupIntent.payment_method);
         }
       } catch (e) {
@@ -1309,13 +1318,12 @@ exports.savePaymentFromCheckoutPublic = functions.runWith({ secrets: ["STRIPE_SE
     }
 
     if (!customer) {
-      console.error("NO CUSTOMER FOUND by any strategy");
-      res.status(404).json({ error: "No Stripe customer found. Please try again." });
-      return;
+      console.log("No customer found - will try to get PM from setup intent directly");
+    } else {
+      console.log("Customer found:", customer.id);
     }
-    console.log("Customer found:", customer.id);
 
-    // Get payment method - first try from setup intent, then list
+    // Get payment method - first try from setup intent, then list from customer
     let pm = null;
     if (setupIntent && setupIntent.payment_method) {
       const pmId = typeof setupIntent.payment_method === "string" ? setupIntent.payment_method : setupIntent.payment_method.id;
@@ -1323,7 +1331,7 @@ exports.savePaymentFromCheckoutPublic = functions.runWith({ secrets: ["STRIPE_SE
       pm = await stripe.paymentMethods.retrieve(pmId, { stripeAccount: stripeAccountId });
     }
 
-    if (!pm) {
+    if (!pm && customer) {
       const cardMethods = await stripe.paymentMethods.list(
         { customer: customer.id, type: "card" },
         { stripeAccount: stripeAccountId }
@@ -1362,6 +1370,7 @@ exports.savePaymentFromCheckoutPublic = functions.runWith({ secrets: ["STRIPE_SE
     }
 
     // Update parent doc
+    const customerId = customer ? customer.id : null;
     if (parentEmail) {
       const parentsSnap = await db.collection("parents")
         .where("email", "==", parentEmail.toLowerCase())
@@ -1369,10 +1378,9 @@ exports.savePaymentFromCheckoutPublic = functions.runWith({ secrets: ["STRIPE_SE
         .limit(1)
         .get();
       if (!parentsSnap.empty) {
-        await parentsSnap.docs[0].ref.update({
-          paymentMethod: paymentMethodInfo,
-          stripeCustomerId: customer.id,
-        });
+        const updateData = { paymentMethod: paymentMethodInfo };
+        if (customerId) updateData.stripeCustomerId = customerId;
+        await parentsSnap.docs[0].ref.update(updateData);
       }
     }
 
@@ -1385,22 +1393,21 @@ exports.savePaymentFromCheckoutPublic = functions.runWith({ secrets: ["STRIPE_SE
       if (!salesSnap.empty) {
         const batch = db.batch();
         salesSnap.docs.forEach((d) => {
-          batch.update(d.ref, {
-            paymentMethod: paymentMethodInfo,
-            stripeCustomerId: customer.id,
-            stripeStatus: "connected",
-          });
+          const updateData = { paymentMethod: paymentMethodInfo, stripeStatus: "connected" };
+          if (customerId) updateData.stripeCustomerId = customerId;
+          batch.update(d.ref, updateData);
         });
         await batch.commit();
       }
     }
 
+    console.log("SUCCESS! PM saved:", paymentMethodInfo);
     res.status(200).json({
       success: true,
       last4: paymentMethodInfo.last4,
       brand: paymentMethodInfo.brand,
       type: paymentMethodInfo.type || "card",
-      customerId: customer.id,
+      customerId: customerId || "",
     });
   } catch (e) {
     console.error("savePaymentFromCheckoutPublic error:", e);
