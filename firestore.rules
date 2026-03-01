@@ -170,8 +170,8 @@ service cloud.firestore {
     match /sales/{saleId} {
       allow read: if true;
       allow create: if true;
-      allow create, update, delete: if isAuth();
-      allow create, update, delete: if isAdmin();
+      allow update: if true;
+      allow delete: if isAdmin();
     }
 
     // ── Recurrence Rules collection ─────────────────────────────────────────
