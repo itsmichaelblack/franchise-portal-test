@@ -642,7 +642,69 @@ exports.sendSessionNotification = functions.https.onCall(async (data, context) =
     if (success) sent++;
   }
 
-  return { success: sent > 0, sent, total: emails.size };
+  // Also send push notifications to parents who have sessionUpdates enabled
+  let pushSent = 0;
+  try {
+    const db = getFirestore();
+    const messaging = getMessaging();
+
+    // Collect parent emails from the booking
+    const parentEmails = [...emails];
+
+    // Also collect from students subcollection if booking has students
+    if (booking.id) {
+      try {
+        const studentsSnap = await db.collection("bookings").doc(booking.id).collection("students").get();
+        studentsSnap.docs.forEach(s => {
+          const pe = s.data().parentEmail;
+          if (pe) parentEmails.push(pe.toLowerCase().trim());
+        });
+      } catch (e) { /* ignore if no students subcollection */ }
+    }
+
+    // Deduplicate
+    const uniqueEmails = [...new Set(parentEmails)];
+
+    // Find parent docs with these emails that have sessionUpdates enabled and fcmToken
+    for (const email of uniqueEmails) {
+      const parentsSnap = await db.collection("parents")
+        .where("email", "==", email)
+        .limit(1)
+        .get();
+
+      if (parentsSnap.empty) continue;
+      const parent = parentsSnap.docs[0].data();
+
+      // Check if sessionUpdates is enabled (default true) and has token
+      if (parent.notifications?.sessionUpdates === false) continue;
+      if (!parent.fcmToken) continue;
+
+      const pushTitle = type === "cancel"
+        ? `Session Cancelled — ${mergeData.className}`
+        : `Session Rescheduled — ${mergeData.className}`;
+      const pushBody = type === "cancel"
+        ? `Your session on ${mergeData.bookingDate} has been cancelled.`
+        : `Your session has been moved to ${mergeData.bookingDate} at ${mergeData.bookingTime}.`;
+
+      try {
+        await messaging.send({
+          token: parent.fcmToken,
+          notification: { title: pushTitle, body: pushBody },
+          android: { notification: { sound: "default", channelId: "session_updates" } },
+          apns: { payload: { aps: { sound: "default", badge: 1 } } },
+        });
+        pushSent++;
+      } catch (e) {
+        if (e.code === "messaging/invalid-registration-token" || e.code === "messaging/registration-token-not-registered") {
+          db.doc(`parents/${parentsSnap.docs[0].id}`).update({ fcmToken: null }).catch(() => {});
+        }
+      }
+    }
+  } catch (e) {
+    console.error("Push notification error in sendSessionNotification:", e);
+  }
+
+  return { success: sent > 0, sent, pushSent, total: emails.size };
 });
 
 // ── Callable: Seed default email templates ───────────────────────────────
@@ -2461,3 +2523,124 @@ exports.sendPushNotification = functions.https.onCall(async (data, context) => {
 
   return { success: true, sent, failed, totalTargeted: tokens.length };
 });
+
+// ── Scheduled: Send booking reminder push notifications (24hr + 1hr before) ──
+exports.sendBookingReminders = functions.pubsub
+  .schedule("every 30 minutes")
+  .timeZone("Australia/Sydney")
+  .onRun(async () => {
+    const db = getFirestore();
+    const messaging = getMessaging();
+
+    const now = new Date();
+    let totalSent = 0;
+
+    // Check for sessions happening in ~1 hour and ~24 hours
+    // We check a 30-minute window since the function runs every 30 mins
+    const windows = [
+      { label: "1hr", offsetMs: 60 * 60 * 1000, rangeMs: 15 * 60 * 1000 },
+      { label: "24hr", offsetMs: 24 * 60 * 60 * 1000, rangeMs: 15 * 60 * 1000 },
+    ];
+
+    for (const win of windows) {
+      const targetTime = new Date(now.getTime() + win.offsetMs);
+      const targetDate = targetTime.toISOString().split("T")[0]; // YYYY-MM-DD
+      const targetHour = targetTime.getHours();
+      const targetMin = targetTime.getMinutes();
+
+      // Query bookings on the target date with status 'scheduled'
+      const bookingsSnap = await db.collection("bookings")
+        .where("date", "==", targetDate)
+        .where("status", "==", "scheduled")
+        .get();
+
+      for (const bookingDoc of bookingsSnap.docs) {
+        const booking = bookingDoc.data();
+        if (!booking.time) continue;
+
+        // Check if booking time falls within the window
+        const [bh, bm] = booking.time.split(":").map(Number);
+        const bookingMinutes = bh * 60 + bm;
+        const targetMinutes = targetHour * 60 + targetMin;
+        const diff = Math.abs(bookingMinutes - targetMinutes);
+        if (diff > 30) continue; // Outside the 30-min window
+
+        // Skip if reminder already sent for this window
+        const reminderKey = `reminder_${win.label}_sent`;
+        if (booking[reminderKey]) continue;
+
+        // Get students enrolled in this booking
+        const studentsSnap = await db.collection("bookings").doc(bookingDoc.id).collection("students").get();
+        const parentEmails = new Set();
+
+        // For assessment bookings, use customerEmail/parentEmail directly
+        if (booking.customerEmail) parentEmails.add(booking.customerEmail.toLowerCase().trim());
+        if (booking.parentEmail) parentEmails.add(booking.parentEmail.toLowerCase().trim());
+
+        // For session bookings, get parent emails from students
+        studentsSnap.docs.forEach(s => {
+          const pe = s.data().parentEmail;
+          if (pe) parentEmails.add(pe.toLowerCase().trim());
+        });
+
+        if (parentEmails.size === 0) continue;
+
+        // Format time for display
+        const fmtTime = (t) => {
+          const [h, m] = t.split(":").map(Number);
+          return `${h > 12 ? h - 12 : h === 0 ? 12 : h}:${String(m).padStart(2, "0")} ${h >= 12 ? "PM" : "AM"}`;
+        };
+
+        const dateObj = new Date(booking.date + "T00:00:00");
+        const formattedDate = dateObj.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long" });
+        const sessionName = booking.serviceName || booking.className || "your session";
+        const timeLabel = fmtTime(booking.time);
+
+        const pushTitle = win.label === "1hr"
+          ? `Starting soon — ${sessionName}`
+          : `Tomorrow — ${sessionName}`;
+        const pushBody = win.label === "1hr"
+          ? `${sessionName} starts at ${timeLabel} today.`
+          : `${sessionName} is on ${formattedDate} at ${timeLabel}.`;
+
+        // Send push to each parent who has bookingReminders enabled
+        for (const email of parentEmails) {
+          try {
+            const parentsSnap = await db.collection("parents")
+              .where("email", "==", email)
+              .limit(1)
+              .get();
+
+            if (parentsSnap.empty) continue;
+            const parent = parentsSnap.docs[0].data();
+
+            // Check bookingReminders preference (default true)
+            if (parent.notifications?.bookingReminders === false) continue;
+            if (!parent.fcmToken) continue;
+
+            await messaging.send({
+              token: parent.fcmToken,
+              notification: { title: pushTitle, body: pushBody },
+              android: { notification: { sound: "default", channelId: "booking_reminders" } },
+              apns: { payload: { aps: { sound: "default", badge: 1 } } },
+            });
+            totalSent++;
+          } catch (e) {
+            if (e.code === "messaging/invalid-registration-token" || e.code === "messaging/registration-token-not-registered") {
+              // Clean up invalid token
+              const parentsSnap2 = await db.collection("parents").where("email", "==", email).limit(1).get();
+              if (!parentsSnap2.empty) {
+                db.doc(`parents/${parentsSnap2.docs[0].id}`).update({ fcmToken: null }).catch(() => {});
+              }
+            }
+          }
+        }
+
+        // Mark reminder as sent on the booking
+        await db.doc(`bookings/${bookingDoc.id}`).update({ [reminderKey]: true });
+      }
+    }
+
+    console.log(`Booking reminders: sent ${totalSent} push notification(s).`);
+    return null;
+  });
