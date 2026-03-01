@@ -6585,6 +6585,40 @@ function FranchisePortal({ user, onLogout }) {
     return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
   };
 
+  // Compute overlap columns for bookings that overlap in time within a day
+  const computeOverlapColumns = (dayBookings) => {
+    const items = dayBookings.map(b => {
+      const [bh, bm] = b.time.split(':').map(Number);
+      const startMin = bh * 60 + bm;
+      const svc = b.serviceId ? locationServices.find(s => s.id === b.serviceId) : null;
+      const dur = b.duration ? Number(b.duration) : (svc?.duration ? Number(svc.duration) : 40);
+      return { id: b.id, startMin, endMin: startMin + dur };
+    });
+    items.sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin);
+    const columns = {};
+    const active = [];
+    items.forEach(item => {
+      const stillActive = active.filter(a => a.endMin > item.startMin);
+      const usedCols = new Set(stillActive.map(a => a.col));
+      let col = 0;
+      while (usedCols.has(col)) col++;
+      stillActive.push({ id: item.id, endMin: item.endMin, col });
+      columns[item.id] = { col, totalCols: 1 };
+      active.length = 0;
+      active.push(...stillActive);
+    });
+    items.forEach(item => {
+      const overlapping = items.filter(other =>
+        other.startMin < item.endMin && other.endMin > item.startMin
+      );
+      const maxCol = Math.max(...overlapping.map(o => columns[o.id].col)) + 1;
+      overlapping.forEach(o => {
+        columns[o.id].totalCols = Math.max(columns[o.id].totalCols, maxCol);
+      });
+    });
+    return columns;
+  };
+
   // Current time in the franchise location's timezone
   const nowInTz = new Date(new Date().toLocaleString('en-US', { timeZone: timezone }));
   const currentHour = nowInTz.getHours();
@@ -6681,6 +6715,14 @@ function FranchisePortal({ user, onLogout }) {
               const weekStart = weekDays[0].toISOString().split('T')[0];
               const weekEnd = weekDays[6].toISOString().split('T')[0];
               const weekBookings = filteredBookings.filter(b => b.date >= weekStart && b.date <= weekEnd);
+
+              // Build a map: dateStr -> { bookingId -> { col, totalCols } }
+              const overlapMap = {};
+              weekDays.forEach(d => {
+                const ds = d.toISOString().split('T')[0];
+                const dayBks = weekBookings.filter(b => b.date === ds);
+                overlapMap[ds] = computeOverlapColumns(dayBks);
+              });
 
               const hours = [];
               for (let h = 8; h <= 21; h++) hours.push(h);
@@ -6881,12 +6923,16 @@ function FranchisePortal({ user, onLogout }) {
                                     const duration = b.duration ? Number(b.duration) : (svcMatch?.duration ? Number(svcMatch.duration) : 40);
                                     const topOffset = (bm / 60) * 56; // minutes into the hour -> px
                                     const heightPx = Math.max((duration / 60) * 56, 24); // duration in px, min 24px
+                                    // Overlap column positioning
+                                    const overlap = overlapMap[dateStr]?.[b.id] || { col: 0, totalCols: 1 };
+                                    const colWidth = 100 / overlap.totalCols;
+                                    const colLeft = overlap.col * colWidth;
                                     return (
                                       <div key={bi} onClick={(e) => { e.stopPropagation(); setSelectedBooking(b); }} style={{
                                         position: 'absolute',
                                         top: topOffset + 2,
-                                        left: 3,
-                                        right: 3,
+                                        left: `calc(${colLeft}% + 2px)`,
+                                        width: `calc(${colWidth}% - 4px)`,
                                         height: heightPx - 4,
                                         background: b.status === 'cancelled' ? 'linear-gradient(135deg, #d1d5db, #9ca3af)' : isSession ? 'linear-gradient(135deg, #3d9695, #6DCBCA)' : 'linear-gradient(135deg, #E25D25, #f0845a)',
                                         opacity: b.status === 'cancelled' ? 0.5 : 1,
@@ -6921,6 +6967,7 @@ function FranchisePortal({ user, onLogout }) {
                     viewDay.setDate(viewDay.getDate() + calendarDayOffset);
                     const dateStr = viewDay.toISOString().split('T')[0];
                     const dayBookings = filteredBookings.filter(b => b.date === dateStr);
+                    const dayOverlapMap = computeOverlapColumns(dayBookings);
                     const jsDow = viewDay.getDay();
                     const availIdx = jsDow === 0 ? 6 : jsDow - 1;
                     const dayAvail = availability[availIdx];
@@ -6974,7 +7021,10 @@ function FranchisePortal({ user, onLogout }) {
                                     const heightPx = Math.max((duration / 60) * 64, 28);
                                     return (
                                       <div key={bi} onClick={(e) => { e.stopPropagation(); setSelectedBooking(b); }} style={{
-                                        position: 'absolute', top: topOffset + 2, left: 4, right: 4, height: heightPx - 4,
+                                        position: 'absolute', top: topOffset + 2,
+                                        left: `calc(${(dayOverlapMap[b.id]?.col || 0) * (100 / (dayOverlapMap[b.id]?.totalCols || 1))}% + 3px)`,
+                                        width: `calc(${100 / (dayOverlapMap[b.id]?.totalCols || 1)}% - 6px)`,
+                                        height: heightPx - 4,
                                         background: b.status === 'cancelled' ? 'linear-gradient(135deg, #d1d5db, #9ca3af)' : isSession ? 'linear-gradient(135deg, #3d9695, #6DCBCA)' : 'linear-gradient(135deg, #E25D25, #f0845a)',
                                         opacity: b.status === 'cancelled' ? 0.5 : 1,
                                         color: '#fff', borderRadius: 8, padding: '6px 12px', fontSize: 13,
