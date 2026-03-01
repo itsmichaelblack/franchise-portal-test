@@ -2679,6 +2679,7 @@ function ServiceModal({ editing, onSave, onClose }) {
   const [imagePreview, setImagePreview] = useState(editing?.imageUrl || '');
   const [selectedCountries, setSelectedCountries] = useState(editing?.countries || []);
   const [selectedStates, setSelectedStates] = useState(editing?.availability || []);
+  const [allowedMemberships, setAllowedMemberships] = useState(editing?.allowedMemberships || []);
   const [saving, setSaving] = useState(false);
 
   const fileInputRef = useRef(null);
@@ -2728,6 +2729,7 @@ function ServiceModal({ editing, onSave, onClose }) {
       imageUrl: finalImageUrl,
       countries: selectedCountries,
       availability: selectedStates,
+      allowedMemberships,
     }, editing?.id);
     setSaving(false);
   };
@@ -2882,6 +2884,40 @@ function ServiceModal({ editing, onSave, onClose }) {
               )}
             </div>
           ))}
+        </div>
+
+        {/* Allowed Memberships */}
+        <div className="form-group">
+          <div className="form-label hq">Allowed Memberships</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>Select which membership plans can book this service. If none selected, all memberships can book.</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {[
+              { id: 'foundation_phase_1', name: 'Foundation Phase 1' },
+              { id: 'foundation_phase_2', name: 'Foundation Phase 2' },
+              { id: 'foundation_phase_3', name: 'Foundation Phase 3' },
+              { id: 'membership_1_session', name: 'Membership (1 Session)' },
+              { id: 'membership_2_sessions', name: 'Membership (2 Sessions)' },
+              { id: 'membership_unlimited', name: 'Membership (Unlimited)' },
+              { id: 'one_on_one_primary', name: 'One-on-One (Primary)' },
+              { id: 'one_on_one_secondary', name: 'One-on-One (Secondary)' },
+              { id: 'camp_coding', name: 'Coding Camp' },
+              { id: 'camp_public_speaking', name: 'Public Speaking Camp' },
+              { id: 'camp_creative_writing', name: 'Creative Writing Camp' },
+              { id: 'camp_learn_ai', name: 'Learn AI Camp' },
+              { id: 'camp_speed_typing', name: 'Speed Typing Camp' },
+            ].map(m => (
+              <button key={m.id} type="button"
+                onClick={() => setAllowedMemberships(prev => prev.includes(m.id) ? prev.filter(x => x !== m.id) : [...prev, m.id])}
+                style={{
+                  padding: '6px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                  border: allowedMemberships.includes(m.id) ? '2px solid var(--orange)' : '2px solid var(--border)',
+                  background: allowedMemberships.includes(m.id) ? 'var(--orange-pale)' : 'transparent',
+                  color: allowedMemberships.includes(m.id) ? 'var(--orange)' : 'var(--text-muted)',
+                }}>
+                {m.name}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="modal-actions">
