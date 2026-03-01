@@ -1235,8 +1235,8 @@ exports.savePaymentFromCheckoutPublic = functions.runWith({ secrets: ["STRIPE_SE
   if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
 
   try {
-    const { parentEmail, locationId, sessionId } = req.body;
-    console.log("savePaymentFromCheckoutPublic called:", { parentEmail, locationId, sessionId: sessionId || "NONE" });
+    const { parentEmail, locationId, sessionId, oldPaymentMethodId } = req.body;
+    console.log("savePaymentFromCheckoutPublic called:", { parentEmail, locationId, sessionId: sessionId || "NONE", oldPaymentMethodId: oldPaymentMethodId || "NONE" });
     if (!locationId) { res.status(400).json({ error: "locationId required." }); return; }
 
     const db = getFirestore();
@@ -1398,6 +1398,16 @@ exports.savePaymentFromCheckoutPublic = functions.runWith({ secrets: ["STRIPE_SE
           batch.update(d.ref, updateData);
         });
         await batch.commit();
+      }
+    }
+
+    // Detach old payment method from Stripe if replacing
+    if (oldPaymentMethodId) {
+      try {
+        await stripe.paymentMethods.detach(oldPaymentMethodId, { stripeAccount: stripeAccountId });
+        console.log("Detached old PM:", oldPaymentMethodId);
+      } catch (detachErr) {
+        console.error("Failed to detach old PM (non-fatal):", detachErr.message);
       }
     }
 
