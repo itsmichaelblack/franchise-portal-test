@@ -1576,7 +1576,7 @@ function AuthPage({ portal, onLogin, onBack }) {
 function HQPortal({ user, onLogout }) {
   const [page, setPage] = useState(() => {
     const saved = localStorage.getItem('hq_portal_page');
-    return saved && ['locations', 'users', 'services', 'settings'].includes(saved) ? saved : 'locations';
+    return saved && ['locations', 'users', 'services', 'settings', 'email_templates'].includes(saved) ? saved : 'locations';
   });
 
   // Persist page choice
@@ -1621,6 +1621,237 @@ function HQPortal({ user, onLogout }) {
   const [editingPolicy, setEditingPolicy] = useState(null); // null | 'membershipPolicy' | 'termsAndConditions' | 'privacyPolicy'
   const quillRef = useRef(null);
   const quillInstanceRef = useRef(null);
+
+  // ── Email Templates state ──
+  const [emailTemplates, setEmailTemplates] = useState([]);
+  const [emailTemplatesLoading, setEmailTemplatesLoading] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState(null);
+  const [emailTemplateTab, setEmailTemplateTab] = useState('hq_users');
+  const [templateSearch, setTemplateSearch] = useState('');
+  const [templatePreview, setTemplatePreview] = useState(null);
+  const [testEmailAddress, setTestEmailAddress] = useState('');
+  const [testEmailSending, setTestEmailSending] = useState(false);
+  const [templateSaving, setTemplateSaving] = useState(false);
+  const [templateSeeding, setTemplateSeeding] = useState(false);
+  const emailQuillRef = useRef(null);
+  const emailQuillInstanceRef = useRef(null);
+  const [countryOverrideMode, setCountryOverrideMode] = useState(null); // null | 'AU' | 'NZ' | 'UK'
+  const [editingTemplateForm, setEditingTemplateForm] = useState(null); // form state for editing
+
+  // Email template category definitions
+  const EMAIL_TEMPLATE_CATEGORIES = [
+    { key: 'hq_users', label: 'HQ Users', icon: icons.users },
+    { key: 'staff', label: 'Staff', icon: icons.users },
+    { key: 'franchise_partner', label: 'Franchise Partner', icon: icons.building },
+    { key: 'customer_new', label: 'Customer (New)', icon: icons.mail },
+    { key: 'customer_existing', label: 'Customer (Existing)', icon: icons.mail },
+  ];
+
+  const COUNTRIES = [
+    { code: 'AU', label: 'Australia' },
+    { code: 'NZ', label: 'New Zealand' },
+    { code: 'UK', label: 'United Kingdom' },
+  ];
+
+  // Load email templates
+  useEffect(() => {
+    if (page !== 'email_templates' || !isMaster) return;
+    const loadTemplates = async () => {
+      setEmailTemplatesLoading(true);
+      try {
+        const { collection, getDocs } = await import('firebase/firestore');
+        const { db } = await import('./firebase.js');
+        const snap = await getDocs(collection(db, 'email_templates'));
+        setEmailTemplates(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (e) { console.error("Failed to load email templates:", e); }
+      setEmailTemplatesLoading(false);
+    };
+    loadTemplates();
+  }, [page, isMaster]);
+
+  // Seed default templates
+  const handleSeedTemplates = async () => {
+    setTemplateSeeding(true);
+    try {
+      const { getFunctions, httpsCallable } = await import('firebase/functions');
+      const fns = getFunctions();
+      const seedFn = httpsCallable(fns, 'seedEmailTemplates');
+      const result = await seedFn({ overwrite: false });
+      showToast(`✓ Seeded ${result.data.seeded} of ${result.data.total} templates.`);
+      // Reload
+      const { collection, getDocs } = await import('firebase/firestore');
+      const { db } = await import('./firebase.js');
+      const snap = await getDocs(collection(db, 'email_templates'));
+      setEmailTemplates(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch (e) {
+      console.error("Failed to seed templates:", e);
+      showToast('Failed to seed templates. Check console.');
+    }
+    setTemplateSeeding(false);
+  };
+
+  // Save a template (global or country override)
+  const handleSaveTemplate = async (templateKey, formData, countryCode) => {
+    setTemplateSaving(true);
+    try {
+      const { doc, getDoc, setDoc, serverTimestamp } = await import('firebase/firestore');
+      const { db } = await import('./firebase.js');
+
+      const docKey = countryCode ? `${templateKey}_${countryCode}` : templateKey;
+      const docRef = doc(db, 'email_templates', docKey);
+
+      // Get current version for history
+      const existing = await getDoc(docRef);
+      let versions = [];
+      if (existing.exists()) {
+        const prev = existing.data();
+        versions = prev.versions || [];
+        // Add current version to history
+        versions = [{
+          subject: prev.subject,
+          body: prev.body,
+          headerTitle: prev.headerTitle,
+          headerSubtitle: prev.headerSubtitle,
+          headerBg: prev.headerBg,
+          editedBy: user.name || user.email,
+          editedAt: new Date().toISOString(),
+        }, ...versions].slice(0, 50); // Keep last 50 versions
+      }
+
+      const saveData = {
+        ...formData,
+        versions,
+        scope: countryCode ? countryCode : 'global',
+        updatedAt: new Date().toISOString(),
+        updatedBy: user.name || user.email,
+      };
+
+      if (countryCode && !existing.exists()) {
+        // New country override — copy metadata from global
+        const globalDoc = await getDoc(doc(db, 'email_templates', templateKey));
+        if (globalDoc.exists()) {
+          const g = globalDoc.data();
+          saveData.key = templateKey;
+          saveData.category = g.category;
+          saveData.name = g.name + ` (${countryCode})`;
+          saveData.description = g.description;
+          saveData.mergeTags = g.mergeTags;
+          saveData.enabled = true;
+          saveData.createdAt = new Date().toISOString();
+        }
+      }
+
+      await setDoc(docRef, saveData, { merge: true });
+      showToast(`✓ Template saved${countryCode ? ` for ${countryCode}` : ''}.`);
+
+      // Reload templates
+      const { collection, getDocs } = await import('firebase/firestore');
+      const snap = await getDocs(collection(db, 'email_templates'));
+      setEmailTemplates(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+
+      if (!countryCode) {
+        setEditingTemplate(null);
+        setEditingTemplateForm(null);
+      }
+      setCountryOverrideMode(null);
+    } catch (e) {
+      console.error("Failed to save template:", e);
+      showToast('Failed to save template.');
+    }
+    setTemplateSaving(false);
+  };
+
+  // Revert to a previous version
+  const handleRevertTemplate = async (templateKey, versionIndex) => {
+    const template = emailTemplates.find(t => t.key === templateKey || t.id === templateKey);
+    if (!template || !template.versions || !template.versions[versionIndex]) return;
+    const version = template.versions[versionIndex];
+    setEditingTemplateForm({
+      subject: version.subject,
+      body: version.body,
+      headerTitle: version.headerTitle || '',
+      headerSubtitle: version.headerSubtitle || '',
+      headerBg: version.headerBg || '',
+    });
+    // Update Quill
+    if (emailQuillInstanceRef.current) {
+      emailQuillInstanceRef.current.root.innerHTML = version.body || '';
+    }
+    showToast(`Reverted to version from ${new Date(version.editedAt).toLocaleDateString()}. Click Save to apply.`);
+  };
+
+  // Delete a country override
+  const handleDeleteCountryOverride = async (templateKey, countryCode) => {
+    try {
+      const { doc, deleteDoc } = await import('firebase/firestore');
+      const { db } = await import('./firebase.js');
+      await deleteDoc(doc(db, 'email_templates', `${templateKey}_${countryCode}`));
+      showToast(`✓ ${countryCode} override deleted. Will use global template.`);
+      const { collection, getDocs } = await import('firebase/firestore');
+      const snap = await getDocs(collection(db, 'email_templates'));
+      setEmailTemplates(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setCountryOverrideMode(null);
+    } catch (e) {
+      console.error("Failed to delete override:", e);
+      showToast('Failed to delete override.');
+    }
+  };
+
+  // Send test email
+  const handleSendTestEmail = async (templateKey) => {
+    if (!testEmailAddress) { showToast('Enter a test email address.'); return; }
+    setTestEmailSending(true);
+    try {
+      const { getFunctions, httpsCallable } = await import('firebase/functions');
+      const fns = getFunctions();
+      const sendFn = httpsCallable(fns, 'sendTestEmail');
+      await sendFn({ templateKey, toEmail: testEmailAddress });
+      showToast(`✓ Test email sent to ${testEmailAddress}`);
+    } catch (e) {
+      console.error("Failed to send test email:", e);
+      showToast('Failed to send test email.');
+    }
+    setTestEmailSending(false);
+  };
+
+  // Init Quill for email template editing
+  const initEmailQuill = (template) => {
+    setTimeout(() => {
+      if (emailQuillRef.current && !emailQuillInstanceRef.current && window.Quill) {
+        emailQuillInstanceRef.current = new window.Quill(emailQuillRef.current, {
+          theme: 'snow',
+          modules: {
+            toolbar: [
+              [{ 'header': [1, 2, 3, false] }],
+              ['bold', 'italic', 'underline', 'strike'],
+              [{ 'color': [] }, { 'background': [] }],
+              [{ 'list': 'ordered' }, { 'list': 'bullet' }],
+              [{ 'align': [] }],
+              ['link', 'image'],
+              ['clean'],
+            ],
+          },
+        });
+        emailQuillInstanceRef.current.root.innerHTML = template?.body || '';
+      }
+    }, 100);
+  };
+
+  const destroyEmailQuill = () => {
+    emailQuillInstanceRef.current = null;
+  };
+
+  // Get templates filtered by category + search
+  const getFilteredTemplates = (category) => {
+    return emailTemplates
+      .filter(t => t.category === category && t.scope === 'global')
+      .filter(t => !templateSearch || t.name?.toLowerCase().includes(templateSearch.toLowerCase()) || t.description?.toLowerCase().includes(templateSearch.toLowerCase()));
+  };
+
+  // Get country override for a template
+  const getCountryOverride = (templateKey, countryCode) => {
+    return emailTemplates.find(t => t.id === `${templateKey}_${countryCode}`);
+  };
 
   // Services
   const [services, setServices] = useState([]);
@@ -1948,6 +2179,11 @@ function HQPortal({ user, onLogout }) {
           <button className={`nav-item ${page === 'services' ? 'active' : ''}`} onClick={() => setPagePersist('services')}>
             <Icon path={icons.star} size={16} /> Services
           </button>
+          {isMaster && (
+            <button className={`nav-item ${page === 'email_templates' ? 'active' : ''}`} onClick={() => setPagePersist('email_templates')}>
+              <Icon path={icons.mail} size={16} /> Email Templates
+            </button>
+          )}
           <button className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => setPagePersist('settings')}>
             <Icon path={icons.clock} size={16} /> Settings
           </button>
@@ -2361,6 +2597,430 @@ function HQPortal({ user, onLogout }) {
           })()}
         </>
       )}
+
+      {/* Email Templates Page */}
+      {page === 'email_templates' && isMaster && (() => {
+        const filteredTemplates = getFilteredTemplates(emailTemplateTab);
+        const editingTpl = editingTemplate ? emailTemplates.find(t => t.id === editingTemplate || t.key === editingTemplate) : null;
+
+        return (<>
+          <div className="page-header">
+            <div className="page-header-left">
+              <div className="page-title">{editingTpl ? '← Edit Template' : 'Email Templates'}</div>
+              <div className="page-desc">{editingTpl ? editingTpl.name : 'Manage email templates sent across the network. Templates are mandatory for all locations.'}</div>
+            </div>
+            {!editingTpl && (
+              <div className="page-header-right">
+                <button className="btn btn-ghost hq" onClick={handleSeedTemplates} disabled={templateSeeding} style={{ fontSize: 12 }}>
+                  <Icon path={icons.plus} size={14} /> {templateSeeding ? 'Seeding...' : 'Seed Defaults'}
+                </button>
+              </div>
+            )}
+            {editingTpl && (
+              <div className="page-header-right">
+                <button className="btn btn-ghost hq" onClick={() => { setEditingTemplate(null); setEditingTemplateForm(null); destroyEmailQuill(); setCountryOverrideMode(null); setTemplatePreview(null); }} style={{ fontSize: 12 }}>
+                  <Icon path={icons.x} size={14} /> Cancel
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* ── Template List View ── */}
+          {!editingTpl && (<>
+            {/* Category tabs */}
+            <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid var(--border)', marginBottom: 20, flexWrap: 'wrap' }}>
+              {EMAIL_TEMPLATE_CATEGORIES.map(cat => (
+                <button key={cat.key} onClick={() => setEmailTemplateTab(cat.key)} style={{
+                  padding: '12px 16px', fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+                  border: 'none', borderBottom: emailTemplateTab === cat.key ? '2px solid var(--orange)' : '2px solid transparent',
+                  background: 'none', color: emailTemplateTab === cat.key ? 'var(--orange)' : 'var(--text-muted)',
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, marginBottom: -2,
+                  transition: 'color 0.15s, border-color 0.15s', whiteSpace: 'nowrap',
+                }}>
+                  <Icon path={cat.icon} size={13} /> {cat.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Search */}
+            <div style={{ marginBottom: 16 }}>
+              <input
+                type="text" placeholder="Search templates..." value={templateSearch}
+                onChange={e => setTemplateSearch(e.target.value)}
+                style={{
+                  width: '100%', maxWidth: 320, padding: '10px 14px', borderRadius: 8,
+                  border: '1px solid var(--border)', fontSize: 13, fontFamily: 'inherit',
+                  background: 'var(--card)', color: 'var(--text)',
+                }}
+              />
+            </div>
+
+            {emailTemplatesLoading ? (
+              <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>Loading templates...</div>
+            ) : filteredTemplates.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
+                <Icon path={icons.mail} size={40} /><br /><br />
+                <div style={{ fontSize: 15, fontWeight: 600 }}>No templates found</div>
+                <div style={{ fontSize: 13, marginTop: 8 }}>Click "Seed Defaults" to create the default email templates.</div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {filteredTemplates.map(tpl => {
+                  const hasOverrides = COUNTRIES.some(c => emailTemplates.find(t => t.id === `${tpl.key}_${c.code}`));
+                  return (
+                    <div key={tpl.id} style={{
+                      background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12,
+                      padding: '16px 20px', cursor: 'pointer', transition: 'border-color 0.15s, box-shadow 0.15s',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--orange)'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(226,93,37,0.08)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none'; }}
+                    onClick={() => {
+                      setEditingTemplate(tpl.key || tpl.id);
+                      setEditingTemplateForm({
+                        subject: tpl.subject || '',
+                        body: tpl.body || '',
+                        headerTitle: tpl.headerTitle || '',
+                        headerSubtitle: tpl.headerSubtitle || '',
+                        headerBg: tpl.headerBg || '',
+                      });
+                      initEmailQuill(tpl);
+                      setTestEmailAddress('');
+                      setTemplatePreview(null);
+                      setCountryOverrideMode(null);
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <Icon path={icons.mail} size={14} style={{ opacity: 0.5 }} />
+                            {tpl.name}
+                            {hasOverrides && (
+                              <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, background: 'var(--orange)', color: '#fff', fontWeight: 600 }}>
+                                OVERRIDES
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>{tpl.description}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'monospace' }}>Subject: {tpl.subject}</div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          {tpl.updatedBy && (
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'right' }}>
+                              <div>Last edited by {tpl.updatedBy}</div>
+                              <div>{tpl.updatedAt ? new Date(tpl.updatedAt).toLocaleDateString() : ''}</div>
+                            </div>
+                          )}
+                          <Icon path={icons.edit} size={14} style={{ color: 'var(--text-muted)' }} />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>)}
+
+          {/* ── Template Editor View ── */}
+          {editingTpl && editingTemplateForm && (() => {
+            const currentForm = editingTemplateForm;
+            // Determine which template to show/edit (global or country override)
+            const activeCountry = countryOverrideMode;
+            const countryTpl = activeCountry ? getCountryOverride(editingTpl.key, activeCountry) : null;
+            const activeForm = activeCountry && countryTpl ? {
+              subject: countryTpl.subject || '',
+              body: countryTpl.body || '',
+              headerTitle: countryTpl.headerTitle || '',
+              headerSubtitle: countryTpl.headerSubtitle || '',
+              headerBg: countryTpl.headerBg || '',
+            } : currentForm;
+
+            return (
+              <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+                {/* Left: Editor */}
+                <div style={{ flex: '1 1 500px', minWidth: 0 }}>
+                  {/* Scope selector: Global + Country tabs */}
+                  <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid var(--border)', marginBottom: 20 }}>
+                    <button onClick={() => {
+                      setCountryOverrideMode(null);
+                      setEditingTemplateForm({
+                        subject: editingTpl.subject || '',
+                        body: editingTpl.body || '',
+                        headerTitle: editingTpl.headerTitle || '',
+                        headerSubtitle: editingTpl.headerSubtitle || '',
+                        headerBg: editingTpl.headerBg || '',
+                      });
+                      destroyEmailQuill();
+                      setTimeout(() => initEmailQuill(editingTpl), 50);
+                    }} style={{
+                      padding: '10px 16px', fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+                      border: 'none', borderBottom: !activeCountry ? '2px solid var(--orange)' : '2px solid transparent',
+                      background: 'none', color: !activeCountry ? 'var(--orange)' : 'var(--text-muted)',
+                      cursor: 'pointer', marginBottom: -2, display: 'flex', alignItems: 'center', gap: 6,
+                    }}>
+                      <Icon path={icons.globe} size={13} /> Global
+                    </button>
+                    {COUNTRIES.map(c => {
+                      const hasOverride = !!getCountryOverride(editingTpl.key, c.code);
+                      return (
+                        <button key={c.code} onClick={() => {
+                          setCountryOverrideMode(c.code);
+                          const override = getCountryOverride(editingTpl.key, c.code);
+                          if (override) {
+                            setEditingTemplateForm({
+                              subject: override.subject || '',
+                              body: override.body || '',
+                              headerTitle: override.headerTitle || '',
+                              headerSubtitle: override.headerSubtitle || '',
+                              headerBg: override.headerBg || '',
+                            });
+                            destroyEmailQuill();
+                            setTimeout(() => initEmailQuill(override), 50);
+                          } else {
+                            // Clone global for editing
+                            setEditingTemplateForm({
+                              subject: editingTpl.subject || '',
+                              body: editingTpl.body || '',
+                              headerTitle: editingTpl.headerTitle || '',
+                              headerSubtitle: editingTpl.headerSubtitle || '',
+                              headerBg: editingTpl.headerBg || '',
+                            });
+                            destroyEmailQuill();
+                            setTimeout(() => initEmailQuill(editingTpl), 50);
+                          }
+                        }} style={{
+                          padding: '10px 16px', fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+                          border: 'none', borderBottom: activeCountry === c.code ? '2px solid var(--orange)' : '2px solid transparent',
+                          background: 'none', color: activeCountry === c.code ? 'var(--orange)' : 'var(--text-muted)',
+                          cursor: 'pointer', marginBottom: -2, display: 'flex', alignItems: 'center', gap: 6,
+                        }}>
+                          {c.label}
+                          {hasOverride && <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--orange)', display: 'inline-block' }} />}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Country override info banner */}
+                  {activeCountry && !countryTpl && (
+                    <div style={{
+                      background: '#fef3cd', border: '1px solid #ffc107', borderRadius: 8, padding: '12px 16px',
+                      fontSize: 13, color: '#856404', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10,
+                    }}>
+                      <Icon path={icons.alert} size={16} />
+                      <div>No custom template for <strong>{COUNTRIES.find(c => c.code === activeCountry)?.label}</strong>. Editing below will create a country-specific override. The global template is shown as a starting point.</div>
+                    </div>
+                  )}
+                  {activeCountry && countryTpl && (
+                    <div style={{
+                      background: '#d4edda', border: '1px solid #28a745', borderRadius: 8, padding: '12px 16px',
+                      fontSize: 13, color: '#155724', marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <Icon path={icons.check} size={16} />
+                        <span>Custom override active for <strong>{COUNTRIES.find(c => c.code === activeCountry)?.label}</strong>.</span>
+                      </div>
+                      <button onClick={() => { if (confirm('Delete this country override? The global template will be used instead.')) handleDeleteCountryOverride(editingTpl.key, activeCountry); }}
+                        style={{ fontSize: 11, color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, fontFamily: 'inherit' }}>
+                        Delete Override
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Header fields */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4, display: 'block' }}>Header Title</label>
+                      <input type="text" value={editingTemplateForm.headerTitle}
+                        onChange={e => setEditingTemplateForm(f => ({ ...f, headerTitle: e.target.value }))}
+                        style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, fontFamily: 'inherit', background: 'var(--card)', color: 'var(--text)', boxSizing: 'border-box' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4, display: 'block' }}>Header Subtitle</label>
+                      <input type="text" value={editingTemplateForm.headerSubtitle}
+                        onChange={e => setEditingTemplateForm(f => ({ ...f, headerSubtitle: e.target.value }))}
+                        style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, fontFamily: 'inherit', background: 'var(--card)', color: 'var(--text)', boxSizing: 'border-box' }}
+                      />
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4, display: 'block' }}>Subject Line</label>
+                      <input type="text" value={editingTemplateForm.subject}
+                        onChange={e => setEditingTemplateForm(f => ({ ...f, subject: e.target.value }))}
+                        style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, fontFamily: 'inherit', background: 'var(--card)', color: 'var(--text)', boxSizing: 'border-box' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4, display: 'block' }}>Header Background</label>
+                      <input type="text" value={editingTemplateForm.headerBg} placeholder="#E25D25 or linear-gradient(...)"
+                        onChange={e => setEditingTemplateForm(f => ({ ...f, headerBg: e.target.value }))}
+                        style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, fontFamily: 'inherit', background: 'var(--card)', color: 'var(--text)', boxSizing: 'border-box' }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Merge tags reference */}
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 }}>Available Merge Tags</div>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      {(editingTpl.mergeTags || []).map(tag => (
+                        <button key={tag} onClick={() => {
+                          if (emailQuillInstanceRef.current) {
+                            const range = emailQuillInstanceRef.current.getSelection(true);
+                            emailQuillInstanceRef.current.insertText(range ? range.index : 0, `{{${tag}}}`);
+                          }
+                        }} style={{
+                          padding: '3px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)',
+                          fontSize: 11, color: 'var(--orange)', cursor: 'pointer', fontFamily: 'monospace', fontWeight: 600,
+                        }}
+                        title="Click to insert at cursor">
+                          {`{{${tag}}}`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* WYSIWYG Editor */}
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6, display: 'block' }}>Email Body</label>
+                    <div ref={emailQuillRef} style={{
+                      minHeight: 250, border: '1px solid var(--border)', borderRadius: '0 0 8px 8px',
+                      background: '#fff', color: '#333',
+                    }} />
+                  </div>
+
+                  {/* Action buttons */}
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <button className="btn hq" disabled={templateSaving} onClick={() => {
+                      const body = emailQuillInstanceRef.current ? emailQuillInstanceRef.current.root.innerHTML : editingTemplateForm.body;
+                      handleSaveTemplate(editingTpl.key || editingTpl.id, { ...editingTemplateForm, body }, activeCountry || null);
+                    }} style={{ fontSize: 13, padding: '10px 24px' }}>
+                      <Icon path={icons.check} size={14} /> {templateSaving ? 'Saving...' : 'Save Template'}
+                    </button>
+                    <button className="btn btn-ghost hq" onClick={() => setTemplatePreview(prev => !prev)} style={{ fontSize: 12 }}>
+                      <Icon path={icons.eye} size={14} /> {templatePreview ? 'Hide Preview' : 'Preview'}
+                    </button>
+                    <div style={{ flex: 1 }} />
+                    <input type="email" placeholder="test@example.com" value={testEmailAddress}
+                      onChange={e => setTestEmailAddress(e.target.value)}
+                      style={{
+                        padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)',
+                        fontSize: 12, fontFamily: 'inherit', width: 200, background: 'var(--card)', color: 'var(--text)',
+                      }}
+                    />
+                    <button className="btn btn-ghost hq" disabled={testEmailSending || !testEmailAddress}
+                      onClick={() => handleSendTestEmail(editingTpl.key || editingTpl.id)} style={{ fontSize: 12 }}>
+                      <Icon path={icons.send} size={13} /> {testEmailSending ? 'Sending...' : 'Send Test'}
+                    </button>
+                  </div>
+
+                  {/* Version History */}
+                  {editingTpl.versions && editingTpl.versions.length > 0 && (
+                    <div style={{ marginTop: 24, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Icon path={icons.clock} size={14} /> Version History
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {editingTpl.versions.slice(0, 10).map((v, i) => (
+                          <div key={i} style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            padding: '8px 12px', background: 'var(--bg)', borderRadius: 8, fontSize: 12,
+                          }}>
+                            <div style={{ color: 'var(--text-muted)' }}>
+                              <strong>{v.editedBy || 'Unknown'}</strong> — {v.editedAt ? new Date(v.editedAt).toLocaleString() : 'Unknown date'}
+                            </div>
+                            <button onClick={() => handleRevertTemplate(editingTpl.key || editingTpl.id, i)}
+                              style={{ fontSize: 11, color: 'var(--orange)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, fontFamily: 'inherit' }}>
+                              Revert to this version
+                            </button>
+                          </div>
+                        ))}
+                        {editingTpl.versions.length > 10 && (
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: 4 }}>
+                            + {editingTpl.versions.length - 10} older versions
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Right: Preview Panel */}
+                {templatePreview && (
+                  <div style={{ flex: '0 0 380px', maxWidth: 400 }}>
+                    <div style={{
+                      position: 'sticky', top: 20, background: 'var(--card)', border: '1px solid var(--border)',
+                      borderRadius: 12, overflow: 'hidden',
+                    }}>
+                      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Icon path={icons.eye} size={13} /> Email Preview
+                      </div>
+                      <div style={{ maxHeight: 600, overflowY: 'auto' }}>
+                        <iframe
+                          srcDoc={(() => {
+                            const body = emailQuillInstanceRef.current ? emailQuillInstanceRef.current.root.innerHTML : editingTemplateForm.body;
+                            const subj = editingTemplateForm.subject || '';
+                            const previewData = {
+                              customerName: 'John Smith', customerFirstName: 'John', customerLastName: 'Smith',
+                              customerEmail: 'john@example.com', customerPhone: '+61 400 000 000',
+                              locationName: 'Success Tutoring Bondi', locationEmail: 'bondi@successtutoring.com',
+                              locationPhone: '+61 2 9000 0000', locationAddress: '123 Bondi Road, Bondi NSW 2026',
+                              bookingDate: 'Monday, 15 April 2026', bookingTime: '3:30 PM', bookingRef: 'DEMO1234',
+                              membershipName: 'Standard Weekly', className: 'Year 5 Maths',
+                              staffName: 'Jane Doe', franchisePartnerName: 'Franchise Partner',
+                              paymentAmount: '$49.00', paymentLink: '#', portalLink: '#',
+                              inviteLink: '#', formType: 'VIP List', year: String(new Date().getFullYear()),
+                            };
+                            let rendered = body || '';
+                            Object.entries(previewData).forEach(([k, v]) => {
+                              rendered = rendered.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), v);
+                            });
+                            let renderedSubj = subj;
+                            Object.entries(previewData).forEach(([k, v]) => {
+                              renderedSubj = renderedSubj.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), v);
+                            });
+                            return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+                              body { margin: 0; padding: 0; background: #f5f3ee; font-family: Arial, sans-serif; }
+                              .wrapper { max-width: 100%; background: #ffffff; overflow: hidden; }
+                              .header { background: ${editingTemplateForm.headerBg || 'linear-gradient(135deg, #E25D25 0%, #c94f1f 100%)'}; padding: 24px; text-align: center; }
+                              .header h1 { color: #ffffff; font-size: 18px; margin: 0; }
+                              .header p { color: rgba(255,255,255,0.8); font-size: 12px; margin: 6px 0 0; }
+                              .subject { padding: 12px 16px; background: #f5f3ee; font-size: 12px; color: #666; border-bottom: 1px solid #e5e5e5; }
+                              .subject strong { color: #333; }
+                              .body { padding: 24px; }
+                              .body p { color: #444; font-size: 13px; line-height: 1.7; }
+                              .body a { color: #E25D25; }
+                              .detail-card { background: #fdf0ea; border-radius: 10px; padding: 16px; margin: 16px 0; }
+                              .detail-row { margin-bottom: 8px; font-size: 12px; color: #333; }
+                              .detail-label { font-weight: 600; color: #E25D25; }
+                              .ref { font-size: 11px; color: #999; margin-top: 10px; }
+                              .cta { text-align: center; margin: 20px 0; }
+                              .cta a { display: inline-block; background: #E25D25; color: #ffffff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; font-size: 12px; }
+                              .footer { background: #f5f3ee; padding: 16px; text-align: center; font-size: 10px; color: #999; }
+                            </style></head><body>
+                              <div class="wrapper">
+                                <div class="subject">Subject: <strong>${renderedSubj}</strong></div>
+                                <div class="header">
+                                  <h1>${editingTemplateForm.headerTitle || ''}</h1>
+                                  ${editingTemplateForm.headerSubtitle ? `<p>${editingTemplateForm.headerSubtitle}</p>` : ''}
+                                </div>
+                                <div class="body">${rendered}</div>
+                                <div class="footer">&copy; ${new Date().getFullYear()} Success Tutoring. All rights reserved.</div>
+                              </div>
+                            </body></html>`;
+                          })()}
+                          style={{ width: '100%', height: 520, border: 'none' }}
+                          title="Email Preview"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </>);
+      })()}
 
       {/* Settings Page */}
       {page === 'settings' && (

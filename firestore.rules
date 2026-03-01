@@ -197,6 +197,14 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // ── Email Templates collection ─────────────────────────────────────────
+    match /email_templates/{templateId} {
+      // Cloud Functions need read access for sending emails (service account bypasses rules)
+      // Master admins can read and write templates
+      allow read: if isMasterAdmin();
+      allow write: if isMasterAdmin();
+    }
+
     // ── Services collection ────────────────────────────────────────────────
     match /services/{serviceId} {
       allow read: if true;

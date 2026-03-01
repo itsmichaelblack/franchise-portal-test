@@ -14,7 +14,646 @@ const FROM_EMAIL = "michael@successtutoring.com";
 const FROM_NAME  = "Success Tutoring";
 const PORTAL_URL = "https://success-tutoring-test.web.app";
 
-// ── Helper: build the confirmation email ─────────────────────────────────────
+// ── Email Template System ─────────────────────────────────────────────────────
+
+// Master email layout wrapper (fixed, not editable)
+function wrapInMasterLayout(bodyHtml, headerTitle, headerSubtitle, headerBg) {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8" />
+<style>
+  body { margin: 0; padding: 0; background: #f5f3ee; font-family: Arial, sans-serif; }
+  .wrapper { max-width: 560px; margin: 40px auto; background: #ffffff; border-radius: 16px; overflow: hidden; }
+  .header { background: ${headerBg || 'linear-gradient(135deg, #E25D25 0%, #c94f1f 100%)'}; padding: 40px; text-align: center; }
+  .header h1 { color: #ffffff; font-size: 24px; margin: 0; }
+  .header p { color: rgba(255,255,255,0.8); font-size: 14px; margin: 8px 0 0; }
+  .body { padding: 40px; }
+  .body p { color: #444; font-size: 15px; line-height: 1.7; }
+  .body a { color: #E25D25; }
+  .detail-card { background: #fdf0ea; border-radius: 12px; padding: 24px; margin: 24px 0; }
+  .detail-row { margin-bottom: 10px; font-size: 14px; color: #333; }
+  .detail-label { font-weight: 600; color: #E25D25; }
+  .ref { font-size: 12px; color: #999; margin-top: 16px; }
+  .cta { text-align: center; margin: 28px 0; }
+  .cta a { display: inline-block; background: #E25D25; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 10px; font-weight: 600; font-size: 14px; }
+  .footer { background: #f5f3ee; padding: 24px; text-align: center; font-size: 12px; color: #999; }
+</style></head>
+<body>
+  <div class="wrapper">
+    <div class="header">
+      <h1>${headerTitle || ''}</h1>
+      ${headerSubtitle ? `<p>${headerSubtitle}</p>` : ''}
+    </div>
+    <div class="body">
+      ${bodyHtml}
+    </div>
+    <div class="footer">&copy; ${new Date().getFullYear()} Success Tutoring. All rights reserved.</div>
+  </div>
+</body></html>`;
+}
+
+// Replace merge tags in template content
+function replaceMergeTags(content, data) {
+  if (!content) return '';
+  return content
+    .replace(/\{\{customerName\}\}/g, data.customerName || '')
+    .replace(/\{\{customerFirstName\}\}/g, data.customerFirstName || '')
+    .replace(/\{\{customerLastName\}\}/g, data.customerLastName || '')
+    .replace(/\{\{customerEmail\}\}/g, data.customerEmail || '')
+    .replace(/\{\{customerPhone\}\}/g, data.customerPhone || '')
+    .replace(/\{\{locationName\}\}/g, data.locationName || '')
+    .replace(/\{\{locationEmail\}\}/g, data.locationEmail || '')
+    .replace(/\{\{locationPhone\}\}/g, data.locationPhone || '')
+    .replace(/\{\{locationAddress\}\}/g, data.locationAddress || '')
+    .replace(/\{\{bookingDate\}\}/g, data.bookingDate || '')
+    .replace(/\{\{bookingTime\}\}/g, data.bookingTime || '')
+    .replace(/\{\{bookingRef\}\}/g, data.bookingRef || '')
+    .replace(/\{\{membershipName\}\}/g, data.membershipName || '')
+    .replace(/\{\{className\}\}/g, data.className || '')
+    .replace(/\{\{staffName\}\}/g, data.staffName || '')
+    .replace(/\{\{franchisePartnerName\}\}/g, data.franchisePartnerName || '')
+    .replace(/\{\{paymentAmount\}\}/g, data.paymentAmount || '')
+    .replace(/\{\{paymentLink\}\}/g, data.paymentLink || '')
+    .replace(/\{\{portalLink\}\}/g, data.portalLink || PORTAL_URL)
+    .replace(/\{\{inviteLink\}\}/g, data.inviteLink || '')
+    .replace(/\{\{formType\}\}/g, data.formType || '')
+    .replace(/\{\{year\}\}/g, String(new Date().getFullYear()));
+}
+
+// Resolve the correct template: country-specific override > global
+async function resolveTemplate(templateKey, country) {
+  const db = getFirestore();
+  
+  // Try country-specific override first
+  if (country) {
+    const countryKey = `${templateKey}_${country.toUpperCase()}`;
+    const countryDoc = await db.doc(`email_templates/${countryKey}`).get();
+    if (countryDoc.exists && countryDoc.data().enabled !== false) {
+      return countryDoc.data();
+    }
+  }
+  
+  // Fall back to global template
+  const globalDoc = await db.doc(`email_templates/${templateKey}`).get();
+  if (globalDoc.exists) {
+    return globalDoc.data();
+  }
+  
+  return null;
+}
+
+// Build and send an email using a template from Firestore
+async function sendTemplatedEmail({ to, templateKey, mergeData, country, replyTo, fromName }) {
+  const template = await resolveTemplate(templateKey, country);
+  if (!template) {
+    console.warn(`No email template found for key "${templateKey}" — skipping email.`);
+    return false;
+  }
+  
+  const subject = replaceMergeTags(template.subject || '', mergeData);
+  const bodyHtml = replaceMergeTags(template.body || '', mergeData);
+  const html = wrapInMasterLayout(bodyHtml, template.headerTitle || '', template.headerSubtitle || '', template.headerBg || '');
+  const text = subject; // Simple text fallback
+  
+  const apiKey = functions.config().sendgrid?.api_key;
+  if (!apiKey) {
+    console.error("SendGrid API key not set.");
+    return false;
+  }
+  sgMail.setApiKey(apiKey);
+  
+  const msg = {
+    to,
+    from: { email: FROM_EMAIL, name: fromName || FROM_NAME },
+    subject,
+    text,
+    html,
+  };
+  
+  if (replyTo) {
+    msg.replyTo = replyTo;
+  }
+  
+  try {
+    await sgMail.send(msg);
+    console.log(`Template email "${templateKey}" sent to ${to}`);
+    return true;
+  } catch (err) {
+    console.error(`SendGrid error for "${templateKey}":`, err?.response?.body ?? err);
+    return false;
+  }
+}
+
+// ── Default email template seed data ──────────────────────────────────────────
+const DEFAULT_EMAIL_TEMPLATES = [
+  // ── HQ Users ──
+  {
+    key: 'hq_user_created',
+    category: 'hq_users',
+    name: 'New HQ User Account Created',
+    description: 'Sent when a new HQ user account is created via invite',
+    subject: "You've been invited to the Success Tutoring HQ Portal",
+    headerTitle: "You've been invited!",
+    headerSubtitle: 'Success Tutoring HQ Portal',
+    headerBg: '#0a0a0f',
+    body: `<p>Hi {{staffName}},</p>
+<p>You've been invited to join the <strong>Success Tutoring HQ Portal</strong> as an <strong>Admin</strong>.</p>
+<p>Click the button below to sign in with your Google account and get started.</p>
+<div class="cta"><a href="{{inviteLink}}">Accept Invite & Sign In →</a></div>
+<p style="font-size: 13px; color: #888;">If you weren't expecting this invite, you can safely ignore this email.</p>`,
+    mergeTags: ['staffName', 'inviteLink', 'portalLink'],
+  },
+  // ── Staff ──
+  {
+    key: 'staff_member_created',
+    category: 'staff',
+    name: 'New Staff Member',
+    description: 'Sent when a new staff member is created at a location',
+    subject: 'Welcome to {{locationName}} — Your Staff Account is Ready',
+    headerTitle: 'Welcome to the Team!',
+    headerSubtitle: 'Your staff account is ready',
+    headerBg: 'linear-gradient(135deg, #6dcbca 0%, #4fa8a7 100%)',
+    body: `<p>Hi {{staffName}},</p>
+<p>You've been added as a staff member at <strong>{{locationName}}</strong>.</p>
+<p>You can now access the portal to view your schedule and manage your sessions.</p>
+<div class="cta"><a href="{{portalLink}}">Access Portal →</a></div>`,
+    mergeTags: ['staffName', 'locationName', 'portalLink'],
+  },
+  // ── Franchise Partner ──
+  {
+    key: 'franchise_partner_created',
+    category: 'franchise_partner',
+    name: 'New Franchise Partner Account',
+    description: 'Sent when a new franchise partner user account is created',
+    subject: 'Welcome! Your franchise location "{{locationName}}" is now active',
+    headerTitle: 'Welcome to the Network!',
+    headerSubtitle: 'Your franchise location has been created',
+    headerBg: '#2d5a3d',
+    body: `<p>Hi there,</p>
+<p>Your franchise location <strong>{{locationName}}</strong> has been successfully added to the system. Your partner portal is now active.</p>
+<div class="detail-card">
+  <div class="detail-row"><span class="detail-label">Location: </span>{{locationName}}</div>
+  <div class="detail-row"><span class="detail-label">Address: </span>{{locationAddress}}</div>
+  <div class="detail-row"><span class="detail-label">Phone: </span>{{locationPhone}}</div>
+  <div class="detail-row"><span class="detail-label">Email: </span>{{locationEmail}}</div>
+</div>
+<p>Sign in to your Partner Portal to set your availability and manage booking settings.</p>
+<div class="cta"><a href="{{portalLink}}">Access Partner Portal →</a></div>`,
+    mergeTags: ['locationName', 'locationAddress', 'locationPhone', 'locationEmail', 'portalLink'],
+  },
+  {
+    key: 'franchise_assessment_booked',
+    category: 'franchise_partner',
+    name: 'New Assessment Booked',
+    description: 'Sent to the franchise partner when a new assessment is booked',
+    subject: 'New Booking — {{customerName}} on {{bookingDate}} at {{bookingTime}}',
+    headerTitle: 'New Assessment Booking!',
+    headerSubtitle: 'A customer has booked an assessment at your centre',
+    headerBg: 'linear-gradient(135deg, #6dcbca 0%, #4fa8a7 100%)',
+    body: `<p>Hi there,</p>
+<p>A new assessment has been booked at <strong>{{locationName}}</strong>:</p>
+<div class="detail-card">
+  <div class="detail-row"><span class="detail-label">Customer: </span>{{customerName}}</div>
+  <div class="detail-row"><span class="detail-label">Email: </span>{{customerEmail}}</div>
+  <div class="detail-row"><span class="detail-label">Phone: </span>{{customerPhone}}</div>
+  <div class="detail-row"><span class="detail-label">Date: </span>{{bookingDate}}</div>
+  <div class="detail-row"><span class="detail-label">Time: </span>{{bookingTime}}</div>
+  <div class="ref">Booking Ref: {{bookingRef}}</div>
+</div>
+<p>Log in to your Partner Portal to view all upcoming bookings.</p>
+<div class="cta"><a href="{{portalLink}}">Open Partner Portal →</a></div>`,
+    mergeTags: ['customerName', 'customerEmail', 'customerPhone', 'bookingDate', 'bookingTime', 'bookingRef', 'locationName', 'portalLink'],
+  },
+  {
+    key: 'franchise_new_signup',
+    category: 'franchise_partner',
+    name: 'New Sign Up Member (App)',
+    description: 'Sent to the franchise partner when a new member signs up on the app',
+    subject: 'New Sign Up — {{customerName}} at {{locationName}}',
+    headerTitle: 'New Member Sign Up!',
+    headerSubtitle: 'A new member has signed up via the app',
+    headerBg: 'linear-gradient(135deg, #6dcbca 0%, #4fa8a7 100%)',
+    body: `<p>Hi there,</p>
+<p>A new member has signed up at <strong>{{locationName}}</strong> via the mobile app:</p>
+<div class="detail-card">
+  <div class="detail-row"><span class="detail-label">Name: </span>{{customerName}}</div>
+  <div class="detail-row"><span class="detail-label">Email: </span>{{customerEmail}}</div>
+  <div class="detail-row"><span class="detail-label">Phone: </span>{{customerPhone}}</div>
+</div>
+<p>Log in to your Partner Portal to view the new member.</p>
+<div class="cta"><a href="{{portalLink}}">Open Partner Portal →</a></div>`,
+    mergeTags: ['customerName', 'customerEmail', 'customerPhone', 'locationName', 'portalLink'],
+  },
+  {
+    key: 'franchise_new_lead_assessment',
+    category: 'franchise_partner',
+    name: 'New Lead — Assessment Booked',
+    description: 'Sent to the franchise partner when a new lead books an assessment',
+    subject: 'New Lead — Assessment Booked at {{locationName}}',
+    headerTitle: 'New Lead!',
+    headerSubtitle: 'Assessment booked at your centre',
+    headerBg: 'linear-gradient(135deg, #E25D25 0%, #c94f1f 100%)',
+    body: `<p>Hi there,</p>
+<p>You've received a new lead via an <strong>Assessment Booking</strong> for <strong>{{locationName}}</strong>:</p>
+<div class="detail-card">
+  <div class="detail-row"><span class="detail-label">Name: </span>{{customerName}}</div>
+  <div class="detail-row"><span class="detail-label">Email: </span>{{customerEmail}}</div>
+  <div class="detail-row"><span class="detail-label">Phone: </span>{{customerPhone}}</div>
+  <div class="detail-row"><span class="detail-label">Form: </span>Assessment Booking</div>
+</div>
+<div class="cta"><a href="{{portalLink}}">Open Partner Portal →</a></div>`,
+    mergeTags: ['customerName', 'customerEmail', 'customerPhone', 'locationName', 'portalLink'],
+  },
+  {
+    key: 'franchise_new_lead_vip',
+    category: 'franchise_partner',
+    name: 'New Lead — Joined VIP List',
+    description: 'Sent to the franchise partner when someone joins the VIP list',
+    subject: 'New VIP List Sign Up at {{locationName}}',
+    headerTitle: 'New Lead!',
+    headerSubtitle: 'Someone joined the VIP list',
+    headerBg: 'linear-gradient(135deg, #E25D25 0%, #c94f1f 100%)',
+    body: `<p>Hi there,</p>
+<p>You've received a new lead via the <strong>VIP List</strong> form for <strong>{{locationName}}</strong>:</p>
+<div class="detail-card">
+  <div class="detail-row"><span class="detail-label">Name: </span>{{customerName}}</div>
+  <div class="detail-row"><span class="detail-label">Email: </span>{{customerEmail}}</div>
+  <div class="detail-row"><span class="detail-label">Phone: </span>{{customerPhone}}</div>
+  <div class="detail-row"><span class="detail-label">Form: </span>VIP List</div>
+</div>
+<div class="cta"><a href="{{portalLink}}">Open Partner Portal →</a></div>`,
+    mergeTags: ['customerName', 'customerEmail', 'customerPhone', 'locationName', 'portalLink'],
+  },
+  {
+    key: 'franchise_new_lead_foundation',
+    category: 'franchise_partner',
+    name: 'New Lead — Foundation Membership',
+    description: 'Sent to the franchise partner when someone signs up for a foundation membership',
+    subject: 'New Foundation Membership Lead at {{locationName}}',
+    headerTitle: 'New Lead!',
+    headerSubtitle: 'Foundation membership enquiry',
+    headerBg: 'linear-gradient(135deg, #E25D25 0%, #c94f1f 100%)',
+    body: `<p>Hi there,</p>
+<p>You've received a new lead via the <strong>Get Foundation Membership</strong> form for <strong>{{locationName}}</strong>:</p>
+<div class="detail-card">
+  <div class="detail-row"><span class="detail-label">Name: </span>{{customerName}}</div>
+  <div class="detail-row"><span class="detail-label">Email: </span>{{customerEmail}}</div>
+  <div class="detail-row"><span class="detail-label">Phone: </span>{{customerPhone}}</div>
+  <div class="detail-row"><span class="detail-label">Form: </span>Foundation Membership</div>
+</div>
+<div class="cta"><a href="{{portalLink}}">Open Partner Portal →</a></div>`,
+    mergeTags: ['customerName', 'customerEmail', 'customerPhone', 'locationName', 'portalLink'],
+  },
+  {
+    key: 'franchise_new_lead_enquiry',
+    category: 'franchise_partner',
+    name: 'New Lead — Enquiry (Temp Closed)',
+    description: 'Sent to the franchise partner when an enquiry is submitted for a temporarily closed location',
+    subject: 'New Enquiry at {{locationName}} (Temporarily Closed)',
+    headerTitle: 'New Lead!',
+    headerSubtitle: 'Enquiry for temporarily closed location',
+    headerBg: 'linear-gradient(135deg, #E25D25 0%, #c94f1f 100%)',
+    body: `<p>Hi there,</p>
+<p>You've received a new enquiry for <strong>{{locationName}}</strong> (temporarily closed):</p>
+<div class="detail-card">
+  <div class="detail-row"><span class="detail-label">Name: </span>{{customerName}}</div>
+  <div class="detail-row"><span class="detail-label">Email: </span>{{customerEmail}}</div>
+  <div class="detail-row"><span class="detail-label">Phone: </span>{{customerPhone}}</div>
+  <div class="detail-row"><span class="detail-label">Form: </span>Enquiry (Temp. Closed)</div>
+</div>
+<div class="cta"><a href="{{portalLink}}">Open Partner Portal →</a></div>`,
+    mergeTags: ['customerName', 'customerEmail', 'customerPhone', 'locationName', 'portalLink'],
+  },
+  // ── Customer (New) ──
+  {
+    key: 'customer_new_member',
+    category: 'customer_new',
+    name: 'New Member Email',
+    description: 'Sent when a user creates a new account',
+    subject: 'Welcome to Success Tutoring, {{customerFirstName}}!',
+    headerTitle: 'Welcome!',
+    headerSubtitle: "You're all set to get started",
+    headerBg: 'linear-gradient(135deg, #E25D25 0%, #c94f1f 100%)',
+    body: `<p>Hi {{customerName}},</p>
+<p>Welcome to <strong>Success Tutoring</strong>! Your account has been created and you're ready to start your learning journey.</p>
+<p>Your centre: <strong>{{locationName}}</strong></p>
+<p>If you have any questions, don't hesitate to contact your local centre.</p>`,
+    mergeTags: ['customerName', 'customerFirstName', 'locationName', 'locationEmail', 'locationPhone'],
+  },
+  {
+    key: 'customer_assessment_booked',
+    category: 'customer_new',
+    name: 'Assessment Booked',
+    description: 'Sent to the customer when they book an assessment',
+    subject: 'Assessment Confirmed — {{bookingDate}} at {{bookingTime}}',
+    headerTitle: 'Assessment Confirmed!',
+    headerSubtitle: 'Your booking is all set',
+    headerBg: 'linear-gradient(135deg, #E25D25 0%, #c94f1f 100%)',
+    body: `<p>Hi {{customerName}},</p>
+<p>Your free 40-minute assessment has been confirmed. Here are your booking details:</p>
+<div class="detail-card">
+  <div class="detail-row"><span class="detail-label">Location: </span>{{locationName}}</div>
+  <div class="detail-row"><span class="detail-label">Address: </span>{{locationAddress}}</div>
+  <div class="detail-row"><span class="detail-label">Date: </span>{{bookingDate}}</div>
+  <div class="detail-row"><span class="detail-label">Time: </span>{{bookingTime}}</div>
+  <div class="ref">Booking Ref: {{bookingRef}}</div>
+</div>
+<p>Please arrive a few minutes early. If you need to reschedule, contact your centre directly.</p>`,
+    mergeTags: ['customerName', 'bookingDate', 'bookingTime', 'bookingRef', 'locationName', 'locationAddress'],
+  },
+  {
+    key: 'customer_vip_joined',
+    category: 'customer_new',
+    name: 'Joined VIP List',
+    description: 'Sent when a customer joins the VIP list',
+    subject: "You're on the VIP List for {{locationName}}!",
+    headerTitle: "You're on the VIP List!",
+    headerSubtitle: 'Thanks for your interest',
+    headerBg: 'linear-gradient(135deg, #F9A72B 0%, #e8971d 100%)',
+    body: `<p>Hi {{customerName}},</p>
+<p>Thanks for joining the VIP list for <strong>{{locationName}}</strong>!</p>
+<p>You'll be the first to know when we open and will have access to exclusive deals and early-bird pricing.</p>
+<p>We'll be in touch soon with more details.</p>`,
+    mergeTags: ['customerName', 'locationName'],
+  },
+  {
+    key: 'customer_foundation_membership',
+    category: 'customer_new',
+    name: 'Foundation Membership',
+    description: 'Sent when a customer signs up for a foundation membership rate',
+    subject: 'Foundation Membership Confirmed at {{locationName}}',
+    headerTitle: 'Foundation Membership!',
+    headerSubtitle: "You've locked in the foundation rate",
+    headerBg: 'linear-gradient(135deg, #F9A72B 0%, #e8971d 100%)',
+    body: `<p>Hi {{customerName}},</p>
+<p>Congratulations! You've secured a <strong>Foundation Membership</strong> rate at <strong>{{locationName}}</strong>.</p>
+<p>We'll be in touch with more details about when your centre opens and how to get started.</p>`,
+    mergeTags: ['customerName', 'locationName'],
+  },
+  {
+    key: 'customer_enquiry_temp_closed',
+    category: 'customer_new',
+    name: 'Enquiry (Temp Closed Location)',
+    description: 'Sent when a customer enquires about a temporarily closed location',
+    subject: 'Thanks for your enquiry about {{locationName}}',
+    headerTitle: 'Thanks for your enquiry!',
+    headerSubtitle: "We'll be back soon",
+    headerBg: 'linear-gradient(135deg, #6dcbca 0%, #4fa8a7 100%)',
+    body: `<p>Hi {{customerName}},</p>
+<p>Thank you for your enquiry about <strong>{{locationName}}</strong>. This centre is temporarily closed, but we'll notify you as soon as we reopen.</p>
+<p>In the meantime, feel free to check out our other nearby locations.</p>`,
+    mergeTags: ['customerName', 'locationName'],
+  },
+  // ── Customer (Existing) ──
+  {
+    key: 'customer_class_cancelled',
+    category: 'customer_existing',
+    name: 'Class Cancelled',
+    description: 'Sent when a class is cancelled',
+    subject: 'Class Cancelled — {{className}} on {{bookingDate}}',
+    headerTitle: 'Class Cancelled',
+    headerSubtitle: 'An upcoming class has been cancelled',
+    headerBg: '#dc2626',
+    body: `<p>Hi {{customerName}},</p>
+<p>Unfortunately, your upcoming class has been cancelled:</p>
+<div class="detail-card">
+  <div class="detail-row"><span class="detail-label">Class: </span>{{className}}</div>
+  <div class="detail-row"><span class="detail-label">Date: </span>{{bookingDate}}</div>
+  <div class="detail-row"><span class="detail-label">Time: </span>{{bookingTime}}</div>
+  <div class="detail-row"><span class="detail-label">Location: </span>{{locationName}}</div>
+</div>
+<p>Please contact your centre if you have any questions or would like to reschedule.</p>`,
+    mergeTags: ['customerName', 'className', 'bookingDate', 'bookingTime', 'locationName'],
+  },
+  {
+    key: 'customer_membership_purchased',
+    category: 'customer_existing',
+    name: 'Membership Purchased',
+    description: 'Sent when a member purchases a membership',
+    subject: 'Membership Confirmed — {{membershipName}}',
+    headerTitle: 'Membership Confirmed!',
+    headerSubtitle: 'Your membership is now active',
+    headerBg: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+    body: `<p>Hi {{customerName}},</p>
+<p>Your membership has been confirmed:</p>
+<div class="detail-card">
+  <div class="detail-row"><span class="detail-label">Membership: </span>{{membershipName}}</div>
+  <div class="detail-row"><span class="detail-label">Amount: </span>{{paymentAmount}}/week</div>
+  <div class="detail-row"><span class="detail-label">Location: </span>{{locationName}}</div>
+</div>
+<p>You're all set! Your sessions will begin as per your schedule.</p>`,
+    mergeTags: ['customerName', 'membershipName', 'paymentAmount', 'locationName'],
+  },
+  {
+    key: 'customer_class_joined',
+    category: 'customer_existing',
+    name: 'Joined a Class',
+    description: 'Sent when a member joins a class',
+    subject: 'Class Confirmed — {{className}} on {{bookingDate}}',
+    headerTitle: 'Class Confirmed!',
+    headerSubtitle: "You're enrolled in an upcoming class",
+    headerBg: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+    body: `<p>Hi {{customerName}},</p>
+<p>You've been enrolled in the following class:</p>
+<div class="detail-card">
+  <div class="detail-row"><span class="detail-label">Class: </span>{{className}}</div>
+  <div class="detail-row"><span class="detail-label">Date: </span>{{bookingDate}}</div>
+  <div class="detail-row"><span class="detail-label">Time: </span>{{bookingTime}}</div>
+  <div class="detail-row"><span class="detail-label">Location: </span>{{locationName}}</div>
+</div>`,
+    mergeTags: ['customerName', 'className', 'bookingDate', 'bookingTime', 'locationName'],
+  },
+  {
+    key: 'customer_membership_suspended',
+    category: 'customer_existing',
+    name: 'Membership Suspended',
+    description: 'Sent when a member suspends their membership',
+    subject: 'Membership Suspended — {{membershipName}}',
+    headerTitle: 'Membership Suspended',
+    headerSubtitle: 'Your membership has been paused',
+    headerBg: '#F9A72B',
+    body: `<p>Hi {{customerName}},</p>
+<p>Your membership <strong>{{membershipName}}</strong> at <strong>{{locationName}}</strong> has been suspended.</p>
+<p>Your sessions are on hold until the membership is reactivated. Contact your centre to resume.</p>`,
+    mergeTags: ['customerName', 'membershipName', 'locationName'],
+  },
+  {
+    key: 'customer_membership_cancelled',
+    category: 'customer_existing',
+    name: 'Membership Cancelled',
+    description: 'Sent when a member cancels their membership',
+    subject: 'Membership Cancelled — {{membershipName}}',
+    headerTitle: 'Membership Cancelled',
+    headerSubtitle: 'Your membership has been cancelled',
+    headerBg: '#dc2626',
+    body: `<p>Hi {{customerName}},</p>
+<p>Your membership <strong>{{membershipName}}</strong> at <strong>{{locationName}}</strong> has been cancelled.</p>
+<p>If this was a mistake or you'd like to re-enrol, please contact your centre.</p>`,
+    mergeTags: ['customerName', 'membershipName', 'locationName'],
+  },
+  {
+    key: 'customer_policies_updated',
+    category: 'customer_existing',
+    name: 'Policies Updated',
+    description: 'Sent when existing policies have been updated',
+    subject: 'Policy Update at Success Tutoring',
+    headerTitle: 'Policy Update',
+    headerSubtitle: 'Our policies have been updated',
+    headerBg: '#0a0a0f',
+    body: `<p>Hi {{customerName}},</p>
+<p>We've updated our policies at <strong>Success Tutoring</strong>. Please review the changes at your earliest convenience.</p>
+<p>The updated policies are effective immediately and apply to all members.</p>
+<p>If you have any questions, please contact your local centre.</p>`,
+    mergeTags: ['customerName', 'locationName'],
+  },
+  {
+    key: 'customer_payment_failed',
+    category: 'customer_existing',
+    name: 'Payment Failed',
+    description: 'Sent when a payment fails',
+    subject: 'Payment Failed — Action Required',
+    headerTitle: 'Payment Failed',
+    headerSubtitle: 'We couldn\'t process your payment',
+    headerBg: '#dc2626',
+    body: `<p>Hi {{customerName}},</p>
+<p>We were unable to process your payment of <strong>{{paymentAmount}}</strong> for your membership at <strong>{{locationName}}</strong>.</p>
+<p>Please update your payment method to avoid any interruption to your sessions.</p>
+<div class="cta"><a href="{{paymentLink}}">Update Payment Method →</a></div>`,
+    mergeTags: ['customerName', 'paymentAmount', 'locationName', 'paymentLink'],
+  },
+  {
+    key: 'customer_payment_reminder_1',
+    category: 'customer_existing',
+    name: 'Payment Reminder #1',
+    description: 'First payment reminder',
+    subject: 'Payment Reminder — {{membershipName}}',
+    headerTitle: 'Payment Reminder',
+    headerSubtitle: 'A friendly reminder about your upcoming payment',
+    headerBg: '#F9A72B',
+    body: `<p>Hi {{customerName}},</p>
+<p>This is a friendly reminder that your payment of <strong>{{paymentAmount}}</strong> for <strong>{{membershipName}}</strong> at <strong>{{locationName}}</strong> is due soon.</p>
+<p>Please ensure your payment method is up to date.</p>
+<div class="cta"><a href="{{paymentLink}}">Check Payment Method →</a></div>`,
+    mergeTags: ['customerName', 'paymentAmount', 'membershipName', 'locationName', 'paymentLink'],
+  },
+  {
+    key: 'customer_payment_reminder_2',
+    category: 'customer_existing',
+    name: 'Payment Reminder #2',
+    description: 'Second payment reminder (more urgent)',
+    subject: 'Urgent: Payment Overdue — {{membershipName}}',
+    headerTitle: 'Payment Overdue',
+    headerSubtitle: 'Your payment requires immediate attention',
+    headerBg: '#dc2626',
+    body: `<p>Hi {{customerName}},</p>
+<p>Your payment of <strong>{{paymentAmount}}</strong> for <strong>{{membershipName}}</strong> at <strong>{{locationName}}</strong> is now overdue.</p>
+<p>Please update your payment method immediately to avoid suspension of your membership.</p>
+<div class="cta"><a href="{{paymentLink}}">Update Payment Now →</a></div>`,
+    mergeTags: ['customerName', 'paymentAmount', 'membershipName', 'locationName', 'paymentLink'],
+  },
+  {
+    key: 'customer_payment_link_sent',
+    category: 'customer_existing',
+    name: 'Payment Link Sent',
+    description: 'Sent when a payment link is sent to a customer',
+    subject: 'Payment Link — {{locationName}}',
+    headerTitle: 'Payment Link',
+    headerSubtitle: 'Complete your payment setup',
+    headerBg: 'linear-gradient(135deg, #E25D25 0%, #c94f1f 100%)',
+    body: `<p>Hi {{customerName}},</p>
+<p>Please use the link below to set up your payment method for <strong>{{locationName}}</strong>:</p>
+<div class="cta"><a href="{{paymentLink}}">Set Up Payment →</a></div>
+<p style="font-size: 13px; color: #888;">This link will expire after use. If you have any issues, please contact your centre.</p>`,
+    mergeTags: ['customerName', 'locationName', 'paymentLink'],
+  },
+];
+
+// ── Callable: Seed default email templates ───────────────────────────────────
+exports.seedEmailTemplates = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  }
+  const callerDoc = await getFirestore().doc(`users/${context.auth.uid}`).get();
+  if (callerDoc.data()?.role !== "master_admin") {
+    throw new functions.https.HttpsError("permission-denied", "Only master admins can seed templates.");
+  }
+
+  const db = getFirestore();
+  const { overwrite } = data || {};
+  let seeded = 0;
+
+  for (const template of DEFAULT_EMAIL_TEMPLATES) {
+    const docRef = db.doc(`email_templates/${template.key}`);
+    const existing = await docRef.get();
+    if (!existing.exists || overwrite) {
+      await docRef.set({
+        ...template,
+        enabled: true,
+        scope: 'global',
+        versions: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }, { merge: !overwrite });
+      seeded++;
+    }
+  }
+
+  return { success: true, seeded, total: DEFAULT_EMAIL_TEMPLATES.length };
+});
+
+// ── Callable: Send test email ────────────────────────────────────────────────
+exports.sendTestEmail = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  }
+  const callerDoc = await getFirestore().doc(`users/${context.auth.uid}`).get();
+  if (callerDoc.data()?.role !== "master_admin") {
+    throw new functions.https.HttpsError("permission-denied", "Only master admins can send test emails.");
+  }
+
+  const { templateKey, toEmail } = data;
+  if (!templateKey || !toEmail) {
+    throw new functions.https.HttpsError("invalid-argument", "templateKey and toEmail required.");
+  }
+
+  // Use sample merge data
+  const sampleData = {
+    customerName: 'John Smith',
+    customerFirstName: 'John',
+    customerLastName: 'Smith',
+    customerEmail: 'john@example.com',
+    customerPhone: '+61 400 000 000',
+    locationName: 'Success Tutoring Bondi',
+    locationEmail: 'bondi@successtutoring.com',
+    locationPhone: '+61 2 9000 0000',
+    locationAddress: '123 Bondi Road, Bondi NSW 2026',
+    bookingDate: 'Monday, 15 April 2026',
+    bookingTime: '3:30 PM',
+    bookingRef: 'TEST1234',
+    membershipName: 'Standard Weekly Membership',
+    className: 'Year 5 Maths',
+    staffName: 'Jane Doe',
+    franchisePartnerName: 'Franchise Partner',
+    paymentAmount: '$49.00',
+    paymentLink: PORTAL_URL,
+    portalLink: PORTAL_URL,
+    inviteLink: PORTAL_URL + '?invite=test123',
+    formType: 'VIP List',
+    year: String(new Date().getFullYear()),
+  };
+
+  const success = await sendTemplatedEmail({
+    to: toEmail,
+    templateKey,
+    mergeData: sampleData,
+  });
+
+  if (!success) {
+    throw new functions.https.HttpsError("internal", "Failed to send test email.");
+  }
+
+  return { success: true };
+});
+
+// ── Helper: build the confirmation email (legacy, kept for backward compat) ──
 function buildConfirmationEmail(location) {
   const { name, address, phone, email } = location;
 
@@ -79,29 +718,50 @@ exports.onLocationCreated = functions.firestore
       return;
     }
 
-    const apiKey = functions.config().sendgrid?.api_key;
-    if (!apiKey) {
-      console.error("SendGrid API key not set. Run: firebase functions:config:set sendgrid.api_key=YOUR_KEY");
-      return;
+    // Try templated email first
+    const mergeData = {
+      locationName: location.name,
+      locationAddress: location.address,
+      locationPhone: location.phone,
+      locationEmail: location.email,
+      portalLink: PORTAL_URL,
+    };
+    
+    const sent = await sendTemplatedEmail({
+      to: location.email,
+      templateKey: 'franchise_partner_created',
+      mergeData,
+      country: location.country,
+      replyTo: location.email,
+    });
+
+    if (!sent) {
+      // Fallback to legacy hardcoded email
+      const apiKey = functions.config().sendgrid?.api_key;
+      if (!apiKey) {
+        console.error("SendGrid API key not set.");
+        return;
+      }
+      sgMail.setApiKey(apiKey);
+      const { html, text } = buildConfirmationEmail(location);
+      try {
+        await sgMail.send({
+          to: location.email,
+          from: { email: FROM_EMAIL, name: FROM_NAME },
+          subject: `Welcome! Your franchise location "${location.name}" is now active`,
+          text, html,
+        });
+      } catch (err) {
+        console.error("SendGrid error:", err?.response?.body ?? err);
+      }
     }
 
-    sgMail.setApiKey(apiKey);
-    const { html, text } = buildConfirmationEmail(location);
-
     try {
-      await sgMail.send({
-        to:      location.email,
-        from:    { email: FROM_EMAIL, name: FROM_NAME },
-        subject: `Welcome! Your franchise location "${location.name}" is now active`,
-        text,
-        html,
-      });
-      console.log(`Email sent to ${location.email}`);
       await getFirestore().doc(`locations/${locationId}`).update({
         confirmationEmailSentAt: new Date().toISOString(),
       });
     } catch (err) {
-      console.error("SendGrid error:", err?.response?.body ?? err);
+      console.error("Failed to update location:", err);
     }
   });
 
@@ -297,13 +957,6 @@ exports.onBookingCreated = functions.firestore
     const booking = snap.data();
     const bookingId = context.params.bookingId;
 
-    const apiKey = functions.config().sendgrid?.api_key;
-    if (!apiKey) {
-      console.error("SendGrid API key not set.");
-      return;
-    }
-    sgMail.setApiKey(apiKey);
-
     // Format date and time
     const dateObj = new Date(booking.date + "T00:00:00");
     const dateStr = dateObj.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
@@ -312,123 +965,65 @@ exports.onBookingCreated = functions.firestore
     const timeStr = `${h % 12 || 12}:${String(m).padStart(2, "0")} ${ampm}`;
     const refCode = bookingId.slice(0, 8).toUpperCase();
 
-    // ── 1. Email to the CUSTOMER ─────────────────────────────────────────
-    const customerHtml = `
-      <!DOCTYPE html><html><head><meta charset="utf-8" />
-      <style>
-        body { margin: 0; padding: 0; background: #f7f8fa; font-family: Arial, sans-serif; }
-        .wrapper { max-width: 560px; margin: 40px auto; background: #ffffff; border-radius: 16px; overflow: hidden; }
-        .header { background: linear-gradient(135deg, #E25D25 0%, #c94f1f 100%); padding: 40px; text-align: center; }
-        .header h1 { color: #ffffff; font-size: 24px; margin: 0; }
-        .header p { color: rgba(255,255,255,0.8); font-size: 14px; margin: 8px 0 0; }
-        .body { padding: 40px; }
-        .body p { color: #444; font-size: 15px; line-height: 1.7; }
-        .detail-card { background: #fdf0ea; border-radius: 12px; padding: 24px; margin: 24px 0; }
-        .detail-row { margin-bottom: 10px; font-size: 14px; color: #333; }
-        .detail-label { font-weight: 600; color: #E25D25; }
-        .ref { font-size: 12px; color: #999; margin-top: 16px; }
-        .cta { text-align: center; margin: 28px 0; }
-        .cta a { display: inline-block; background: #E25D25; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 10px; font-weight: 600; font-size: 14px; }
-        .footer { background: #f7f8fa; padding: 24px; text-align: center; font-size: 12px; color: #999; }
-      </style></head>
-      <body>
-        <div class="wrapper">
-          <div class="header">
-            <h1>Assessment Confirmed!</h1>
-            <p>Your booking is all set</p>
-          </div>
-          <div class="body">
-            <p>Hi ${booking.customerName},</p>
-            <p>Your free 40-minute assessment has been confirmed. Here are your booking details:</p>
-            <div class="detail-card">
-              <div class="detail-row"><span class="detail-label">Location: </span>${booking.locationName}</div>
-              <div class="detail-row"><span class="detail-label">Address: </span>${booking.locationAddress}</div>
-              <div class="detail-row"><span class="detail-label">Date: </span>${dateStr}</div>
-              <div class="detail-row"><span class="detail-label">Time: </span>${timeStr} (40 minutes)</div>
-              <div class="ref">Booking Ref: ${refCode}</div>
-            </div>
-            <p>Please arrive a few minutes early. If you need to reschedule, contact your centre directly.</p>
-            <div class="cta"><a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(booking.locationAddress)}">Get Directions →</a></div>
-          </div>
-          <div class="footer">&copy; ${new Date().getFullYear()} Success Tutoring. All rights reserved.</div>
-        </div>
-      </body></html>
-    `;
-
-    // ── 2. Email to the FRANCHISE PARTNER ────────────────────────────────
     const locationDoc = await getFirestore().doc(`locations/${booking.locationId}`).get();
-    const locationEmail = locationDoc.exists ? locationDoc.data().email : null;
+    const locationData = locationDoc.exists ? locationDoc.data() : {};
+    const locationEmail = locationData.email || null;
+    const country = locationData.country || null;
 
-    const partnerHtml = `
-      <!DOCTYPE html><html><head><meta charset="utf-8" />
-      <style>
-        body { margin: 0; padding: 0; background: #f7f8fa; font-family: Arial, sans-serif; }
-        .wrapper { max-width: 560px; margin: 40px auto; background: #ffffff; border-radius: 16px; overflow: hidden; }
-        .header { background: linear-gradient(135deg, #6dcbca 0%, #4fa8a7 100%); padding: 40px; text-align: center; }
-        .header h1 { color: #ffffff; font-size: 24px; margin: 0; }
-        .header p { color: rgba(255,255,255,0.8); font-size: 14px; margin: 8px 0 0; }
-        .body { padding: 40px; }
-        .body p { color: #444; font-size: 15px; line-height: 1.7; }
-        .detail-card { background: #f0fafa; border-radius: 12px; padding: 24px; margin: 24px 0; }
-        .detail-row { margin-bottom: 10px; font-size: 14px; color: #333; }
-        .detail-label { font-weight: 600; color: #4fa8a7; }
-        .ref { font-size: 12px; color: #999; margin-top: 16px; }
-        .cta { text-align: center; margin: 28px 0; }
-        .cta a { display: inline-block; background: #6dcbca; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 10px; font-weight: 600; font-size: 14px; }
-        .footer { background: #f7f8fa; padding: 24px; text-align: center; font-size: 12px; color: #999; }
-      </style></head>
-      <body>
-        <div class="wrapper">
-          <div class="header">
-            <h1>New Assessment Booking!</h1>
-            <p>A customer has booked an assessment at your centre</p>
-          </div>
-          <div class="body">
-            <p>Hi there,</p>
-            <p>A new assessment has been booked at <strong>${booking.locationName}</strong>:</p>
-            <div class="detail-card">
-              <div class="detail-row"><span class="detail-label">Customer: </span>${booking.customerName}</div>
-              <div class="detail-row"><span class="detail-label">Email: </span>${booking.customerEmail}</div>
-              <div class="detail-row"><span class="detail-label">Phone: </span>${booking.customerPhone}</div>
-              <div class="detail-row"><span class="detail-label">Date: </span>${dateStr}</div>
-              <div class="detail-row"><span class="detail-label">Time: </span>${timeStr} (40 minutes)</div>
-              ${booking.notes ? `<div class="detail-row"><span class="detail-label">Notes: </span>${booking.notes}</div>` : ""}
-              <div class="ref">Booking Ref: ${refCode}</div>
-            </div>
-            <p>Log in to your Partner Portal to view all upcoming bookings.</p>
-            <div class="cta"><a href="${PORTAL_URL}">Open Partner Portal &rarr;</a></div>
-          </div>
-          <div class="footer">&copy; ${new Date().getFullYear()} Success Tutoring. All rights reserved.</div>
-        </div>
-      </body></html>
-    `;
+    const mergeData = {
+      customerName: booking.customerName,
+      customerFirstName: (booking.customerName || '').split(' ')[0],
+      customerEmail: booking.customerEmail,
+      customerPhone: booking.customerPhone,
+      locationName: booking.locationName,
+      locationAddress: booking.locationAddress,
+      locationEmail: locationEmail || '',
+      locationPhone: locationData.phone || '',
+      bookingDate: dateStr,
+      bookingTime: timeStr,
+      bookingRef: refCode,
+      portalLink: PORTAL_URL,
+    };
 
-    try {
-      await sgMail.send({
-        to: booking.customerEmail,
-        from: { email: FROM_EMAIL, name: FROM_NAME },
-        subject: `Assessment Confirmed — ${dateStr} at ${timeStr}`,
-        text: `Hi ${booking.customerName}, your assessment at ${booking.locationName} on ${dateStr} at ${timeStr} is confirmed. Ref: ${refCode}`,
-        html: customerHtml,
-      });
-      console.log(`Customer email sent to ${booking.customerEmail}`);
-    } catch (err) {
-      console.error("Customer email error:", err?.response?.body ?? err);
+    // Send customer email
+    const customerSent = await sendTemplatedEmail({
+      to: booking.customerEmail,
+      templateKey: 'customer_assessment_booked',
+      mergeData,
+      country,
+      replyTo: locationEmail,
+    });
+
+    if (!customerSent) {
+      // Fallback to legacy
+      const apiKey = functions.config().sendgrid?.api_key;
+      if (apiKey) {
+        sgMail.setApiKey(apiKey);
+        const { html, text } = buildConfirmationEmail({ name: booking.locationName, address: booking.locationAddress, phone: locationData.phone || '', email: locationEmail || '' });
+        try {
+          await sgMail.send({ to: booking.customerEmail, from: { email: FROM_EMAIL, name: FROM_NAME }, subject: `Assessment Confirmed — ${dateStr} at ${timeStr}`, text: `Hi ${booking.customerName}, your assessment is confirmed.`, html });
+        } catch (err) { console.error("Customer email error:", err?.response?.body ?? err); }
+      }
     }
 
+    // Send franchise partner email
     if (locationEmail) {
-      try {
-        await sgMail.send({
-          to: locationEmail,
-          from: { email: FROM_EMAIL, name: FROM_NAME },
-          subject: `New Booking — ${booking.customerName} on ${dateStr} at ${timeStr}`,
-          text: `New assessment at ${booking.locationName}. Customer: ${booking.customerName}, ${dateStr} at ${timeStr}. Ref: ${refCode}`,
-          html: partnerHtml,
-        });
-        console.log(`Partner email sent to ${locationEmail}`);
-      } catch (err) {
-        console.error("Partner email error:", err?.response?.body ?? err);
-      }
+      const partnerSent = await sendTemplatedEmail({
+        to: locationEmail,
+        templateKey: 'franchise_assessment_booked',
+        mergeData,
+        country,
+        replyTo: locationEmail,
+      });
+
+      // Also send new lead email to partner
+      await sendTemplatedEmail({
+        to: locationEmail,
+        templateKey: 'franchise_new_lead_assessment',
+        mergeData,
+        country,
+        replyTo: locationEmail,
+      });
     }
 
     try {
@@ -447,7 +1042,6 @@ exports.onEnquiryCreated = functions.firestore
     const enquiry = snap.data();
     const { locationId, enquiryId } = context.params;
 
-    // Look up the location to get the franchise partner's email
     const locationDoc = await getFirestore().doc(`locations/${locationId}`).get();
     if (!locationDoc.exists) {
       console.warn(`Location ${locationId} not found — skipping enquiry email.`);
@@ -455,82 +1049,59 @@ exports.onEnquiryCreated = functions.firestore
     }
     const location = locationDoc.data();
     const partnerEmail = location.email;
-
     if (!partnerEmail) {
       console.warn(`Location ${locationId} has no email — skipping.`);
       return;
     }
 
-    const apiKey = functions.config().sendgrid?.api_key;
-    if (!apiKey) {
-      console.error("SendGrid API key not set.");
-      return;
-    }
-    sgMail.setApiKey(apiKey);
-
-    // Map form type to a friendly label
-    const formLabels = {
-      vip_list: "VIP List",
-      coming_soon: "Secure Foundation Rate",
-      temporary_closed: "Enquiry (Temp. Closed)",
-    };
+    const formLabels = { vip_list: "VIP List", coming_soon: "Secure Foundation Rate", temporary_closed: "Enquiry (Temp. Closed)" };
     const formLabel = formLabels[enquiry.type] || "Enquiry";
 
-    const html = `
-      <!DOCTYPE html><html><head><meta charset="utf-8" />
-      <style>
-        body { margin: 0; padding: 0; background: #f7f8fa; font-family: Arial, sans-serif; }
-        .wrapper { max-width: 560px; margin: 40px auto; background: #ffffff; border-radius: 16px; overflow: hidden; }
-        .header { background: linear-gradient(135deg, #E25D25 0%, #c94f1f 100%); padding: 40px; text-align: center; }
-        .header h1 { color: #ffffff; font-size: 24px; margin: 0; }
-        .header p { color: rgba(255,255,255,0.8); font-size: 14px; margin: 8px 0 0; }
-        .body { padding: 40px; }
-        .body p { color: #444; font-size: 15px; line-height: 1.7; }
-        .detail-card { background: #fdf0ea; border-radius: 12px; padding: 24px; margin: 24px 0; }
-        .detail-row { margin-bottom: 10px; font-size: 14px; color: #333; }
-        .detail-label { font-weight: 600; color: #E25D25; }
-        .cta { text-align: center; margin: 28px 0; }
-        .cta a { display: inline-block; background: #E25D25; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 10px; font-weight: 600; font-size: 14px; }
-        .footer { background: #f7f8fa; padding: 24px; text-align: center; font-size: 12px; color: #999; }
-      </style></head>
-      <body>
-        <div class="wrapper">
-          <div class="header">
-            <h1>New Lead!</h1>
-            <p>A new ${formLabel} enquiry for ${location.name}</p>
-          </div>
-          <div class="body">
-            <p>Hi there,</p>
-            <p>You've received a new lead via the <strong>${formLabel}</strong> form for <strong>${location.name}</strong>:</p>
-            <div class="detail-card">
-              <div class="detail-row"><span class="detail-label">Name: </span>${enquiry.firstName} ${enquiry.lastName}</div>
-              <div class="detail-row"><span class="detail-label">Email: </span>${enquiry.email}</div>
-              <div class="detail-row"><span class="detail-label">Phone: </span>${enquiry.phone}</div>
-              <div class="detail-row"><span class="detail-label">Form: </span>${formLabel}</div>
-              <div class="detail-row"><span class="detail-label">Location: </span>${location.name}</div>
-            </div>
-            <p>Log in to your Partner Portal to view all enquiries.</p>
-            <div class="cta"><a href="${PORTAL_URL}">Open Partner Portal &rarr;</a></div>
-          </div>
-          <div class="footer">&copy; ${new Date().getFullYear()} Success Tutoring. All rights reserved.</div>
-        </div>
-      </body></html>
-    `;
+    // Map enquiry type to template key
+    const templateMap = {
+      vip_list: 'franchise_new_lead_vip',
+      coming_soon: 'franchise_new_lead_foundation',
+      temporary_closed: 'franchise_new_lead_enquiry',
+    };
+    const templateKey = templateMap[enquiry.type] || 'franchise_new_lead_enquiry';
 
-    try {
-      await sgMail.send({
-        to: partnerEmail,
-        from: { email: FROM_EMAIL, name: FROM_NAME },
-        subject: "New Lead",
-        text: `New ${formLabel} enquiry for ${location.name}. ${enquiry.firstName} ${enquiry.lastName}, ${enquiry.email}, ${enquiry.phone}`,
-        html,
+    const mergeData = {
+      customerName: `${enquiry.firstName} ${enquiry.lastName}`,
+      customerFirstName: enquiry.firstName,
+      customerEmail: enquiry.email,
+      customerPhone: enquiry.phone,
+      locationName: location.name,
+      locationEmail: partnerEmail,
+      formType: formLabel,
+      portalLink: PORTAL_URL,
+    };
+
+    // Send franchise partner email
+    await sendTemplatedEmail({
+      to: partnerEmail,
+      templateKey,
+      mergeData,
+      country: location.country,
+      replyTo: partnerEmail,
+    });
+
+    // Send customer confirmation based on type
+    const customerTemplateMap = {
+      vip_list: 'customer_vip_joined',
+      coming_soon: 'customer_foundation_membership',
+      temporary_closed: 'customer_enquiry_temp_closed',
+    };
+    const customerTemplateKey = customerTemplateMap[enquiry.type];
+    if (customerTemplateKey && enquiry.email) {
+      await sendTemplatedEmail({
+        to: enquiry.email,
+        templateKey: customerTemplateKey,
+        mergeData,
+        country: location.country,
+        replyTo: partnerEmail,
       });
-      console.log(`New lead email sent to ${partnerEmail} for enquiry ${enquiryId}`);
-    } catch (err) {
-      console.error("SendGrid error:", err?.response?.body ?? err);
     }
 
-    // Mark the enquiry as email-sent
     try {
       await getFirestore()
         .doc(`locations/${locationId}/enquiries/${enquiryId}`)
