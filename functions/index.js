@@ -1246,29 +1246,50 @@ exports.savePaymentFromCheckoutPublic = functions.runWith({ secrets: ["STRIPE_SE
     const stripeAccountId = location.stripeAccountId;
     if (!stripeAccountId) { res.status(400).json({ error: "Stripe not connected." }); return; }
 
-    // Find the customer on the connected account
-    const customers = await requireStripe().customers.list(
+    const stripe = requireStripe();
+
+    // Strategy 1: Find customer by email
+    let customer = null;
+    const customers = await stripe.customers.list(
       { email: parentEmail, limit: 1 },
       { stripeAccount: stripeAccountId }
     );
+    if (customers.data.length > 0) {
+      customer = customers.data[0];
+    }
 
-    if (customers.data.length === 0) {
-      res.status(404).json({ error: "No Stripe customer found for this email." });
+    // Strategy 2: Search recent completed checkout sessions if no customer found by email
+    if (!customer) {
+      const sessions = await stripe.checkout.sessions.list(
+        { limit: 10 },
+        { stripeAccount: stripeAccountId }
+      );
+      for (const session of sessions.data) {
+        if (session.mode === "setup" && session.status === "complete" && session.customer) {
+          customer = await stripe.customers.retrieve(
+            session.customer,
+            { stripeAccount: stripeAccountId }
+          );
+          break;
+        }
+      }
+    }
+
+    if (!customer) {
+      res.status(404).json({ error: "No Stripe customer found. Please try again." });
       return;
     }
 
-    const customer = customers.data[0];
-
     // Get payment methods (try card first, then BECS)
     let pm = null;
-    const cardMethods = await requireStripe().paymentMethods.list(
+    const cardMethods = await stripe.paymentMethods.list(
       { customer: customer.id, type: "card" },
       { stripeAccount: stripeAccountId }
     );
     if (cardMethods.data.length > 0) {
       pm = cardMethods.data[0];
     } else {
-      const becsMethods = await requireStripe().paymentMethods.list(
+      const becsMethods = await stripe.paymentMethods.list(
         { customer: customer.id, type: "au_becs_debit" },
         { stripeAccount: stripeAccountId }
       );
@@ -1297,21 +1318,37 @@ exports.savePaymentFromCheckoutPublic = functions.runWith({ secrets: ["STRIPE_SE
       };
     }
 
+    // Update parent doc directly
+    const parentsSnap = await db.collection("parents")
+      .where("email", "==", parentEmail.toLowerCase())
+      .where("locationId", "==", locationId)
+      .limit(1)
+      .get();
+
+    if (!parentsSnap.empty) {
+      await parentsSnap.docs[0].ref.update({
+        paymentMethod: paymentMethodInfo,
+        stripeCustomerId: customer.id,
+      });
+    }
+
     // Update sales for this parent at this location
     const salesSnap = await db.collection("sales")
       .where("locationId", "==", locationId)
       .where("parentEmail", "==", parentEmail)
       .get();
 
-    const batch = db.batch();
-    salesSnap.docs.forEach((doc) => {
-      batch.update(doc.ref, {
-        paymentMethod: paymentMethodInfo,
-        stripeCustomerId: customer.id,
-        stripeStatus: "connected",
+    if (!salesSnap.empty) {
+      const batch = db.batch();
+      salesSnap.docs.forEach((d) => {
+        batch.update(d.ref, {
+          paymentMethod: paymentMethodInfo,
+          stripeCustomerId: customer.id,
+          stripeStatus: "connected",
+        });
       });
-    });
-    await batch.commit();
+      await batch.commit();
+    }
 
     res.status(200).json({
       success: true,
