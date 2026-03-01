@@ -642,7 +642,9 @@ exports.sendSessionNotification = functions.https.onCall(async (data, context) =
   }
 
   return { success: sent > 0, sent, total: emails.size };
-});────
+});
+
+// ── Callable: Seed default email templates ───────────────────────────────
 exports.seedEmailTemplates = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
