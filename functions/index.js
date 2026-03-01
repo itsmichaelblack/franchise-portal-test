@@ -1236,6 +1236,7 @@ exports.savePaymentFromCheckoutPublic = functions.runWith({ secrets: ["STRIPE_SE
 
   try {
     const { parentEmail, locationId, sessionId } = req.body;
+    console.log("savePaymentFromCheckoutPublic called:", { parentEmail, locationId, sessionId: sessionId || "NONE" });
     if (!locationId) { res.status(400).json({ error: "locationId required." }); return; }
 
     const db = getFirestore();
@@ -1245,6 +1246,7 @@ exports.savePaymentFromCheckoutPublic = functions.runWith({ secrets: ["STRIPE_SE
     const location = locationDoc.data();
     const stripeAccountId = location.stripeAccountId;
     if (!stripeAccountId) { res.status(400).json({ error: "Stripe not connected." }); return; }
+    console.log("stripeAccountId:", stripeAccountId);
 
     const stripe = requireStripe();
     let customer = null;
@@ -1253,23 +1255,29 @@ exports.savePaymentFromCheckoutPublic = functions.runWith({ secrets: ["STRIPE_SE
     // Strategy 1: Use session ID to get exact customer and setup intent
     if (sessionId) {
       try {
+        console.log("Trying session ID lookup:", sessionId);
         const session = await stripe.checkout.sessions.retrieve(
           sessionId,
           { expand: ["setup_intent"] },
           { stripeAccount: stripeAccountId }
         );
+        console.log("Session found:", { customer: session.customer, status: session.status, setup_intent: session.setup_intent?.id || session.setup_intent });
         if (session.customer) {
           customer = await stripe.customers.retrieve(
             session.customer,
             { stripeAccount: stripeAccountId }
           );
+          console.log("Customer from session:", customer.id, customer.email);
         }
         if (session.setup_intent && typeof session.setup_intent === "object") {
           setupIntent = session.setup_intent;
+          console.log("SetupIntent:", setupIntent.id, "payment_method:", setupIntent.payment_method);
         }
       } catch (e) {
         console.error("Session retrieval error:", e.message);
       }
+    } else {
+      console.log("No sessionId provided");
     }
 
     // Strategy 2: Find customer by email
@@ -1301,14 +1309,17 @@ exports.savePaymentFromCheckoutPublic = functions.runWith({ secrets: ["STRIPE_SE
     }
 
     if (!customer) {
+      console.error("NO CUSTOMER FOUND by any strategy");
       res.status(404).json({ error: "No Stripe customer found. Please try again." });
       return;
     }
+    console.log("Customer found:", customer.id);
 
     // Get payment method - first try from setup intent, then list
     let pm = null;
     if (setupIntent && setupIntent.payment_method) {
       const pmId = typeof setupIntent.payment_method === "string" ? setupIntent.payment_method : setupIntent.payment_method.id;
+      console.log("Getting PM from setup intent:", pmId);
       pm = await stripe.paymentMethods.retrieve(pmId, { stripeAccount: stripeAccountId });
     }
 
