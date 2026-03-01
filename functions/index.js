@@ -1116,6 +1116,69 @@ function setCors(res) {
   res.set("Access-Control-Allow-Headers", "Content-Type");
 }
 
+// Public SetupIntent creation for in-app Stripe Payment Sheet
+exports.createSetupIntentPublic = functions.runWith({ secrets: ["STRIPE_SECRET_KEY"] }).https.onRequest(async (req, res) => {
+  setCors(res);
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
+
+  try {
+    const { parentEmail, locationId } = req.body;
+    if (!parentEmail || !locationId) { res.status(400).json({ error: "parentEmail and locationId required." }); return; }
+
+    const db = getFirestore();
+    const locationDoc = await db.doc(`locations/${locationId}`).get();
+    if (!locationDoc.exists) { res.status(404).json({ error: "Location not found." }); return; }
+
+    const location = locationDoc.data();
+    const stripeAccountId = location.stripeAccountId;
+    if (!stripeAccountId) { res.status(400).json({ error: "Stripe not connected for this centre." }); return; }
+
+    const stripe = requireStripe();
+
+    // Find or create customer on the connected account
+    let customer;
+    const existing = await stripe.customers.list(
+      { email: parentEmail, limit: 1 },
+      { stripeAccount: stripeAccountId }
+    );
+    if (existing.data.length > 0) {
+      customer = existing.data[0];
+    } else {
+      customer = await stripe.customers.create(
+        { email: parentEmail },
+        { stripeAccount: stripeAccountId }
+      );
+    }
+
+    // Create ephemeral key for the customer
+    const ephemeralKey = await stripe.ephemeralKeys.create(
+      { customer: customer.id },
+      { apiVersion: "2023-10-16", stripeAccount: stripeAccountId }
+    );
+
+    // Create SetupIntent on the connected account
+    const setupIntent = await stripe.setupIntents.create(
+      {
+        customer: customer.id,
+        payment_method_types: ["card"],
+      },
+      { stripeAccount: stripeAccountId }
+    );
+
+    res.status(200).json({
+      setupIntent: setupIntent.client_secret,
+      ephemeralKey: ephemeralKey.secret,
+      customer: customer.id,
+      publishableKey: "pk_test_51T5SUvLsPU0tzh4WBBfeISFfSFTLC0rD2c7fuB9h3ePAToMm0levx9XYwQ2yqIDxwswTVmcX9EaTHqhUOuL38d0Y00DHJQZK6H",
+      stripeAccountId,
+    });
+  } catch (e) {
+    console.error("createSetupIntentPublic error:", e);
+    res.status(500).json({ error: e.message || "Failed to create setup intent." });
+  }
+});
+
 // Public version of createPaymentLink for parent app
 exports.createPaymentLinkPublic = functions.runWith({ secrets: ["STRIPE_SECRET_KEY"] }).https.onRequest(async (req, res) => {
   setCors(res);
