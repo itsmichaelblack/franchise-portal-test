@@ -1161,7 +1161,7 @@ exports.createSetupIntentPublic = functions.runWith({ secrets: ["STRIPE_SECRET_K
     const setupIntent = await stripe.setupIntents.create(
       {
         customer: customer.id,
-        payment_method_types: ["card"],
+        payment_method_types: ["card", "au_becs_debit"],
       },
       { stripeAccount: stripeAccountId }
     );
@@ -1213,7 +1213,7 @@ exports.createPaymentLinkPublic = functions.runWith({ secrets: ["STRIPE_SECRET_K
         mode: "setup",
         currency,
         customer_email: customerEmail || undefined,
-        payment_method_types: ["card"],
+        payment_method_types: ["card", "au_becs_debit"],
         success_url: `${PORTAL_URL}?payment_setup=success&sale_id=${saleId || ""}`,
         cancel_url: `${PORTAL_URL}?payment_setup=cancelled`,
         metadata: { saleId: saleId || "", locationId },
