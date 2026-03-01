@@ -118,8 +118,8 @@ service cloud.firestore {
     // ── Availability collection ─────────────────────────────────────────────
     // Each document ID matches a locationId
     match /availability/{locationId} {
-      // HQ admins can read all availability
-      allow read: if isAdmin();
+      // Allow public read (needed for parent app)
+      allow read: if true;
 
       // Franchise partners can read and write their own availability
       allow read: if isFranchisePartner(locationId);
@@ -134,11 +134,14 @@ service cloud.firestore {
       // Anyone can create a booking (public booking form)
       allow create: if true;
 
+      // Allow public read (needed for parent app to load sessions)
+      allow read: if true;
+
       // HQ admins can read all bookings
-      allow read: if isAdmin();
+      // allow read: if isAdmin();
 
       // Franchise partners can read bookings for their location
-      allow read: if isAuth() && resource.data.locationId == userDoc().locationId;
+      // allow read: if isAuth() && resource.data.locationId == userDoc().locationId;
 
       // Franchise partners can update bookings for their location
       allow update: if isAuth() && resource.data.locationId == userDoc().locationId;
@@ -151,8 +154,8 @@ service cloud.firestore {
 
       // Students subcollection (enrolled students + attendance)
       match /students/{studentId} {
-        allow read: if isAuth();
-        allow create, update, delete: if isAuth();
+        allow read: if true;
+        allow create, update, delete: if true;
       }
     }
 
@@ -288,6 +291,13 @@ service cloud.firestore {
         allow read, create, update: if true;
         allow delete: if isAdmin();
       }
+    }
+
+    // ── Transactions collection ───────────────────────────────────────────
+    match /transactions/{transactionId} {
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if isAdmin();
     }
 
     // ── Deny everything else ────────────────────────────────────────────────
