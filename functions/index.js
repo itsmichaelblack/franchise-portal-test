@@ -1500,6 +1500,7 @@ exports.createSubscriptionPublic = functions.runWith({ secrets: ["STRIPE_SECRET_
       );
       if (pms.data.length > 0) {
         paymentMethodId = pms.data[0].id;
+        console.log("PM from customer card list:", paymentMethodId);
       } else {
         const becsPms = await stripe.paymentMethods.list(
           { customer: customer.id, type: "au_becs_debit" },
@@ -1507,6 +1508,29 @@ exports.createSubscriptionPublic = functions.runWith({ secrets: ["STRIPE_SECRET_
         );
         if (becsPms.data.length > 0) {
           paymentMethodId = becsPms.data[0].id;
+          console.log("PM from customer BECS list:", paymentMethodId);
+        }
+      }
+    }
+
+    // Fallback: search recent completed checkout sessions for this email to find PM
+    if (!paymentMethodId) {
+      console.log("No PM found yet, searching recent checkout sessions...");
+      const sessions = await stripe.checkout.sessions.list(
+        { limit: 5, status: "complete" },
+        { stripeAccount: stripeAccountId }
+      );
+      for (const sess of sessions.data) {
+        if (sess.setup_intent) {
+          const si = await stripe.setupIntents.retrieve(
+            typeof sess.setup_intent === "string" ? sess.setup_intent : sess.setup_intent.id,
+            { stripeAccount: stripeAccountId }
+          );
+          if (si.payment_method) {
+            paymentMethodId = typeof si.payment_method === "string" ? si.payment_method : si.payment_method.id;
+            console.log("PM from checkout session setup intent:", paymentMethodId);
+            break;
+          }
         }
       }
     }
@@ -1519,7 +1543,6 @@ exports.createSubscriptionPublic = functions.runWith({ secrets: ["STRIPE_SECRET_
         await stripe.paymentMethods.attach(paymentMethodId, { customer: customer.id }, { stripeAccount: stripeAccountId });
         console.log("PM attached to customer");
       } catch (attachErr) {
-        // May already be attached — that's fine
         console.log("PM attach note:", attachErr.message);
       }
       await stripe.customers.update(customer.id, {
