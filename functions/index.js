@@ -5,6 +5,7 @@
 const functions = require("firebase-functions");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
+const { getMessaging } = require("firebase-admin/messaging");
 const sgMail = require("@sendgrid/mail");
 
 initializeApp();
@@ -2339,4 +2340,124 @@ exports.createSubscriptionPublic = functions.runWith({ secrets: ["STRIPE_SECRET_
     console.error("createSubscriptionPublic error:", e);
     res.status(500).json({ error: e.message || "Failed to create subscription." });
   }
+});
+
+// ── Callable: Send push notification to targeted users ───────────────────
+exports.sendPushNotification = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  }
+
+  // Verify caller is master_admin
+  const callerDoc = await getFirestore().doc(`users/${context.auth.uid}`).get();
+  if (!callerDoc.exists || callerDoc.data().role !== "master_admin") {
+    throw new functions.https.HttpsError("permission-denied", "Only master admins can send push notifications.");
+  }
+
+  const { title, message, deepLink, targetType, targetCountry, targetState } = data;
+  if (!title || !message) {
+    throw new functions.https.HttpsError("invalid-argument", "title and message are required.");
+  }
+
+  const db = getFirestore();
+
+  // Query parents who have push tokens and promotional offers enabled
+  let parentsQuery = db.collection("parents");
+  const snap = await parentsQuery.get();
+
+  const tokens = [];
+  const parentIds = [];
+
+  snap.docs.forEach(doc => {
+    const p = doc.data();
+
+    // Skip if no FCM token
+    if (!p.fcmToken) return;
+
+    // Skip if promotional offers is explicitly disabled
+    if (p.notifications && p.notifications.promotionalOffers === false) return;
+
+    // Filter by country
+    if (targetType === "country" || targetType === "state") {
+      if (!targetCountry || (p.country || "").toUpperCase() !== targetCountry.toUpperCase()) return;
+    }
+
+    // Filter by state
+    if (targetType === "state") {
+      if (!targetState || (p.state || "").toLowerCase() !== targetState.toLowerCase()) return;
+    }
+
+    tokens.push(p.fcmToken);
+    parentIds.push(doc.id);
+  });
+
+  let sent = 0;
+  let failed = 0;
+
+  if (tokens.length > 0) {
+    // FCM supports up to 500 tokens per multicast
+    const messaging = getMessaging();
+    const batchSize = 500;
+    for (let i = 0; i < tokens.length; i += batchSize) {
+      const batch = tokens.slice(i, i + batchSize);
+      try {
+        const fcmMessage = {
+          notification: {
+            title: title,
+            body: message,
+          },
+          data: {},
+          tokens: batch,
+        };
+
+        if (deepLink) {
+          fcmMessage.data.deepLink = deepLink;
+        }
+
+        // Add Android/iOS specific config
+        fcmMessage.android = {
+          notification: { sound: "default", channelId: "promotional" },
+        };
+        fcmMessage.apns = {
+          payload: { aps: { sound: "default", badge: 1 } },
+        };
+
+        const result = await messaging.sendEachForMulticast(fcmMessage);
+        sent += result.successCount;
+        failed += result.failureCount;
+
+        // Clean up invalid tokens
+        result.responses.forEach((resp, idx) => {
+          if (!resp.success && resp.error &&
+            (resp.error.code === "messaging/invalid-registration-token" ||
+             resp.error.code === "messaging/registration-token-not-registered")) {
+            // Remove invalid token from parent doc
+            const parentId = parentIds[i + idx];
+            db.doc(`parents/${parentId}`).update({ fcmToken: null }).catch(() => {});
+          }
+        });
+      } catch (e) {
+        console.error("FCM batch send error:", e);
+        failed += batch.length;
+      }
+    }
+  }
+
+  // Store notification record
+  await db.collection("push_notifications").add({
+    title,
+    message,
+    deepLink: deepLink || null,
+    targetType,
+    targetCountry: targetCountry || null,
+    targetState: targetState || null,
+    sent,
+    failed,
+    totalTargeted: tokens.length,
+    sentBy: context.auth.uid,
+    sentByEmail: context.auth.token.email || null,
+    sentAt: require("firebase-admin/firestore").FieldValue.serverTimestamp(),
+  });
+
+  return { success: true, sent, failed, totalTargeted: tokens.length };
 });

@@ -205,6 +205,11 @@ service cloud.firestore {
       allow write: if isMasterAdmin();
     }
 
+    match /push_notifications/{notificationId} {
+      allow read: if isMasterAdmin();
+      allow write: if isMasterAdmin();
+    }
+
     // ── Services collection ────────────────────────────────────────────────
     match /services/{serviceId} {
       allow read: if true;

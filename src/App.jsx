@@ -95,6 +95,7 @@ const icons = {
   send: "M22 2L11 13 M22 2l-7 20-4-9-9-4 20-7z",
   creditCard: "M1 4h22v16H1z M1 10h22",
   chart: "M3 3v18h18 M7 14l4-4 4 4 5-6",
+  bell: "M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9 M13.73 21a2 2 0 0 1-3.46 0",
 };
 
 // --- Styles ---------------------------------------------------------------------
@@ -1633,6 +1634,12 @@ function HQPortal({ user, onLogout }) {
   const [testEmailSending, setTestEmailSending] = useState(false);
   const [templateSaving, setTemplateSaving] = useState(false);
   const [templateSeeding, setTemplateSeeding] = useState(false);
+
+  // Push notifications state
+  const [pushNotifications, setPushNotifications] = useState([]);
+  const [pushForm, setPushForm] = useState({ title: '', message: '', deepLink: '', targetType: 'all', targetCountry: '', targetState: '' });
+  const [pushSending, setPushSending] = useState(false);
+  const [pushLoading, setPushLoading] = useState(false);
   const emailQuillRef = useRef(null);
   const emailQuillInstanceRef = useRef(null);
   const [countryOverrideMode, setCountryOverrideMode] = useState(null); // null | 'AU' | 'NZ' | 'UK'
@@ -2182,6 +2189,11 @@ function HQPortal({ user, onLogout }) {
           {isMaster && (
             <button className={`nav-item ${page === 'email_templates' ? 'active' : ''}`} onClick={() => setPagePersist('email_templates')}>
               <Icon path={icons.mail} size={16} /> Email Templates
+            </button>
+          )}
+          {isMaster && (
+            <button className={`nav-item ${page === 'push_notifications' ? 'active' : ''}`} onClick={() => setPagePersist('push_notifications')}>
+              <Icon path={icons.bell} size={16} /> Push Notifications
             </button>
           )}
           <button className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => setPagePersist('settings')}>
@@ -3209,6 +3221,187 @@ function HQPortal({ user, onLogout }) {
           )}
         </>
       )}
+
+      {/* Push Notifications Page */}
+      {page === 'push_notifications' && isMaster && (() => {
+        const COUNTRIES = [
+          { code: 'AU', name: 'Australia', states: ['NSW', 'VIC', 'QLD', 'SA', 'WA', 'TAS', 'NT', 'ACT'] },
+          { code: 'NZ', name: 'New Zealand', states: ['Auckland', 'Wellington', 'Canterbury', 'Waikato', 'Bay of Plenty', 'Otago', 'Hawkes Bay', 'Manawatu-Wanganui', 'Taranaki', 'Northland', 'Southland', 'Nelson', 'Marlborough', 'Gisborne', 'West Coast', 'Tasman'] },
+          { code: 'UK', name: 'United Kingdom', states: ['England', 'Scotland', 'Wales', 'Northern Ireland', 'Greater London', 'South East', 'South West', 'East Midlands', 'West Midlands', 'North West', 'North East', 'Yorkshire', 'East of England'] },
+        ];
+        const selectedCountry = COUNTRIES.find(c => c.code === pushForm.targetCountry);
+
+        // Load notification history
+        const loadPushHistory = async () => {
+          setPushLoading(true);
+          try {
+            const { collection, getDocs, query, orderBy, limit } = await import('firebase/firestore');
+            const { db } = await import('./firebase.js');
+            const q = query(collection(db, 'push_notifications'), orderBy('sentAt', 'desc'), limit(50));
+            const snap = await getDocs(q);
+            setPushNotifications(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+          } catch (e) { console.error('Failed to load push history:', e); }
+          setPushLoading(false);
+        };
+
+        // Send push notification
+        const handleSendPush = async () => {
+          if (!pushForm.title.trim() || !pushForm.message.trim()) return;
+          if (!confirm(`Send this push notification to ${pushForm.targetType === 'all' ? 'ALL users' : pushForm.targetType === 'country' ? `all users in ${selectedCountry?.name || pushForm.targetCountry}` : `users in ${pushForm.targetState}, ${selectedCountry?.name || pushForm.targetCountry}`}?`)) return;
+          setPushSending(true);
+          try {
+            const { getFunctions, httpsCallable } = await import('firebase/functions');
+            const fns = getFunctions();
+            const sendFn = httpsCallable(fns, 'sendPushNotification');
+            const result = await sendFn({
+              title: pushForm.title.trim(),
+              message: pushForm.message.trim(),
+              deepLink: pushForm.deepLink.trim() || null,
+              targetType: pushForm.targetType,
+              targetCountry: pushForm.targetCountry || null,
+              targetState: pushForm.targetState || null,
+            });
+            showToast(`✓ Push notification sent to ${result.data?.sent || 0} user(s).`);
+            setPushForm({ title: '', message: '', deepLink: '', targetType: 'all', targetCountry: '', targetState: '' });
+            loadPushHistory();
+          } catch (e) {
+            console.error('Failed to send push:', e);
+            showToast('✗ Failed to send push notification.');
+          }
+          setPushSending(false);
+        };
+
+        // Load on mount
+        if (!pushLoading && pushNotifications.length === 0) {
+          loadPushHistory();
+        }
+
+        return (<>
+          <div className="page-header">
+            <div className="page-header-left">
+              <div className="page-title">Push Notifications</div>
+              <div className="page-desc">Send promotional push notifications to parent app users.</div>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, alignItems: 'start' }}>
+            {/* Compose Form */}
+            <div className="card hq" style={{ padding: 0 }}>
+              <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)', fontWeight: 800, fontSize: 16, color: 'var(--text)' }}>
+                <Icon path={icons.send} size={16} style={{ marginRight: 8, opacity: 0.5 }} /> Compose Notification
+              </div>
+              <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <div className="form-label hq">Title *</div>
+                  <input className="form-input hq" placeholder="e.g. 50% Off This Week!" value={pushForm.title} onChange={e => setPushForm(p => ({ ...p, title: e.target.value }))} maxLength={100} />
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, textAlign: 'right' }}>{pushForm.title.length}/100</div>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <div className="form-label hq">Message *</div>
+                  <textarea className="form-input hq" placeholder="Write your notification message..." value={pushForm.message} onChange={e => setPushForm(p => ({ ...p, message: e.target.value }))} rows={3} maxLength={500} style={{ resize: 'vertical', minHeight: 80, fontFamily: 'inherit' }} />
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, textAlign: 'right' }}>{pushForm.message.length}/500</div>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <div className="form-label hq">Deep Link URL <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(optional)</span></div>
+                  <input className="form-input hq" placeholder="e.g. successtutoring://promo or https://..." value={pushForm.deepLink} onChange={e => setPushForm(p => ({ ...p, deepLink: e.target.value }))} />
+                </div>
+
+                <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+                  <div className="form-label hq" style={{ marginBottom: 12 }}>Target Audience</div>
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                    {[{ v: 'all', l: 'All Users' }, { v: 'country', l: 'By Country' }, { v: 'state', l: 'By State' }].map(o => (
+                      <button key={o.v} className={`btn btn-ghost hq`} style={{
+                        flex: 1, justifyContent: 'center', fontWeight: 700, fontSize: 13,
+                        background: pushForm.targetType === o.v ? 'var(--orange-pale)' : 'transparent',
+                        color: pushForm.targetType === o.v ? 'var(--orange)' : 'var(--text-muted)',
+                        border: pushForm.targetType === o.v ? '2px solid var(--orange)' : '2px solid var(--border)',
+                      }} onClick={() => setPushForm(p => ({ ...p, targetType: o.v, targetCountry: o.v === 'all' ? '' : p.targetCountry, targetState: '' }))}>
+                        {o.l}
+                      </button>
+                    ))}
+                  </div>
+
+                  {pushForm.targetType !== 'all' && (
+                    <div style={{ display: 'grid', gridTemplateColumns: pushForm.targetType === 'state' ? '1fr 1fr' : '1fr', gap: 10 }}>
+                      <div>
+                        <div className="form-label hq" style={{ fontSize: 11 }}>Country</div>
+                        <select className="form-input hq" value={pushForm.targetCountry} onChange={e => setPushForm(p => ({ ...p, targetCountry: e.target.value, targetState: '' }))}
+                          style={{ appearance: 'none', backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '16px', paddingRight: 36, cursor: 'pointer' }}>
+                          <option value="">Select country...</option>
+                          {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                        </select>
+                      </div>
+                      {pushForm.targetType === 'state' && selectedCountry && (
+                        <div>
+                          <div className="form-label hq" style={{ fontSize: 11 }}>State / Region</div>
+                          <select className="form-input hq" value={pushForm.targetState} onChange={e => setPushForm(p => ({ ...p, targetState: e.target.value }))}
+                            style={{ appearance: 'none', backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27%3e%3cpath d=%27M6 9l6 6 6-6%27/%3e%3c/svg%3e")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '16px', paddingRight: 36, cursor: 'pointer' }}>
+                            <option value="">Select state...</option>
+                            {selectedCountry.states.map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <button className="btn btn-primary hq" style={{ width: '100%', justifyContent: 'center', marginTop: 8, padding: '14px 20px', fontSize: 15 }}
+                  disabled={pushSending || !pushForm.title.trim() || !pushForm.message.trim() || (pushForm.targetType === 'country' && !pushForm.targetCountry) || (pushForm.targetType === 'state' && (!pushForm.targetCountry || !pushForm.targetState))}
+                  onClick={handleSendPush}>
+                  <Icon path={icons.send} size={16} /> {pushSending ? 'Sending...' : 'Send Push Notification'}
+                </button>
+              </div>
+            </div>
+
+            {/* History */}
+            <div className="card hq" style={{ padding: 0 }}>
+              <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)', fontWeight: 800, fontSize: 16, color: 'var(--text)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span><Icon path={icons.clock} size={16} style={{ marginRight: 8, opacity: 0.5 }} /> Notification History</span>
+                <button className="btn btn-ghost hq" style={{ fontSize: 12 }} onClick={loadPushHistory}>
+                  <Icon path={icons.eye} size={13} /> Refresh
+                </button>
+              </div>
+              <div style={{ maxHeight: 600, overflowY: 'auto' }}>
+                {pushLoading && <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>Loading...</div>}
+                {!pushLoading && pushNotifications.length === 0 && (
+                  <div style={{ padding: 40, textAlign: 'center' }}>
+                    <Icon path={icons.bell} size={40} style={{ color: 'var(--orange)', opacity: 0.3 }} /><br /><br />
+                    <div style={{ fontWeight: 700, color: 'var(--text)' }}>No notifications sent yet</div>
+                    <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>Your sent notification history will appear here.</div>
+                  </div>
+                )}
+                {pushNotifications.map(n => (
+                  <div key={n.id} style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--orange-pale)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <Icon path={icons.bell} size={16} style={{ color: 'var(--orange)' }} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)', marginBottom: 2 }}>{n.title}</div>
+                      <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 6 }}>{n.message}</div>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 11 }}>
+                        <span style={{ padding: '2px 8px', borderRadius: 6, background: 'var(--bg)', color: 'var(--text-muted)', fontWeight: 600 }}>
+                          {n.targetType === 'all' ? '🌍 All Users' : n.targetType === 'country' ? `🏳 ${n.targetCountry}` : `📍 ${n.targetState}, ${n.targetCountry}`}
+                        </span>
+                        <span style={{ padding: '2px 8px', borderRadius: 6, background: '#ecfdf5', color: '#059669', fontWeight: 600 }}>
+                          ✓ {n.sent || 0} sent
+                        </span>
+                        {n.sentAt && (
+                          <span style={{ color: 'var(--text-muted)' }}>
+                            {new Date(n.sentAt.seconds ? n.sentAt.seconds * 1000 : n.sentAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        )}
+                      </div>
+                      {n.deepLink && <div style={{ fontSize: 11, color: 'var(--orange)', marginTop: 4 }}>🔗 {n.deepLink}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </>);
+      })()}
 
       </main>
 
