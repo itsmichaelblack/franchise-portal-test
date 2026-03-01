@@ -6667,7 +6667,9 @@ function FranchisePortal({ user, onLogout }) {
               }) : bookings;
 
               const startOfWeek = new Date(today);
-              startOfWeek.setDate(today.getDate() - today.getDay() + 1 + calendarWeekOffset * 7);
+              const dayOfWeek = today.getDay(); // 0=Sun, 1=Mon, ...
+              const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // Sunday → go back 6 days to Monday
+              startOfWeek.setDate(today.getDate() - daysToMonday + calendarWeekOffset * 7);
               const weekDays = [];
               for (let i = 0; i < 7; i++) {
                 const d = new Date(startOfWeek);
