@@ -5043,6 +5043,8 @@ function FranchisePortal({ user, onLogout }) {
   const [logsLoading, setLogsLoading] = useState(false);
   const [logFilter, setLogFilter] = useState('all'); // 'all' | 'marketing' | 'admin' | 'user' | 'bookings'
   const [locationData, setLocationData] = useState(null); // full location document for General tab
+  const [transactionFeePercent, setTransactionFeePercent] = useState('');
+  const [transactionFeeFlat, setTransactionFeeFlat] = useState('');
   const [marketingData, setMarketingData] = useState({ instagramUrl: '', facebookUrl: '' });
   const [currency, setCurrency] = useState('AUD');
   const [selectedBooking, setSelectedBooking] = useState(null);
@@ -5583,6 +5585,8 @@ function FranchisePortal({ user, onLogout }) {
         if (!locSnap.exists()) return;
         const locData = locSnap.data();
         setLocationData(locData);
+        setTransactionFeePercent(locData.transactionFeePercent || '');
+        setTransactionFeeFlat(locData.transactionFeeFlat || '');
         setLocationStripeId(locData.stripeAccountId || null);
         // Set currency based on country
         const countryToCurrency = { AU: 'AUD', NZ: 'NZD', US: 'USD', GB: 'GBP', CA: 'CAD', SG: 'SGD', HK: 'HKD', MY: 'MYR' };
@@ -7053,6 +7057,55 @@ function FranchisePortal({ user, onLogout }) {
                       </div>
                     );
                   })()}
+                </div>
+
+                {/* Transaction Fees */}
+                <div className="card fp" style={{ padding: 24 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--fp-text)', marginBottom: 4 }}>Transaction Fees</div>
+                  <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginBottom: 16, lineHeight: 1.5 }}>
+                    Set fees that will be added to each membership payment. You can use a percentage, a flat fee, or both. These are shown to parents at checkout.
+                  </div>
+                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                    <div style={{ flex: 1, minWidth: 180 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Percentage Fee (%)</div>
+                      <div style={{ display: 'flex', alignItems: 'center', border: '2px solid var(--fp-border)', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
+                        <input type="number" min="0" max="100" step="0.01" value={transactionFeePercent}
+                          onChange={e => setTransactionFeePercent(e.target.value)}
+                          placeholder="0"
+                          style={{ width: '100%', padding: '10px 12px', border: 'none', outline: 'none', fontFamily: 'inherit', fontSize: 14, fontWeight: 600, color: 'var(--fp-text)', background: 'transparent' }} />
+                        <span style={{ padding: '10px 12px', color: 'var(--fp-muted)', fontSize: 14, fontWeight: 700 }}>%</span>
+                      </div>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 180 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--fp-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Flat Fee ($)</div>
+                      <div style={{ display: 'flex', alignItems: 'center', border: '2px solid var(--fp-border)', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
+                        <span style={{ padding: '10px 8px 10px 12px', color: 'var(--fp-muted)', fontSize: 14, fontWeight: 700 }}>$</span>
+                        <input type="number" min="0" step="0.01" value={transactionFeeFlat}
+                          onChange={e => setTransactionFeeFlat(e.target.value)}
+                          placeholder="0.00"
+                          style={{ width: '100%', padding: '10px 12px 10px 0', border: 'none', outline: 'none', fontFamily: 'inherit', fontSize: 14, fontWeight: 600, color: 'var(--fp-text)', background: 'transparent' }} />
+                      </div>
+                    </div>
+                  </div>
+                  {(transactionFeePercent || transactionFeeFlat) && (
+                    <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: 'rgba(109,203,202,0.08)', border: '1px solid rgba(109,203,202,0.2)', fontSize: 13, color: '#3d9695' }}>
+                      Example: On a $50/week membership, the parent pays <strong>${(50 + 50 * (parseFloat(transactionFeePercent) || 0) / 100 + (parseFloat(transactionFeeFlat) || 0)).toFixed(2)}/week</strong>
+                    </div>
+                  )}
+                  <button className="btn btn-primary fp" style={{ alignSelf: 'flex-start', marginTop: 16 }} onClick={async () => {
+                    try {
+                      const { doc, updateDoc } = await import('firebase/firestore');
+                      const { db } = await import('./firebase.js');
+                      await updateDoc(doc(db, 'locations', locationId), {
+                        transactionFeePercent: transactionFeePercent || '0',
+                        transactionFeeFlat: transactionFeeFlat || '0',
+                      });
+                      showToast('✓ Transaction fees saved.');
+                      writeLog('user', 'Transaction fees updated', { feePercent: transactionFeePercent, feeFlat: transactionFeeFlat });
+                    } catch (e) { console.error('Failed to save fees:', e); showToast('✗ Failed to save fees.'); }
+                  }}>
+                    <Icon path={icons.check} size={14} /> Save Fees
+                  </button>
                 </div>
 
                 {/* Pricing Options */}

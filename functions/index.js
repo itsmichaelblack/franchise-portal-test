@@ -1424,3 +1424,203 @@ exports.savePaymentFromCheckoutPublic = functions.runWith({ secrets: ["STRIPE_SE
     res.status(500).json({ error: e.message || "Failed to confirm payment." });
   }
 });
+
+// Create a Stripe Subscription for a membership purchase (parent app)
+exports.createSubscriptionPublic = functions.runWith({ secrets: ["STRIPE_SECRET_KEY"] }).https.onRequest(async (req, res) => {
+  setCors(res);
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
+
+  try {
+    const {
+      parentEmail, parentName, parentId, parentPhone,
+      locationId, childName, childGrade,
+      membershipId, membershipName, membershipCategory,
+      basePrice, totalAmount, feeAmount, feeDescription,
+    } = req.body;
+
+    console.log("createSubscriptionPublic called:", { parentEmail, locationId, membershipId, basePrice, totalAmount });
+
+    if (!parentEmail || !locationId || !membershipId || !totalAmount) {
+      res.status(400).json({ error: "Missing required fields" });
+      return;
+    }
+
+    const stripe = getStripe();
+    const db = getDb();
+
+    // Get stripe account ID for this location
+    const locSnap = await db.collection("locations").doc(locationId).get();
+    if (!locSnap.exists) {
+      res.status(404).json({ error: "Location not found" });
+      return;
+    }
+    const stripeAccountId = locSnap.data().stripeAccountId;
+    if (!stripeAccountId) {
+      res.status(400).json({ error: "This centre has not set up payments yet." });
+      return;
+    }
+
+    // Get or create customer on connected account
+    let customer = null;
+    const existingCustomers = await stripe.customers.list(
+      { email: parentEmail.toLowerCase(), limit: 1 },
+      { stripeAccount: stripeAccountId }
+    );
+    if (existingCustomers.data.length > 0) {
+      customer = existingCustomers.data[0];
+    } else {
+      customer = await stripe.customers.create(
+        { email: parentEmail.toLowerCase(), name: parentName || "", phone: parentPhone || "" },
+        { stripeAccount: stripeAccountId }
+      );
+    }
+    console.log("Customer:", customer.id);
+
+    // Find payment method - check parent doc first, then list from customer
+    let paymentMethodId = null;
+    const parentSnap = await db.collection("parents")
+      .where("email", "==", parentEmail.toLowerCase())
+      .where("locationId", "==", locationId)
+      .limit(1)
+      .get();
+
+    if (!parentSnap.empty) {
+      const parentDoc = parentSnap.docs[0].data();
+      paymentMethodId = parentDoc.paymentMethod?.id || null;
+    }
+
+    if (!paymentMethodId) {
+      const pms = await stripe.paymentMethods.list(
+        { customer: customer.id, type: "card" },
+        { stripeAccount: stripeAccountId }
+      );
+      if (pms.data.length > 0) {
+        paymentMethodId = pms.data[0].id;
+      } else {
+        const becsPms = await stripe.paymentMethods.list(
+          { customer: customer.id, type: "au_becs_debit" },
+          { stripeAccount: stripeAccountId }
+        );
+        if (becsPms.data.length > 0) {
+          paymentMethodId = becsPms.data[0].id;
+        }
+      }
+    }
+
+    // Attach payment method to customer if needed
+    if (paymentMethodId) {
+      try {
+        await stripe.paymentMethods.attach(paymentMethodId, { customer: customer.id }, { stripeAccount: stripeAccountId });
+      } catch (attachErr) {
+        if (!attachErr.message.includes("already been attached")) {
+          console.log("PM attach note:", attachErr.message);
+        }
+      }
+      await stripe.customers.update(customer.id, {
+        invoice_settings: { default_payment_method: paymentMethodId },
+      }, { stripeAccount: stripeAccountId });
+    }
+
+    // Create product on connected account
+    const product = await stripe.products.create({
+      name: membershipName || membershipId,
+      metadata: { membershipId, childName: childName || "", locationId },
+    }, { stripeAccount: stripeAccountId });
+
+    // Create price (weekly recurring) — amount in cents
+    const amountCents = Math.round(parseFloat(totalAmount) * 100);
+    const price = await stripe.prices.create({
+      product: product.id,
+      unit_amount: amountCents,
+      currency: "aud",
+      recurring: { interval: "week", interval_count: 1 },
+    }, { stripeAccount: stripeAccountId });
+
+    // Create subscription — charge immediately if we have a PM
+    const subscriptionParams = {
+      customer: customer.id,
+      items: [{ price: price.id }],
+      expand: ["latest_invoice.payment_intent"],
+      metadata: {
+        membershipId,
+        childName: childName || "",
+        parentEmail: parentEmail.toLowerCase(),
+        locationId,
+      },
+    };
+    if (paymentMethodId) {
+      subscriptionParams.default_payment_method = paymentMethodId;
+      subscriptionParams.payment_behavior = "error_if_incomplete";
+    } else {
+      subscriptionParams.payment_behavior = "default_incomplete";
+    }
+
+    const subscription = await stripe.subscriptions.create(
+      subscriptionParams,
+      { stripeAccount: stripeAccountId }
+    );
+    console.log("Subscription created:", subscription.id, "status:", subscription.status);
+
+    // Create sale doc in Firestore
+    const today = new Date().toISOString().split("T")[0];
+    const saleData = {
+      locationId,
+      children: [{ name: childName || "", grade: childGrade || "" }],
+      parentName: parentName || "",
+      parentEmail: parentEmail.toLowerCase(),
+      parentPhone: parentPhone || "",
+      parentId: parentId || "",
+      membershipId,
+      membershipName: membershipName || membershipId,
+      membershipCategory: membershipCategory || "membership",
+      basePrice: basePrice || totalAmount,
+      weeklyAmount: totalAmount,
+      feeAmount: feeAmount || "0",
+      feeDescription: feeDescription || "",
+      activationDate: today,
+      firstPaymentDate: today,
+      billingFrequency: "weekly",
+      status: subscription.status === "active" ? "active" : "pending",
+      stripeStatus: subscription.status,
+      stripeSubscriptionId: subscription.id,
+      stripeCustomerId: customer.id,
+      stripePriceId: price.id,
+      stripeProductId: product.id,
+      createdAt: new Date(),
+      source: "mobile_app",
+    };
+    const saleRef = await db.collection("sales").add(saleData);
+
+    // Create initial transaction record
+    const transactionData = {
+      locationId,
+      saleId: saleRef.id,
+      parentEmail: parentEmail.toLowerCase(),
+      parentName: parentName || "",
+      childName: childName || "",
+      membershipName: membershipName || membershipId,
+      amount: totalAmount,
+      basePrice: basePrice || totalAmount,
+      feeAmount: feeAmount || "0",
+      type: "subscription_payment",
+      status: subscription.status === "active" ? "paid" : "pending",
+      stripeSubscriptionId: subscription.id,
+      stripeInvoiceId: subscription.latest_invoice?.id || "",
+      date: today,
+      createdAt: new Date(),
+    };
+    await db.collection("transactions").add(transactionData);
+
+    res.status(200).json({
+      success: true,
+      subscriptionId: subscription.id,
+      subscriptionStatus: subscription.status,
+      saleId: saleRef.id,
+      customerId: customer.id,
+    });
+  } catch (e) {
+    console.error("createSubscriptionPublic error:", e);
+    res.status(500).json({ error: e.message || "Failed to create subscription." });
+  }
+});
