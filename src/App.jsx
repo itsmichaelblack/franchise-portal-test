@@ -3879,10 +3879,57 @@ function LocationDetailView({ location, locations, user, isMaster, onBack, locat
               <div style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{location.id}</div>
             </div>
           </div>
+
+          {/* Subscription Status */}
+          <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--border)' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Icon path={icons.star} size={15} /> Platform Subscription
+            </div>
+            {(() => {
+              const sub = location.subscription;
+              if (!sub) {
+                return (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', borderRadius: 10, background: 'rgba(156,163,175,0.08)', border: '1px solid rgba(156,163,175,0.15)' }}>
+                    <span style={{ padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700, background: 'rgba(156,163,175,0.12)', color: '#6b7280' }}>No Subscription</span>
+                    <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>This location has not started a trial yet.</span>
+                  </div>
+                );
+              }
+              const now = new Date();
+              const trialEnd = sub.trialEndsAt?.seconds ? new Date(sub.trialEndsAt.seconds * 1000) : (sub.trialEndsAt ? new Date(sub.trialEndsAt) : null);
+              const periodEnd = sub.currentPeriodEnd?.seconds ? new Date(sub.currentPeriodEnd.seconds * 1000) : (sub.currentPeriodEnd ? new Date(sub.currentPeriodEnd) : null);
+              const isTrialing = sub.status === 'trialing' && trialEnd && trialEnd > now;
+              const isActive = sub.status === 'active';
+              const trialExpired = sub.status === 'trialing' && trialEnd && trialEnd <= now;
+              const isCancelled = sub.status === 'cancelled' || sub.status === 'canceled';
+              const daysLeft = isTrialing ? Math.max(0, Math.ceil((trialEnd - now) / (1000*60*60*24))) : 0;
+              const fmtD = (d) => d ? d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+
+              const statusCfg = isActive ? { label: 'Active', bg: 'rgba(5,150,105,0.1)', color: '#059669', border: 'rgba(5,150,105,0.2)' }
+                : isTrialing ? { label: `Trial — ${daysLeft} day${daysLeft !== 1 ? 's' : ''} left`, bg: 'rgba(217,119,6,0.1)', color: '#d97706', border: 'rgba(217,119,6,0.2)' }
+                : trialExpired ? { label: 'Trial Expired', bg: 'rgba(220,38,38,0.1)', color: '#dc2626', border: 'rgba(220,38,38,0.2)' }
+                : isCancelled ? { label: 'Cancelled', bg: 'rgba(220,38,38,0.1)', color: '#dc2626', border: 'rgba(220,38,38,0.2)' }
+                : { label: sub.status || 'Unknown', bg: 'rgba(156,163,175,0.1)', color: '#6b7280', border: 'rgba(156,163,175,0.2)' };
+
+              return (
+                <div style={{ padding: '12px 16px', borderRadius: 10, background: statusCfg.bg, border: `1px solid ${statusCfg.border}` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <span style={{ padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700, background: statusCfg.bg, color: statusCfg.color, border: `1px solid ${statusCfg.border}` }}>
+                      ● {statusCfg.label}
+                    </span>
+                    <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>$250/month</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 24, marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>
+                    {isTrialing && trialEnd && <span>Trial ends: <strong>{fmtD(trialEnd)}</strong></span>}
+                    {isActive && periodEnd && <span>Next billing: <strong>{fmtD(periodEnd)}</strong></span>}
+                    {sub.trialStartedAt && <span>Trial started: <strong>{fmtD(new Date(sub.trialStartedAt))}</strong></span>}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
         </div>
       )}
-
-      {/* User Logs Tab */}
       {locationTab === 'user_logs' && (
         <UserLogsTab locationId={location.id} locationName={location.name} />
       )}
@@ -6831,13 +6878,120 @@ function FranchisePortal({ user, onLogout }) {
   const subTrialEnd = subscription?.trialEndsAt?.seconds ? new Date(subscription.trialEndsAt.seconds * 1000) : (subscription?.trialEndsAt ? new Date(subscription.trialEndsAt) : null);
   const subIsActive = subStatus === 'active';
   const subIsTrialing = subStatus === 'trialing' && subTrialEnd && subTrialEnd > new Date();
-  const subIsLocked = !subLoading && !subIsActive && !subIsTrialing && subscription !== null;
+  const subNoSubscription = !subLoading && subscription === null; // brand new — no trial started
+  const subTrialExpired = !subLoading && !subIsActive && !subIsTrialing && subscription !== null; // had trial/sub but it's over
+  const subIsLocked = subNoSubscription || subTrialExpired;
   const subTrialDaysLeft = subIsTrialing && subTrialEnd ? Math.max(0, Math.ceil((subTrialEnd - new Date()) / (1000 * 60 * 60 * 24))) : 0;
+
+  // State for trial signup modal card collection
+  const [trialCardStep, setTrialCardStep] = useState('info'); // 'info' | 'card' | 'processing'
+  const [trialCardError, setTrialCardError] = useState(null);
+
+  const handleStartTrialWithCard = async () => {
+    setTrialCardStep('processing');
+    setTrialCardError(null);
+    try {
+      const { getFunctions, httpsCallable } = await import('firebase/functions');
+      const fns = getFunctions();
+      const startTrial = httpsCallable(fns, 'startFranchiseTrial');
+      const result = await startTrial({ locationId });
+      if (result.data?.url) {
+        // Redirect to Stripe Checkout for card collection
+        window.location.href = result.data.url;
+      } else if (result.data?.subscription) {
+        setSubscription(result.data.subscription);
+        setTrialCardStep('info');
+        showToast('✓ 30-day free trial activated!');
+      } else {
+        throw new Error('Unexpected response');
+      }
+    } catch (e) {
+      console.error('Trial start error:', e);
+      setTrialCardError(e.message || 'Failed to start trial. Please try again.');
+      setTrialCardStep('info');
+    }
+  };
+
+  // Check URL for trial success callback
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('trial_activated') === 'true') {
+      // Reload subscription data
+      const reloadSub = async () => {
+        try {
+          const { doc, getDoc } = await import('firebase/firestore');
+          const { db } = await import('./firebase.js');
+          const locSnap = await getDoc(doc(db, 'locations', locationId));
+          if (locSnap.exists()) {
+            setSubscription(locSnap.data().subscription || null);
+          }
+        } catch (e) { console.error('Failed to reload subscription:', e); }
+      };
+      reloadSub();
+      showToast('✓ 30-day free trial activated!');
+      // Clean up URL
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
 
   return (
     <div className="layout fp" style={{ background: 'var(--fp-bg)' }}>
-      {/* Subscription Lock Screen */}
-      {subIsLocked && page !== 'settings' && (
+      {/* Subscription Lock Screen — New User (Start Trial) */}
+      {subNoSubscription && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.6)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)',
+        }}>
+          <div style={{
+            background: '#fff', borderRadius: 20, padding: '48px 40px', maxWidth: 520, width: '90%',
+            textAlign: 'center', boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+          }}>
+            <div style={{ width: 64, height: 64, borderRadius: 16, background: 'linear-gradient(135deg, #E25D25, #c94f1f)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px' }}>
+              <Icon path={icons.star} size={32} style={{ color: '#fff' }} />
+            </div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--fp-text)', marginBottom: 8 }}>Welcome to Success Tutoring</div>
+            <div style={{ fontSize: 14, color: 'var(--fp-muted)', lineHeight: 1.6, marginBottom: 24 }}>
+              Start your <strong>30-day free trial</strong> to access the Franchise Portal and Booking App. A payment method is required to begin — you won't be charged during the trial.
+            </div>
+
+            <div style={{ background: '#f9fafb', borderRadius: 14, padding: 20, marginBottom: 20, textAlign: 'left' }}>
+              <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--fp-text)', marginBottom: 12 }}>What's included:</div>
+              {['Full Franchise Partner Portal access', 'Success Booking App for parents', 'Timetable & session management', 'Online payments & memberships', 'Customer notifications & reminders', 'Reporting & analytics'].map(f => (
+                <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', fontSize: 13, color: 'var(--fp-text)' }}>
+                  <Icon path={icons.check} size={14} style={{ color: '#059669', flexShrink: 0 }} /> {f}
+                </div>
+              ))}
+            </div>
+
+            <div style={{ background: '#fffbeb', borderRadius: 10, padding: '12px 16px', marginBottom: 20, border: '1px solid #fde68a' }}>
+              <div style={{ fontSize: 12, color: '#92400e', lineHeight: 1.6 }}>
+                📧 We'll send you a reminder <strong>3 days before</strong> your trial ends. After the trial, the platform is <strong>$250 AUD/month</strong> per location.
+              </div>
+            </div>
+
+            {trialCardError && (
+              <div style={{ background: '#fef2f2', borderRadius: 10, padding: '10px 16px', marginBottom: 16, border: '1px solid #fecaca', fontSize: 13, color: '#dc2626' }}>
+                {trialCardError}
+              </div>
+            )}
+
+            <button className="btn btn-primary fp" style={{ width: '100%', justifyContent: 'center', padding: '16px 20px', fontSize: 16, borderRadius: 12 }}
+              disabled={trialCardStep === 'processing'}
+              onClick={handleStartTrialWithCard}>
+              <Icon path={icons.creditCard} size={18} />
+              {trialCardStep === 'processing' ? 'Redirecting to payment...' : 'Add Payment Method & Start Free Trial'}
+            </button>
+            <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginTop: 10 }}>🔒 Secured by Stripe. No charge for 30 days.</div>
+            <button className="btn btn-ghost fp" style={{ width: '100%', justifyContent: 'center', marginTop: 8, fontSize: 13 }}
+              onClick={onLogout}>
+              Sign Out
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Subscription Lock Screen — Trial Expired / Cancelled */}
+      {subTrialExpired && page !== 'settings' && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.6)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)',
@@ -6854,7 +7008,8 @@ function FranchisePortal({ user, onLogout }) {
               Your free trial has ended. Subscribe to the Success Tutoring Platform to continue using the Franchise Portal and Booking App.
             </div>
             <div style={{ fontSize: 32, fontWeight: 800, color: 'var(--fp-text)', marginBottom: 4 }}>$250<span style={{ fontSize: 16, fontWeight: 600, color: 'var(--fp-muted)' }}>/month</span></div>
-            <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginBottom: 24 }}>per location</div>
+            <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginBottom: 4 }}>per location</div>
+            <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginBottom: 24 }}>First month is pro-rated from today.</div>
             <button className="btn btn-primary fp" style={{ width: '100%', justifyContent: 'center', padding: '16px 20px', fontSize: 16, borderRadius: 12 }}
               onClick={() => { setPagePersist('settings'); setSettingsTab('subscription'); }}>
               <Icon path={icons.creditCard} size={18} /> Subscribe Now
@@ -6913,18 +7068,18 @@ function FranchisePortal({ user, onLogout }) {
 
       <main className="main fp">
         {/* Trial Banner */}
-        {subIsTrialing && subTrialDaysLeft <= 14 && (
+        {subIsTrialing && (
           <div style={{
-            padding: '10px 20px', background: subTrialDaysLeft <= 3 ? '#fef2f2' : '#fffbeb',
+            padding: '12px 20px', background: subTrialDaysLeft <= 3 ? '#fef2f2' : subTrialDaysLeft <= 7 ? '#fffbeb' : '#edfafa',
             borderRadius: 10, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            border: subTrialDaysLeft <= 3 ? '1px solid #fecaca' : '1px solid #fde68a',
+            border: subTrialDaysLeft <= 3 ? '1px solid #fecaca' : subTrialDaysLeft <= 7 ? '1px solid #fde68a' : '1px solid #b8e8e8',
           }}>
-            <div style={{ fontSize: 13, color: subTrialDaysLeft <= 3 ? '#991b1b' : '#92400e', fontWeight: 600 }}>
-              {subTrialDaysLeft <= 3 ? '⚠️' : '⏳'} Free trial ends in {subTrialDaysLeft} day{subTrialDaysLeft !== 1 ? 's' : ''}.
+            <div style={{ fontSize: 13, color: subTrialDaysLeft <= 3 ? '#991b1b' : subTrialDaysLeft <= 7 ? '#92400e' : '#115e59', fontWeight: 600 }}>
+              {subTrialDaysLeft <= 3 ? '⚠️' : subTrialDaysLeft <= 7 ? '⏳' : '🎉'} {subTrialDaysLeft === 0 ? 'Trial ends today!' : `Free trial — ${subTrialDaysLeft} day${subTrialDaysLeft !== 1 ? 's' : ''} remaining`}
             </div>
-            <button className="btn btn-primary fp" style={{ padding: '6px 16px', fontSize: 12 }}
+            <button className="btn btn-primary fp" style={{ padding: '8px 18px', fontSize: 12, whiteSpace: 'nowrap' }}
               onClick={() => { setPagePersist('settings'); setSettingsTab('subscription'); }}>
-              Subscribe Now
+              Begin Subscription
             </button>
           </div>
         )}
@@ -8467,17 +8622,24 @@ function FranchisePortal({ user, onLogout }) {
 
                       {/* Actions */}
                       {noSub && (
-                        <button className="btn btn-primary fp" style={{ width: '100%', justifyContent: 'center', padding: '14px 20px', fontSize: 15 }}
-                          disabled={subActionLoading} onClick={handleStartTrial}>
-                          {subActionLoading ? 'Starting...' : 'Start 30-Day Free Trial'}
-                        </button>
+                        <div style={{ padding: 16, borderRadius: 10, background: '#fef2f2', border: '1px solid #fecaca', marginBottom: 16 }}>
+                          <div style={{ fontWeight: 700, fontSize: 13, color: '#991b1b', marginBottom: 4 }}>No Subscription</div>
+                          <div style={{ fontSize: 13, color: '#7f1d1d' }}>
+                            Start your free trial from the welcome screen to get access.
+                          </div>
+                        </div>
                       )}
 
                       {(isTrialing || trialExpired || isCancelled || isPastDue) && (
-                        <button className="btn btn-primary fp" style={{ width: '100%', justifyContent: 'center', padding: '14px 20px', fontSize: 15, marginTop: noSub ? 10 : 0 }}
-                          disabled={subActionLoading} onClick={handleSubscribe}>
-                          <Icon path={icons.creditCard} size={16} /> {subActionLoading ? 'Processing...' : 'Subscribe — $250/month'}
-                        </button>
+                        <>
+                          <button className="btn btn-primary fp" style={{ width: '100%', justifyContent: 'center', padding: '14px 20px', fontSize: 15, marginTop: 0 }}
+                            disabled={subActionLoading} onClick={handleSubscribe}>
+                            <Icon path={icons.creditCard} size={16} /> {subActionLoading ? 'Processing...' : 'Begin Subscription — $250/month'}
+                          </button>
+                          <div style={{ fontSize: 12, color: 'var(--fp-muted)', textAlign: 'center', marginTop: 8, lineHeight: 1.5 }}>
+                            Your first month will be pro-rated based on today's date. After that, you'll be charged $250 AUD each month.
+                          </div>
+                        </>
                       )}
 
                       {isActive && (

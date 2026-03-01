@@ -2837,3 +2837,203 @@ exports.handlePlatformSubscriptionWebhook = functions.https.onRequest(async (req
     res.status(400).json({ error: e.message });
   }
 });
+
+// ── Callable: Start franchise trial with Stripe card collection ───────────
+exports.startFranchiseTrial = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  }
+
+  const { locationId } = data;
+  if (!locationId) {
+    throw new functions.https.HttpsError("invalid-argument", "locationId is required.");
+  }
+
+  const db = getFirestore();
+  const stripe = requireStripe();
+
+  // Get location data
+  const locSnap = await db.doc(`locations/${locationId}`).get();
+  if (!locSnap.exists) {
+    throw new functions.https.HttpsError("not-found", "Location not found.");
+  }
+  const loc = locSnap.data();
+  const sub = loc.subscription || {};
+
+  // Don't allow re-starting trial if already has one
+  if (sub.status === 'trialing' || sub.status === 'active') {
+    throw new functions.https.HttpsError("already-exists", "This location already has an active trial or subscription.");
+  }
+
+  // Create or reuse Stripe customer
+  let customerId = sub.stripeCustomerId;
+  if (!customerId) {
+    const customer = await stripe.customers.create({
+      email: context.auth.token.email || loc.email || `location-${locationId}@successtutoring.com.au`,
+      metadata: { locationId, locationName: loc.name || "" },
+    });
+    customerId = customer.id;
+  }
+
+  // Create Stripe Setup Checkout Session (no charge — just collect card)
+  const baseUrl = `https://success-tutoring-test.web.app`;
+  const session = await stripe.checkout.sessions.create({
+    customer: customerId,
+    mode: "setup",
+    payment_method_types: ["card"],
+    success_url: `${baseUrl}/?trial_activated=true`,
+    cancel_url: `${baseUrl}/?trial_cancelled=true`,
+    metadata: { locationId, type: "franchise_trial" },
+  });
+
+  // Save customer ID pre-emptively
+  await db.doc(`locations/${locationId}`).set({
+    subscription: {
+      ...sub,
+      stripeCustomerId: customerId,
+    },
+  }, { merge: true });
+
+  return { url: session.url };
+});
+
+// ── Webhook handler for trial setup completion ───────────────────────
+// When Stripe Setup Checkout completes, activate the 30-day trial
+exports.onTrialSetupComplete = functions.https.onRequest(async (req, res) => {
+  if (req.method !== "POST") { res.status(405).send("Method not allowed"); return; }
+  const stripe = requireStripe();
+  const db = getFirestore();
+
+  try {
+    const event = stripe.webhooks.constructEvent(
+      req.rawBody,
+      req.headers["stripe-signature"],
+      functions.config().stripe?.trial_webhook_secret || functions.config().stripe?.webhook_secret || ""
+    );
+
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object;
+      if (session.metadata?.type === "franchise_trial" && session.metadata?.locationId) {
+        const locationId = session.metadata.locationId;
+        const now = new Date();
+        const trialEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+        const trialData = {
+          status: "trialing",
+          trialStartedAt: now.toISOString(),
+          trialEndsAt: trialEnd.toISOString(),
+          stripeCustomerId: session.customer,
+          stripeSetupSessionId: session.id,
+        };
+
+        await db.doc(`locations/${locationId}`).set({ subscription: trialData }, { merge: true });
+
+        // Send welcome email
+        const locSnap = await db.doc(`locations/${locationId}`).get();
+        const loc = locSnap.exists ? locSnap.data() : {};
+        const recipientEmail = loc.email;
+        if (recipientEmail) {
+          try {
+            sgMail.setApiKey(functions.config().sendgrid?.api_key || "");
+            const bodyHtml = `
+              <p>Hi ${loc.name || "there"},</p>
+              <p>Welcome to the Success Tutoring Platform! Your <strong>30-day free trial</strong> has been activated.</p>
+              <div class="detail-card">
+                <div class="detail-row"><span class="detail-label">Trial started:</span> ${now.toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" })}</div>
+                <div class="detail-row"><span class="detail-label">Trial ends:</span> ${trialEnd.toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" })}</div>
+                <div class="detail-row"><span class="detail-label">Subscription price:</span> $250 AUD/month (after trial)</div>
+              </div>
+              <p>You'll receive a reminder 3 days before your trial ends. If you'd like to start your subscription early, you can do so from <strong>Settings → Subscription</strong> in your portal.</p>
+              <div class="cta"><a href="${PORTAL_URL}">Open Your Portal</a></div>
+              <p>Welcome aboard!<br/>The Success Tutoring Team</p>
+            `;
+            await sgMail.send({
+              to: recipientEmail,
+              from: { email: FROM_EMAIL, name: FROM_NAME },
+              subject: "Welcome! Your 30-Day Free Trial Has Started 🎉",
+              html: wrapInMasterLayout(bodyHtml, "Welcome to Success Tutoring", "Your free trial is now active", "linear-gradient(135deg, #E25D25 0%, #c94f1f 100%)"),
+            });
+          } catch (emailErr) {
+            console.error("Failed to send trial welcome email:", emailErr);
+          }
+        }
+
+        console.log(`Trial activated for location ${locationId}, ends ${trialEnd.toISOString()}`);
+      }
+    }
+
+    res.status(200).json({ received: true });
+  } catch (e) {
+    console.error("Trial webhook error:", e);
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// ── Scheduled: Send trial expiry reminder emails (runs daily) ───────────
+exports.sendTrialReminderEmails = functions.pubsub.schedule("every 24 hours").onRun(async () => {
+  const db = getFirestore();
+  const now = new Date();
+  const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+  const fourDaysFromNow = new Date(now.getTime() + 4 * 24 * 60 * 60 * 1000);
+
+  try {
+    sgMail.setApiKey(functions.config().sendgrid?.api_key || "");
+    const locsSnap = await db.collection("locations").get();
+
+    for (const locDoc of locsSnap.docs) {
+      const loc = locDoc.data();
+      const sub = loc.subscription;
+      if (!sub || sub.status !== "trialing") continue;
+
+      const trialEnd = sub.trialEndsAt?.seconds
+        ? new Date(sub.trialEndsAt.seconds * 1000)
+        : sub.trialEndsAt ? new Date(sub.trialEndsAt) : null;
+      if (!trialEnd) continue;
+
+      // Check if trial ends in ~3 days (between 3 and 4 days from now)
+      if (trialEnd > threeDaysFromNow && trialEnd <= fourDaysFromNow) {
+        // Check if reminder already sent
+        if (sub.trialReminderSentAt) continue;
+
+        const recipientEmail = loc.email;
+        if (!recipientEmail) continue;
+
+        const endDate = trialEnd.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+
+        const bodyHtml = `
+          <p>Hi ${loc.name || "there"},</p>
+          <p>Just a heads up — your <strong>free trial</strong> of the Success Tutoring Platform ends in <strong>3 days</strong> (${endDate}).</p>
+          <div class="detail-card">
+            <div class="detail-row"><span class="detail-label">Trial ends:</span> ${endDate}</div>
+            <div class="detail-row"><span class="detail-label">Subscription price:</span> $250 AUD/month</div>
+          </div>
+          <p>To keep using the Franchise Portal and Booking App without interruption, start your subscription before the trial ends.</p>
+          <p>Your first month will be <strong>pro-rated</strong> based on when you subscribe.</p>
+          <div class="cta"><a href="${PORTAL_URL}">Begin Subscription</a></div>
+          <p>If you have any questions, reply to this email — we're happy to help!</p>
+          <p>The Success Tutoring Team</p>
+        `;
+
+        try {
+          await sgMail.send({
+            to: recipientEmail,
+            from: { email: FROM_EMAIL, name: FROM_NAME },
+            subject: "⚠️ Your free trial ends in 3 days",
+            html: wrapInMasterLayout(bodyHtml, "Trial Ending Soon", "Your free trial expires in 3 days", "linear-gradient(135deg, #d97706 0%, #b45309 100%)"),
+          });
+
+          // Mark reminder as sent
+          await db.doc(`locations/${locDoc.id}`).set({
+            subscription: { ...sub, trialReminderSentAt: now.toISOString() },
+          }, { merge: true });
+
+          console.log(`Trial reminder sent to ${recipientEmail} for location ${locDoc.id}`);
+        } catch (emailErr) {
+          console.error(`Failed to send trial reminder to ${recipientEmail}:`, emailErr);
+        }
+      }
+    }
+  } catch (e) {
+    console.error("Trial reminder job error:", e);
+  }
+});
