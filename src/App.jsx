@@ -5768,6 +5768,8 @@ function FranchisePortal({ user, onLogout }) {
   const [bookingEditMode, setBookingEditMode] = useState(false);
   const [bookingEditData, setBookingEditData] = useState(null);
   const [bookingEditSaving, setBookingEditSaving] = useState(false);
+  const [notifyOnBookingEdit, setNotifyOnBookingEdit] = useState(false);
+  const [notifyOnBookingCancel, setNotifyOnBookingCancel] = useState(false);
   const [sessionModal, setSessionModal] = useState(null); // null | { date: 'YYYY-MM-DD', hour: number, editing?: booking }
   const [sessionSaving, setSessionSaving] = useState(false);
   const [sessionDeleteConfirm, setSessionDeleteConfirm] = useState(null); // null | booking to delete
@@ -6884,7 +6886,8 @@ function FranchisePortal({ user, onLogout }) {
                                         left: 3,
                                         right: 3,
                                         height: heightPx - 4,
-                                        background: isSession ? 'linear-gradient(135deg, #3d9695, #6DCBCA)' : 'linear-gradient(135deg, #E25D25, #f0845a)',
+                                        background: b.status === 'cancelled' ? 'linear-gradient(135deg, #d1d5db, #9ca3af)' : isSession ? 'linear-gradient(135deg, #3d9695, #6DCBCA)' : 'linear-gradient(135deg, #E25D25, #f0845a)',
+                                        opacity: b.status === 'cancelled' ? 0.5 : 1,
                                         color: '#fff', borderRadius: 6, padding: '4px 8px', fontSize: 11,
                                         cursor: 'pointer',
                                         lineHeight: 1.3, zIndex: 3,
@@ -6894,7 +6897,7 @@ function FranchisePortal({ user, onLogout }) {
                                       onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.02)'; e.currentTarget.style.boxShadow = isSession ? '0 4px 12px rgba(109,203,202,0.4)' : '0 4px 12px rgba(226,93,37,0.3)'; }}
                                       onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = 'none'; }}
                                       >
-                                        <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{isSession ? (b.serviceName || 'Session') : b.customerName}{b.recurrenceRuleId ? ' ↻' : ''}</div>
+                                        <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: b.status === 'cancelled' ? 'line-through' : 'none' }}>{isSession ? (b.serviceName || 'Session') : b.customerName}{b.recurrenceRuleId ? ' ↻' : ''}</div>
                                         <div style={{ opacity: 0.85, fontSize: 10 }}>{timeLabel}{isSession ? ` · ${b.tutorName || ''}` : ''}</div>
                                         {heightPx > 50 && <div style={{ opacity: 0.7, fontSize: 10, marginTop: 2 }}>{duration} min</div>}
                                       </div>
@@ -6970,11 +6973,12 @@ function FranchisePortal({ user, onLogout }) {
                                     return (
                                       <div key={bi} onClick={(e) => { e.stopPropagation(); setSelectedBooking(b); }} style={{
                                         position: 'absolute', top: topOffset + 2, left: 4, right: 4, height: heightPx - 4,
-                                        background: isSession ? 'linear-gradient(135deg, #3d9695, #6DCBCA)' : 'linear-gradient(135deg, #E25D25, #f0845a)',
+                                        background: b.status === 'cancelled' ? 'linear-gradient(135deg, #d1d5db, #9ca3af)' : isSession ? 'linear-gradient(135deg, #3d9695, #6DCBCA)' : 'linear-gradient(135deg, #E25D25, #f0845a)',
+                                        opacity: b.status === 'cancelled' ? 0.5 : 1,
                                         color: '#fff', borderRadius: 8, padding: '6px 12px', fontSize: 13,
                                         cursor: 'pointer', zIndex: 3, overflow: 'hidden',
                                       }}>
-                                        <div style={{ fontWeight: 700 }}>{isSession ? (b.serviceName || 'Session') : b.customerName}{b.recurrenceRuleId ? ' ↻' : ''}</div>
+                                        <div style={{ fontWeight: 700, textDecoration: b.status === 'cancelled' ? 'line-through' : 'none' }}>{isSession ? (b.serviceName || 'Session') : b.customerName}{b.recurrenceRuleId ? ' ↻' : ''}</div>
                                         <div style={{ opacity: 0.85, fontSize: 11 }}>{timeLabel}{isSession ? ` · ${b.tutorName || ''}` : ''} · {duration} min</div>
                                       </div>
                                     );
@@ -10057,11 +10061,11 @@ function FranchisePortal({ user, onLogout }) {
 
       {/* Booking Detail Modal */}
       {selectedBooking && (
-        <div className="modal-overlay" onClick={() => { setSelectedBooking(null); setBookingEditMode(false); }}>
+        <div className="modal-overlay" onClick={() => { setSelectedBooking(null); setBookingEditMode(false); setNotifyOnBookingCancel(false); setNotifyOnBookingEdit(false); }}>
           <div className="modal fp" onClick={e => e.stopPropagation()} style={{ maxWidth: 440 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px', borderBottom: '1px solid var(--fp-border)' }}>
               <div style={{ fontWeight: 800, fontSize: 18, color: 'var(--fp-text)' }}>{selectedBooking?.type === 'session' ? 'Session Details' : 'Booking Details'}</div>
-              <button onClick={() => { setSelectedBooking(null); setBookingEditMode(false); }}
+              <button onClick={() => { setSelectedBooking(null); setBookingEditMode(false); setNotifyOnBookingCancel(false); setNotifyOnBookingEdit(false); }}
                 style={{ width: 32, height: 32, borderRadius: 8, border: '2px solid var(--fp-border)', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 14, fontWeight: 700, color: 'var(--fp-muted)' }}>✕</button>
             </div>
             <div className="modal-body" style={{ padding: '24px' }}>
@@ -10137,8 +10141,18 @@ function FranchisePortal({ user, onLogout }) {
                               style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '2px solid var(--fp-border)', fontFamily: 'inherit', fontSize: 14, outline: 'none' }} />
                           </div>
                         </div>
-                        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                          <button className="btn btn-ghost fp" style={{ border: '1px solid var(--fp-border)' }} onClick={() => setBookingEditMode(false)}>Cancel</button>
+                        <div style={{ marginTop: 8, padding: '12px 14px', background: notifyOnBookingEdit ? 'rgba(226,93,37,0.06)' : 'var(--fp-bg)', borderRadius: 10, border: notifyOnBookingEdit ? '1px solid rgba(226,93,37,0.2)' : '1px solid var(--fp-border)' }}>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--fp-text)' }}>
+                            <input type="checkbox" checked={notifyOnBookingEdit} onChange={e => setNotifyOnBookingEdit(e.target.checked)}
+                              style={{ width: 18, height: 18, accentColor: '#E25D25', cursor: 'pointer' }} />
+                            Notify customer of this change
+                          </label>
+                          {notifyOnBookingEdit && !b.customerEmail && (
+                            <div style={{ marginTop: 6, fontSize: 12, color: '#E25D25', fontWeight: 600, paddingLeft: 28 }}>⚠ No customer email available for this booking.</div>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                          <button className="btn btn-ghost fp" style={{ border: '1px solid var(--fp-border)' }} onClick={() => { setBookingEditMode(false); setNotifyOnBookingEdit(false); }}>Cancel</button>
                           <button className="btn btn-primary fp" disabled={bookingEditSaving} onClick={async () => {
                             setBookingEditSaving(true);
                             try {
@@ -10157,8 +10171,8 @@ function FranchisePortal({ user, onLogout }) {
                               await updateDoc(doc(db, 'bookings', b.id), updates);
                               showToast('✓ Booking updated.');
                               writeLog('bookings', 'Booking rescheduled', { name: bookingEditData.customerName, date: bookingEditData.date, time: bookingEditData.time });
-                              // Send reschedule notification email
-                              if (bookingEditData.date !== b.date || bookingEditData.time !== b.time) {
+                              // Send reschedule notification email if notify checkbox was checked
+                              if (notifyOnBookingEdit && (bookingEditData.date !== b.date || bookingEditData.time !== b.time)) {
                                 try {
                                   const { getFunctions, httpsCallable } = await import('firebase/functions');
                                   const fns = getFunctions();
@@ -10172,6 +10186,7 @@ function FranchisePortal({ user, onLogout }) {
                               }
                               setSelectedBooking({ ...b, ...updates, children: updates.children || b.children });
                               setBookingEditMode(false);
+                              setNotifyOnBookingEdit(false);
                               // Refresh bookings
                               const { collection, getDocs, query, where } = await import('firebase/firestore');
                               const q = query(collection(db, 'bookings'), where('locationId', '==', locationId));
@@ -10266,6 +10281,7 @@ function FranchisePortal({ user, onLogout }) {
                       </div>
                     ) : (
                       !bookingEditMode && b.status !== 'cancelled' && (
+                        !notifyOnBookingCancel ? (
                         <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
                           <button className="btn btn-primary fp" style={{ flex: 1, justifyContent: 'center' }} onClick={() => {
                             setBookingEditMode(true);
@@ -10280,37 +10296,63 @@ function FranchisePortal({ user, onLogout }) {
                           }}>
                             <Icon path={icons.edit} size={14} /> Edit / Reschedule
                           </button>
-                          <button className="btn btn-ghost fp" style={{ flex: 1, justifyContent: 'center', color: '#dc2626', border: '1px solid #fecaca' }} onClick={async () => {
-                            if (!confirm('Cancel this booking? It will be marked as cancelled.')) return;
-                            try {
-                              const { doc, updateDoc } = await import('firebase/firestore');
-                              const { db } = await import('./firebase.js');
-                              await updateDoc(doc(db, 'bookings', b.id), { status: 'cancelled' });
-                              showToast('✓ Booking cancelled.');
-                              writeLog('bookings', 'Booking cancelled', { name: b.customerName, date: b.date });
-                              // Send cancel notification email
-                              try {
-                                const { getFunctions, httpsCallable } = await import('firebase/functions');
-                                const fns = getFunctions();
-                                const notifyFn = httpsCallable(fns, 'sendSessionNotification');
-                                await notifyFn({
-                                  type: 'cancel',
-                                  booking: { ...b, serviceName: b.serviceName || '' },
-                                  locationData: { name: location?.name, email: location?.email, phone: location?.phone, address: location?.address, country: location?.country },
-                                });
-                              } catch (emailErr) { console.warn('Cancel notification failed:', emailErr); }
-                              setSelectedBooking({ ...b, status: 'cancelled' });
-                              const { collection, getDocs, query, where } = await import('firebase/firestore');
-                              const q = query(collection(db, 'bookings'), where('locationId', '==', locationId));
-                              const snap = await getDocs(q);
-                              const allBookings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-                              allBookings.sort((a2, b2) => a2.date === b2.date ? a2.time.localeCompare(b2.time) : a2.date.localeCompare(b2.date));
-                              setBookings(allBookings);
-                            } catch (e) { showToast('✗ Failed to cancel.'); }
-                          }}>
+                          <button className="btn btn-ghost fp" style={{ flex: 1, justifyContent: 'center', color: '#dc2626', border: '1px solid #fecaca' }} onClick={() => setNotifyOnBookingCancel('pending')}>
                             <Icon path={icons.trash} size={14} /> Cancel
                           </button>
                         </div>
+                        ) : (
+                        <div style={{ marginTop: 16 }}>
+                          <div style={{ padding: '14px', background: '#fef2f2', borderRadius: 10, border: '1px solid #fecaca', marginBottom: 12 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: '#dc2626', marginBottom: 8 }}>Cancel this booking?</div>
+                            <div style={{ fontSize: 12, color: '#7f1d1d', marginBottom: 12 }}>This will mark the booking as cancelled. This cannot be undone.</div>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--fp-text)' }}>
+                              <input type="checkbox" checked={notifyOnBookingCancel === 'notify'} onChange={e => setNotifyOnBookingCancel(e.target.checked ? 'notify' : 'pending')}
+                                style={{ width: 18, height: 18, accentColor: '#E25D25', cursor: 'pointer' }} />
+                              Notify customer of cancellation
+                            </label>
+                            {notifyOnBookingCancel === 'notify' && !b.customerEmail && (
+                              <div style={{ marginTop: 6, fontSize: 12, color: '#E25D25', fontWeight: 600, paddingLeft: 28 }}>⚠ No customer email available for this booking.</div>
+                            )}
+                          </div>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <button className="btn btn-ghost fp" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setNotifyOnBookingCancel(false)}>Go Back</button>
+                            <button className="btn btn-ghost fp" style={{ flex: 1, justifyContent: 'center', color: '#dc2626', border: '1px solid #fecaca', background: '#fef2f2' }} onClick={async () => {
+                              const shouldNotify = notifyOnBookingCancel === 'notify';
+                              try {
+                                const { doc, updateDoc } = await import('firebase/firestore');
+                                const { db } = await import('./firebase.js');
+                                await updateDoc(doc(db, 'bookings', b.id), { status: 'cancelled' });
+                                showToast('✓ Booking cancelled.');
+                                writeLog('bookings', 'Booking cancelled', { name: b.customerName, date: b.date });
+                                // Send cancel notification email if checkbox was checked
+                                if (shouldNotify && b.customerEmail) {
+                                  try {
+                                    const { getFunctions, httpsCallable } = await import('firebase/functions');
+                                    const fns = getFunctions();
+                                    const notifyFn = httpsCallable(fns, 'sendSessionNotification');
+                                    await notifyFn({
+                                      type: 'cancel',
+                                      booking: { ...b, serviceName: b.serviceName || '' },
+                                      locationData: { name: location?.name, email: location?.email, phone: location?.phone, address: location?.address, country: location?.country },
+                                    });
+                                    showToast('✓ Cancellation notification sent.');
+                                  } catch (emailErr) { console.warn('Cancel notification failed:', emailErr); }
+                                }
+                                setSelectedBooking({ ...b, status: 'cancelled' });
+                                setNotifyOnBookingCancel(false);
+                                const { collection, getDocs, query, where } = await import('firebase/firestore');
+                                const q = query(collection(db, 'bookings'), where('locationId', '==', locationId));
+                                const snap = await getDocs(q);
+                                const allBookings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                                allBookings.sort((a2, b2) => a2.date === b2.date ? a2.time.localeCompare(b2.time) : a2.date.localeCompare(b2.date));
+                                setBookings(allBookings);
+                              } catch (e) { showToast('✗ Failed to cancel.'); }
+                            }}>
+                              <Icon path={icons.trash} size={14} /> Confirm Cancel
+                            </button>
+                          </div>
+                        </div>
+                        )
                       )
                     )}
                   </>
