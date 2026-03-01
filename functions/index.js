@@ -1557,7 +1557,7 @@ exports.createSubscriptionPublic = functions.runWith({ secrets: ["STRIPE_SECRET_
       console.log("Joining fee invoice item created:", joiningFeeAmount);
     }
 
-    // Create subscription — charge immediately if we have a PM
+    // Create subscription
     const subscriptionParams = {
       customer: customer.id,
       items: [{ price: price.id }],
@@ -1568,12 +1568,10 @@ exports.createSubscriptionPublic = functions.runWith({ secrets: ["STRIPE_SECRET_
         parentEmail: parentEmail.toLowerCase(),
         locationId,
       },
+      payment_behavior: "allow_incomplete",
     };
     if (paymentMethodId) {
       subscriptionParams.default_payment_method = paymentMethodId;
-      subscriptionParams.payment_behavior = "error_if_incomplete";
-    } else {
-      subscriptionParams.payment_behavior = "default_incomplete";
     }
 
     const subscription = await stripe.subscriptions.create(
@@ -1581,6 +1579,30 @@ exports.createSubscriptionPublic = functions.runWith({ secrets: ["STRIPE_SECRET_
       { stripeAccount: stripeAccountId }
     );
     console.log("Subscription created:", subscription.id, "status:", subscription.status);
+
+    // If subscription is incomplete, try to pay the invoice
+    if (subscription.status !== "active" && subscription.latest_invoice) {
+      const invoice = subscription.latest_invoice;
+      console.log("Invoice status:", invoice.status, "PI:", invoice.payment_intent?.id);
+      
+      if (invoice.status === "open" && paymentMethodId) {
+        try {
+          const paidInvoice = await stripe.invoices.pay(invoice.id, {
+            payment_method: paymentMethodId,
+          }, { stripeAccount: stripeAccountId });
+          console.log("Invoice paid:", paidInvoice.status);
+          // Re-fetch subscription to get updated status
+          const updatedSub = await stripe.subscriptions.retrieve(
+            subscription.id,
+            { stripeAccount: stripeAccountId }
+          );
+          subscription.status = updatedSub.status;
+          console.log("Updated subscription status:", subscription.status);
+        } catch (payErr) {
+          console.error("Failed to pay invoice:", payErr.message);
+        }
+      }
+    }
 
     // Create sale doc in Firestore
     const today = new Date().toISOString().split("T")[0];
