@@ -247,6 +247,14 @@
         body: `<p>Hi {{customerName}},</p><p>Please use the link below to set up your payment method for <strong>{{locationName}}</strong>:</p><div class="cta"><a href="{{paymentLink}}">Set Up Payment →</a></div><p style="font-size: 13px; color: #888;">This link will expire after use. If you have any issues, please contact your centre.</p>`,
         mergeTags: ['customerName', 'locationName', 'paymentLink'],
       },
+      {
+        key: 'customer_session_rescheduled', category: 'customer_existing', name: 'Session Rescheduled',
+        description: 'Sent when a session is rescheduled to a new date/time',
+        subject: 'Session Rescheduled — {{className}} moved to {{bookingDate}}',
+        headerTitle: 'Session Rescheduled', headerSubtitle: 'Your upcoming session has been moved', headerBg: '#F9A72B',
+        body: `<p>Hi {{customerName}},</p><p>Your upcoming session has been rescheduled. Here are the updated details:</p><div class="detail-card"><div class="detail-row"><span class="detail-label">Service: </span>{{className}}</div><div class="detail-row"><span class="detail-label">New Date: </span>{{bookingDate}}</div><div class="detail-row"><span class="detail-label">New Time: </span>{{bookingTime}}</div><div class="detail-row"><span class="detail-label">Location: </span>{{locationName}}</div></div><p>If you have any questions or need to make further changes, please contact your centre.</p>`,
+        mergeTags: ['customerName', 'className', 'bookingDate', 'bookingTime', 'locationName', 'locationEmail', 'locationPhone'],
+      },
     ];
 
     window.seedAll = async function() {
