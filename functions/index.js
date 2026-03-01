@@ -1767,7 +1767,7 @@ function setCors(res) {
 }
 
 // Public SetupIntent creation for in-app Stripe Payment Sheet
-exports.createSetupIntentPublic = functions.runWith({ secrets: ["STRIPE_SECRET_KEY"] }).https.onRequest(async (req, res) => {
+exports.createSetupIntentPublic = functions.https.onRequest(async (req, res) => {
   setCors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
@@ -1830,7 +1830,7 @@ exports.createSetupIntentPublic = functions.runWith({ secrets: ["STRIPE_SECRET_K
 });
 
 // Public version of createPaymentLink for parent app
-exports.createPaymentLinkPublic = functions.runWith({ secrets: ["STRIPE_SECRET_KEY"] }).https.onRequest(async (req, res) => {
+exports.createPaymentLinkPublic = functions.https.onRequest(async (req, res) => {
   setCors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
@@ -1879,7 +1879,7 @@ exports.createPaymentLinkPublic = functions.runWith({ secrets: ["STRIPE_SECRET_K
 });
 
 // Public version of savePaymentFromCheckout for parent app
-exports.savePaymentFromCheckoutPublic = functions.runWith({ secrets: ["STRIPE_SECRET_KEY"] }).https.onRequest(async (req, res) => {
+exports.savePaymentFromCheckoutPublic = functions.https.onRequest(async (req, res) => {
   setCors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
@@ -2076,7 +2076,7 @@ exports.savePaymentFromCheckoutPublic = functions.runWith({ secrets: ["STRIPE_SE
 });
 
 // Create a Stripe Subscription for a membership purchase (parent app)
-exports.createSubscriptionPublic = functions.runWith({ secrets: ["STRIPE_SECRET_KEY"] }).https.onRequest(async (req, res) => {
+exports.createSubscriptionPublic = functions.https.onRequest(async (req, res) => {
   setCors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
