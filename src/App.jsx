@@ -10036,6 +10036,19 @@ function FranchisePortal({ user, onLogout }) {
                               await updateDoc(doc(db, 'bookings', b.id), updates);
                               showToast('✓ Booking updated.');
                               writeLog('bookings', 'Booking rescheduled', { name: bookingEditData.customerName, date: bookingEditData.date, time: bookingEditData.time });
+                              // Send reschedule notification email
+                              if (bookingEditData.date !== b.date || bookingEditData.time !== b.time) {
+                                try {
+                                  const { getFunctions, httpsCallable } = await import('firebase/functions');
+                                  const fns = getFunctions();
+                                  const notifyFn = httpsCallable(fns, 'sendSessionNotification');
+                                  await notifyFn({
+                                    type: 'reschedule',
+                                    booking: { ...b, ...updates, serviceName: b.serviceName || '' },
+                                    locationData: { name: location?.name, email: location?.email, phone: location?.phone, address: location?.address, country: location?.country },
+                                  });
+                                } catch (emailErr) { console.warn('Reschedule notification failed:', emailErr); }
+                              }
                               setSelectedBooking({ ...b, ...updates, children: updates.children || b.children });
                               setBookingEditMode(false);
                               // Refresh bookings
@@ -10154,6 +10167,17 @@ function FranchisePortal({ user, onLogout }) {
                               await updateDoc(doc(db, 'bookings', b.id), { status: 'cancelled' });
                               showToast('✓ Booking cancelled.');
                               writeLog('bookings', 'Booking cancelled', { name: b.customerName, date: b.date });
+                              // Send cancel notification email
+                              try {
+                                const { getFunctions, httpsCallable } = await import('firebase/functions');
+                                const fns = getFunctions();
+                                const notifyFn = httpsCallable(fns, 'sendSessionNotification');
+                                await notifyFn({
+                                  type: 'cancel',
+                                  booking: { ...b, serviceName: b.serviceName || '' },
+                                  locationData: { name: location?.name, email: location?.email, phone: location?.phone, address: location?.address, country: location?.country },
+                                });
+                              } catch (emailErr) { console.warn('Cancel notification failed:', emailErr); }
                               setSelectedBooking({ ...b, status: 'cancelled' });
                               const { collection, getDocs, query, where } = await import('firebase/firestore');
                               const q = query(collection(db, 'bookings'), where('locationId', '==', locationId));

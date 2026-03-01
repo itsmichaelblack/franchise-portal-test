@@ -564,9 +564,85 @@ const DEFAULT_EMAIL_TEMPLATES = [
 <p style="font-size: 13px; color: #888;">This link will expire after use. If you have any issues, please contact your centre.</p>`,
     mergeTags: ['customerName', 'locationName', 'paymentLink'],
   },
+  {
+    key: 'customer_session_rescheduled',
+    category: 'customer_existing',
+    name: 'Session Rescheduled',
+    description: 'Sent when a session is rescheduled to a new date/time',
+    subject: 'Session Rescheduled — {{className}} moved to {{bookingDate}}',
+    headerTitle: 'Session Rescheduled',
+    headerSubtitle: 'Your upcoming session has been moved',
+    headerBg: '#F9A72B',
+    body: `<p>Hi {{customerName}},</p><p>Your upcoming session has been rescheduled. Here are the updated details:</p><div class="detail-card"><div class="detail-row"><span class="detail-label">Service: </span>{{className}}</div><div class="detail-row"><span class="detail-label">New Date: </span>{{bookingDate}}</div><div class="detail-row"><span class="detail-label">New Time: </span>{{bookingTime}}</div><div class="detail-row"><span class="detail-label">Location: </span>{{locationName}}</div></div><p>If you have any questions or need to make further changes, please contact your centre.</p>`,
+    mergeTags: ['customerName', 'className', 'bookingDate', 'bookingTime', 'locationName', 'locationEmail', 'locationPhone'],
+  },
 ];
 
-// ── Callable: Seed default email templates ───────────────────────────────────
+// ── Callable: Send session notification (reschedule / cancel) ────────────
+exports.sendSessionNotification = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  }
+
+  const { type, booking, locationData } = data;
+  if (!type || !booking) {
+    throw new functions.https.HttpsError("invalid-argument", "type and booking are required.");
+  }
+
+  const templateKey = type === 'cancel' ? 'customer_class_cancelled' : 'customer_session_rescheduled';
+
+  // Determine the booking date display
+  const dateObj = booking.date ? new Date(booking.date + 'T00:00:00') : null;
+  const formattedDate = dateObj ? dateObj.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : booking.date || '';
+
+  // Format time
+  const fmtTime = (t) => {
+    if (!t) return '';
+    const [h, m] = t.split(':').map(Number);
+    return `${h > 12 ? h - 12 : h === 0 ? 12 : h}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
+  };
+
+  const mergeData = {
+    customerName: booking.customerName || 'there',
+    customerFirstName: (booking.customerName || '').split(' ')[0] || 'there',
+    className: booking.serviceName || booking.className || 'your session',
+    bookingDate: formattedDate,
+    bookingTime: fmtTime(booking.time),
+    locationName: locationData?.name || booking.locationName || 'Success Tutoring',
+    locationEmail: locationData?.email || '',
+    locationPhone: locationData?.phone || '',
+    locationAddress: locationData?.address || '',
+  };
+
+  // Collect unique emails to send to
+  const emails = new Set();
+  if (booking.customerEmail) emails.add(booking.customerEmail.toLowerCase().trim());
+  if (booking.parentEmail && booking.parentEmail.toLowerCase().trim() !== (booking.customerEmail || '').toLowerCase().trim()) {
+    emails.add(booking.parentEmail.toLowerCase().trim());
+  }
+
+  if (emails.size === 0) {
+    console.warn(`No email addresses found for booking — skipping notification.`);
+    return { success: false, reason: 'no_email' };
+  }
+
+  // Determine country from location for template override
+  const country = locationData?.country || null;
+
+  let sent = 0;
+  for (const email of emails) {
+    const success = await sendTemplatedEmail({
+      to: email,
+      templateKey,
+      mergeData,
+      country,
+      replyTo: locationData?.email || undefined,
+    });
+    if (success) sent++;
+  }
+
+  return { success: sent > 0, sent, total: emails.size };
+});────
 exports.seedEmailTemplates = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
