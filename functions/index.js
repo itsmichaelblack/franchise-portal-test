@@ -2644,3 +2644,196 @@ exports.sendBookingReminders = functions.pubsub
     console.log(`Booking reminders: sent ${totalSent} push notification(s).`);
     return null;
   });
+
+// ── Callable: Create Stripe Checkout Session for location subscription ───
+exports.createLocationSubscription = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  }
+
+  const { locationId } = data;
+  if (!locationId) {
+    throw new functions.https.HttpsError("invalid-argument", "locationId is required.");
+  }
+
+  const db = getFirestore();
+  const stripe = requireStripe();
+
+  // Get location data
+  const locSnap = await db.doc(`locations/${locationId}`).get();
+  if (!locSnap.exists) {
+    throw new functions.https.HttpsError("not-found", "Location not found.");
+  }
+  const loc = locSnap.data();
+  const sub = loc.subscription || {};
+
+  // Reuse existing Stripe customer or create new
+  let customerId = sub.stripeCustomerId;
+  if (!customerId) {
+    const customer = await stripe.customers.create({
+      email: context.auth.token.email || `location-${locationId}@successtutoring.com.au`,
+      metadata: { locationId, locationName: loc.name || "" },
+    });
+    customerId = customer.id;
+  }
+
+  // Find or create the $250/mo price
+  // Search for an existing product
+  let priceId;
+  const products = await stripe.products.list({ limit: 10 });
+  const platformProduct = products.data.find(p => p.metadata?.type === "platform_subscription");
+
+  if (platformProduct) {
+    const prices = await stripe.prices.list({ product: platformProduct.id, active: true, limit: 5 });
+    const monthlyPrice = prices.data.find(p => p.recurring?.interval === "month" && p.unit_amount === 25000);
+    priceId = monthlyPrice?.id;
+  }
+
+  if (!priceId) {
+    // Create product and price
+    const product = await stripe.products.create({
+      name: "Success Tutoring Platform Subscription",
+      description: "Monthly access to the Franchise Portal and Success Booking App",
+      metadata: { type: "platform_subscription" },
+    });
+    const price = await stripe.prices.create({
+      product: product.id,
+      unit_amount: 25000,
+      currency: "aud",
+      recurring: { interval: "month" },
+    });
+    priceId = price.id;
+  }
+
+  // Create Checkout Session
+  const baseUrl = `https://success-tutoring-test.web.app`;
+  const session = await stripe.checkout.sessions.create({
+    customer: customerId,
+    mode: "subscription",
+    payment_method_types: ["card"],
+    line_items: [{ price: priceId, quantity: 1 }],
+    success_url: `${baseUrl}/?subscription_success=true`,
+    cancel_url: `${baseUrl}/?subscription_cancelled=true`,
+    metadata: { locationId },
+  });
+
+  // Save customer ID
+  await db.doc(`locations/${locationId}`).set({
+    subscription: {
+      ...sub,
+      stripeCustomerId: customerId,
+    },
+  }, { merge: true });
+
+  return { url: session.url };
+});
+
+// ── Callable: Cancel location subscription ───────────────────────────────
+exports.cancelLocationSubscription = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  }
+
+  const { locationId } = data;
+  if (!locationId) {
+    throw new functions.https.HttpsError("invalid-argument", "locationId is required.");
+  }
+
+  const db = getFirestore();
+  const stripe = requireStripe();
+
+  const locSnap = await db.doc(`locations/${locationId}`).get();
+  if (!locSnap.exists) {
+    throw new functions.https.HttpsError("not-found", "Location not found.");
+  }
+  const sub = locSnap.data().subscription || {};
+
+  if (!sub.stripeSubscriptionId) {
+    throw new functions.https.HttpsError("failed-precondition", "No active subscription found.");
+  }
+
+  // Cancel at period end (not immediately)
+  const cancelled = await stripe.subscriptions.update(sub.stripeSubscriptionId, {
+    cancel_at_period_end: true,
+  });
+
+  const updatedSub = {
+    ...sub,
+    cancelAtPeriodEnd: true,
+    currentPeriodEnd: new Date(cancelled.current_period_end * 1000).toISOString(),
+  };
+
+  await db.doc(`locations/${locationId}`).set({ subscription: updatedSub }, { merge: true });
+
+  return { subscription: updatedSub };
+});
+
+// ── Webhook: Handle Stripe subscription events for platform subscriptions ─
+exports.handlePlatformSubscriptionWebhook = functions.https.onRequest(async (req, res) => {
+  if (req.method !== "POST") { res.status(405).send("Method not allowed"); return; }
+
+  const stripe = requireStripe();
+  const event = req.body;
+  const db = getFirestore();
+
+  try {
+    switch (event.type) {
+      case "checkout.session.completed": {
+        const session = event.data.object;
+        if (session.mode !== "subscription") break;
+        const locationId = session.metadata?.locationId;
+        if (!locationId) break;
+
+        const subscription = await stripe.subscriptions.retrieve(session.subscription);
+        await db.doc(`locations/${locationId}`).set({
+          subscription: {
+            status: subscription.status,
+            stripeCustomerId: session.customer,
+            stripeSubscriptionId: subscription.id,
+            currentPeriodEnd: new Date(subscription.current_period_end * 1000).toISOString(),
+            cancelAtPeriodEnd: false,
+          },
+        }, { merge: true });
+        break;
+      }
+      case "customer.subscription.updated": {
+        const subscription = event.data.object;
+        // Find location by stripeSubscriptionId
+        const locsSnap = await db.collection("locations").get();
+        for (const loc of locsSnap.docs) {
+          const sub = loc.data().subscription;
+          if (sub?.stripeSubscriptionId === subscription.id) {
+            await db.doc(`locations/${loc.id}`).set({
+              subscription: {
+                ...sub,
+                status: subscription.status,
+                currentPeriodEnd: new Date(subscription.current_period_end * 1000).toISOString(),
+                cancelAtPeriodEnd: subscription.cancel_at_period_end,
+              },
+            }, { merge: true });
+            break;
+          }
+        }
+        break;
+      }
+      case "customer.subscription.deleted": {
+        const subscription = event.data.object;
+        const locsSnap = await db.collection("locations").get();
+        for (const loc of locsSnap.docs) {
+          const sub = loc.data().subscription;
+          if (sub?.stripeSubscriptionId === subscription.id) {
+            await db.doc(`locations/${loc.id}`).set({
+              subscription: { ...sub, status: "cancelled" },
+            }, { merge: true });
+            break;
+          }
+        }
+        break;
+      }
+    }
+    res.status(200).json({ received: true });
+  } catch (e) {
+    console.error("Platform subscription webhook error:", e);
+    res.status(400).json({ error: e.message });
+  }
+});

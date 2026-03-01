@@ -5925,6 +5925,11 @@ function FranchisePortal({ user, onLogout }) {
   const [stripeAccountStatus, setStripeAccountStatus] = useState(null); // {chargesEnabled, payoutsEnabled, detailsSubmitted}
   const [cardCollecting, setCardCollecting] = useState(null); // saleId being collected for
   const [locationStripeId, setLocationStripeId] = useState(null); // stripeAccountId from location doc
+
+  // Subscription state
+  const [subscription, setSubscription] = useState(null); // { status, trialEndsAt, currentPeriodEnd, ... }
+  const [subLoading, setSubLoading] = useState(true);
+  const [subActionLoading, setSubActionLoading] = useState(false);
   const [cardFormState, setCardFormState] = useState(null); // { clientSecret, stripeAccountId } for embedded form
   const [cardFormSaving, setCardFormSaving] = useState(false);
   const [txLogStartDate, setTxLogStartDate] = useState('');
@@ -6593,6 +6598,9 @@ function FranchisePortal({ user, onLogout }) {
         setTransactionFeePercent(locData.transactionFeePercent || '');
         setTransactionFeeFlat(locData.transactionFeeFlat || '');
         setLocationStripeId(locData.stripeAccountId || null);
+        // Load subscription info
+        setSubscription(locData.subscription || null);
+        setSubLoading(false);
         // Set currency based on country
         const countryToCurrency = { AU: 'AUD', NZ: 'NZD', US: 'USD', GB: 'GBP', CA: 'CAD', SG: 'SGD', HK: 'HKD', MY: 'MYR' };
         setCurrency(locData.currency || countryToCurrency[(locData.country || 'AU').toUpperCase()] || 'AUD');
@@ -6818,8 +6826,46 @@ function FranchisePortal({ user, onLogout }) {
   const currentMin = nowInTz.getMinutes();
   const todayInTz = nowInTz; // "today" based on the location timezone
 
+  // Check subscription status for lock screen
+  const subStatus = subscription?.status;
+  const subTrialEnd = subscription?.trialEndsAt?.seconds ? new Date(subscription.trialEndsAt.seconds * 1000) : (subscription?.trialEndsAt ? new Date(subscription.trialEndsAt) : null);
+  const subIsActive = subStatus === 'active';
+  const subIsTrialing = subStatus === 'trialing' && subTrialEnd && subTrialEnd > new Date();
+  const subIsLocked = !subLoading && !subIsActive && !subIsTrialing && subscription !== null;
+  const subTrialDaysLeft = subIsTrialing && subTrialEnd ? Math.max(0, Math.ceil((subTrialEnd - new Date()) / (1000 * 60 * 60 * 24))) : 0;
+
   return (
     <div className="layout fp" style={{ background: 'var(--fp-bg)' }}>
+      {/* Subscription Lock Screen */}
+      {subIsLocked && page !== 'settings' && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.6)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)',
+        }}>
+          <div style={{
+            background: '#fff', borderRadius: 20, padding: '48px 40px', maxWidth: 480, width: '90%',
+            textAlign: 'center', boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+          }}>
+            <div style={{ width: 64, height: 64, borderRadius: 16, background: 'linear-gradient(135deg, #6DCBCA, #3d9695)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px' }}>
+              <Icon path={icons.star} size={32} style={{ color: '#fff' }} />
+            </div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--fp-text)', marginBottom: 8 }}>Subscribe to Continue</div>
+            <div style={{ fontSize: 14, color: 'var(--fp-muted)', lineHeight: 1.6, marginBottom: 24 }}>
+              Your free trial has ended. Subscribe to the Success Tutoring Platform to continue using the Franchise Portal and Booking App.
+            </div>
+            <div style={{ fontSize: 32, fontWeight: 800, color: 'var(--fp-text)', marginBottom: 4 }}>$250<span style={{ fontSize: 16, fontWeight: 600, color: 'var(--fp-muted)' }}>/month</span></div>
+            <div style={{ fontSize: 12, color: 'var(--fp-muted)', marginBottom: 24 }}>per location</div>
+            <button className="btn btn-primary fp" style={{ width: '100%', justifyContent: 'center', padding: '16px 20px', fontSize: 16, borderRadius: 12 }}
+              onClick={() => { setPagePersist('settings'); setSettingsTab('subscription'); }}>
+              <Icon path={icons.creditCard} size={18} /> Subscribe Now
+            </button>
+            <button className="btn btn-ghost fp" style={{ width: '100%', justifyContent: 'center', marginTop: 8, fontSize: 13 }}
+              onClick={onLogout}>
+              Sign Out
+            </button>
+          </div>
+        </div>
+      )}
       <aside className="sidebar fp">
         <div className="sidebar-header">
           <img src="/logo-sticker.png" alt="" className="sidebar-logo-img" />
@@ -6866,6 +6912,22 @@ function FranchisePortal({ user, onLogout }) {
       </aside>
 
       <main className="main fp">
+        {/* Trial Banner */}
+        {subIsTrialing && subTrialDaysLeft <= 14 && (
+          <div style={{
+            padding: '10px 20px', background: subTrialDaysLeft <= 3 ? '#fef2f2' : '#fffbeb',
+            borderRadius: 10, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            border: subTrialDaysLeft <= 3 ? '1px solid #fecaca' : '1px solid #fde68a',
+          }}>
+            <div style={{ fontSize: 13, color: subTrialDaysLeft <= 3 ? '#991b1b' : '#92400e', fontWeight: 600 }}>
+              {subTrialDaysLeft <= 3 ? '⚠️' : '⏳'} Free trial ends in {subTrialDaysLeft} day{subTrialDaysLeft !== 1 ? 's' : ''}.
+            </div>
+            <button className="btn btn-primary fp" style={{ padding: '6px 16px', fontSize: 12 }}
+              onClick={() => { setPagePersist('settings'); setSettingsTab('subscription'); }}>
+              Subscribe Now
+            </button>
+          </div>
+        )}
 
 
         {/* === BOOKINGS PAGE === */}
@@ -7808,6 +7870,7 @@ function FranchisePortal({ user, onLogout }) {
                 { key: 'marketing', label: 'Marketing', icon: icons.globe },
                 { key: 'availability', label: 'Availability', icon: icons.calendar },
                 { key: 'payments', label: 'Payments', icon: icons.creditCard },
+                { key: 'subscription', label: 'Subscription', icon: icons.star },
                 { key: 'logs', label: 'Logs', icon: icons.clock },
               ].map(tab => (
                 <button key={tab.key} onClick={() => setSettingsTab(tab.key)} style={{
@@ -8262,6 +8325,172 @@ function FranchisePortal({ user, onLogout }) {
                 </div>
               </div>
             )}
+
+            {/* ── SUBSCRIPTION TAB ── */}
+            {settingsTab === 'subscription' && (() => {
+              const sub = subscription;
+              const now = new Date();
+              const trialEnd = sub?.trialEndsAt?.seconds ? new Date(sub.trialEndsAt.seconds * 1000) : (sub?.trialEndsAt ? new Date(sub.trialEndsAt) : null);
+              const periodEnd = sub?.currentPeriodEnd?.seconds ? new Date(sub.currentPeriodEnd.seconds * 1000) : (sub?.currentPeriodEnd ? new Date(sub.currentPeriodEnd) : null);
+              const isTrialing = sub?.status === 'trialing' && trialEnd && trialEnd > now;
+              const isActive = sub?.status === 'active';
+              const isCancelled = sub?.status === 'cancelled' || sub?.status === 'canceled';
+              const isPastDue = sub?.status === 'past_due';
+              const trialExpired = sub?.status === 'trialing' && trialEnd && trialEnd <= now;
+              const noSub = !sub;
+
+              const handleSubscribe = async () => {
+                setSubActionLoading(true);
+                try {
+                  const { getFunctions, httpsCallable } = await import('firebase/functions');
+                  const fns = getFunctions();
+                  const createSub = httpsCallable(fns, 'createLocationSubscription');
+                  const result = await createSub({ locationId });
+                  if (result.data?.url) {
+                    window.location.href = result.data.url;
+                  } else if (result.data?.subscription) {
+                    setSubscription(result.data.subscription);
+                    showToast('✓ Subscription activated!');
+                  }
+                } catch (e) {
+                  console.error('Subscription error:', e);
+                  showToast('Failed to start subscription. Please try again.');
+                }
+                setSubActionLoading(false);
+              };
+
+              const handleCancel = async () => {
+                if (!confirm('Are you sure you want to cancel your subscription? You will lose access when the current period ends.')) return;
+                setSubActionLoading(true);
+                try {
+                  const { getFunctions, httpsCallable } = await import('firebase/functions');
+                  const fns = getFunctions();
+                  const cancelSub = httpsCallable(fns, 'cancelLocationSubscription');
+                  const result = await cancelSub({ locationId });
+                  if (result.data?.subscription) {
+                    setSubscription(result.data.subscription);
+                    showToast('Subscription will be cancelled at the end of the billing period.');
+                  }
+                } catch (e) {
+                  console.error('Cancel error:', e);
+                  showToast('Failed to cancel subscription.');
+                }
+                setSubActionLoading(false);
+              };
+
+              const handleStartTrial = async () => {
+                setSubActionLoading(true);
+                try {
+                  const { doc: firestoreDoc, setDoc } = await import('firebase/firestore');
+                  const { db: firestoreDb } = await import('./firebase.js');
+                  const trialData = {
+                    status: 'trialing',
+                    trialStartedAt: new Date().toISOString(),
+                    trialEndsAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+                  };
+                  await setDoc(firestoreDoc(firestoreDb, 'locations', locationId), { subscription: trialData }, { merge: true });
+                  setSubscription(trialData);
+                  showToast('✓ 30-day free trial activated!');
+                } catch (e) {
+                  console.error('Trial error:', e);
+                  showToast('Failed to start trial.');
+                }
+                setSubActionLoading(false);
+              };
+
+              const fmtDate = (d) => d ? d.toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }) : '—';
+
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 600 }}>
+                  <div className="card fp" style={{ padding: 0 }}>
+                    <div style={{ padding: '24px', borderBottom: '1px solid var(--fp-border)' }}>
+                      <div style={{ fontWeight: 800, fontSize: 18, color: 'var(--fp-text)', marginBottom: 4 }}>
+                        Success Tutoring Platform
+                      </div>
+                      <div style={{ fontSize: 13, color: 'var(--fp-muted)' }}>
+                        Access to the Franchise Portal and Success Booking App
+                      </div>
+                    </div>
+
+                    <div style={{ padding: 24 }}>
+                      {/* Status Badge */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+                        <div style={{
+                          padding: '6px 14px', borderRadius: 20, fontSize: 13, fontWeight: 700,
+                          background: isActive ? '#ecfdf5' : isTrialing ? '#fef3c7' : '#fef2f2',
+                          color: isActive ? '#059669' : isTrialing ? '#d97706' : '#dc2626',
+                        }}>
+                          {isActive ? '● Active' : isTrialing ? '● Free Trial' : isCancelled ? '● Cancelled' : isPastDue ? '● Past Due' : trialExpired ? '● Trial Expired' : '● No Subscription'}
+                        </div>
+                        <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--fp-text)' }}>$250<span style={{ fontSize: 14, fontWeight: 600, color: 'var(--fp-muted)' }}>/month</span></div>
+                      </div>
+
+                      {/* Details */}
+                      {isTrialing && (
+                        <div style={{ padding: 16, borderRadius: 10, background: '#fffbeb', border: '1px solid #fde68a', marginBottom: 16 }}>
+                          <div style={{ fontWeight: 700, fontSize: 13, color: '#92400e', marginBottom: 4 }}>Free Trial</div>
+                          <div style={{ fontSize: 13, color: '#78350f' }}>
+                            Your trial ends on <strong>{fmtDate(trialEnd)}</strong>. Subscribe before then to keep access.
+                          </div>
+                        </div>
+                      )}
+
+                      {isActive && periodEnd && (
+                        <div style={{ padding: 16, borderRadius: 10, background: '#ecfdf5', border: '1px solid #a7f3d0', marginBottom: 16 }}>
+                          <div style={{ fontWeight: 700, fontSize: 13, color: '#065f46', marginBottom: 4 }}>Active Subscription</div>
+                          <div style={{ fontSize: 13, color: '#064e3b' }}>
+                            Next billing date: <strong>{fmtDate(periodEnd)}</strong>
+                          </div>
+                        </div>
+                      )}
+
+                      {(trialExpired || isCancelled) && (
+                        <div style={{ padding: 16, borderRadius: 10, background: '#fef2f2', border: '1px solid #fecaca', marginBottom: 16 }}>
+                          <div style={{ fontWeight: 700, fontSize: 13, color: '#991b1b', marginBottom: 4 }}>
+                            {trialExpired ? 'Trial Expired' : 'Subscription Cancelled'}
+                          </div>
+                          <div style={{ fontSize: 13, color: '#7f1d1d' }}>
+                            Subscribe to regain full access to the portal and booking app.
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Features */}
+                      <div style={{ marginBottom: 20 }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--fp-text)', marginBottom: 10 }}>Includes:</div>
+                        {['Full Franchise Partner Portal access', 'Success Booking App for parents', 'Timetable & session management', 'Online payments & memberships', 'Customer notifications & reminders', 'Reporting & analytics'].map(f => (
+                          <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', fontSize: 13, color: 'var(--fp-text)' }}>
+                            <Icon path={icons.check} size={14} style={{ color: 'var(--fp-accent)', flexShrink: 0 }} /> {f}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Actions */}
+                      {noSub && (
+                        <button className="btn btn-primary fp" style={{ width: '100%', justifyContent: 'center', padding: '14px 20px', fontSize: 15 }}
+                          disabled={subActionLoading} onClick={handleStartTrial}>
+                          {subActionLoading ? 'Starting...' : 'Start 30-Day Free Trial'}
+                        </button>
+                      )}
+
+                      {(isTrialing || trialExpired || isCancelled || isPastDue) && (
+                        <button className="btn btn-primary fp" style={{ width: '100%', justifyContent: 'center', padding: '14px 20px', fontSize: 15, marginTop: noSub ? 10 : 0 }}
+                          disabled={subActionLoading} onClick={handleSubscribe}>
+                          <Icon path={icons.creditCard} size={16} /> {subActionLoading ? 'Processing...' : 'Subscribe — $250/month'}
+                        </button>
+                      )}
+
+                      {isActive && (
+                        <button className="btn btn-ghost fp" style={{ width: '100%', justifyContent: 'center', padding: '12px 20px', fontSize: 13, marginTop: 8, color: '#dc2626' }}
+                          disabled={subActionLoading} onClick={handleCancel}>
+                          {subActionLoading ? 'Cancelling...' : 'Cancel Subscription'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* ── LOGS TAB ── */}
             {settingsTab === 'logs' && (
